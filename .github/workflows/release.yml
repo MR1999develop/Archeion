@@ -1,0 +1,47 @@
+# Pushing a tag vX.Y.Z builds archeion.exe and publishes a GitHub release
+# with the portable zip. The tag must match the version in Cargo.toml.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Check that the tag matches the version
+        shell: pwsh
+        run: |
+          $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
+          $version = ($meta.packages | Where-Object name -eq 'archeion').version
+          if ("v$version" -ne $env:GITHUB_REF_NAME) {
+            throw "Tag $env:GITHUB_REF_NAME does not match version $version in Cargo.toml"
+          }
+      - name: Tests
+        run: cargo test --workspace --locked
+      - name: Build
+        run: cargo build --release --locked -p archeion
+      - name: Portable zip
+        shell: pwsh
+        run: |
+          $name = "Archeion-$env:GITHUB_REF_NAME-windows-x64-portable"
+          $dir = "dist/$name"
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          Copy-Item target/release/archeion.exe, README.md, CHANGELOG.md, LICENSE-MIT, LICENSE-APACHE $dir
+          # portable.txt keeps settings and logs in a data folder next to the exe.
+          Set-Content "$dir/portable.txt" "Settings and logs are kept in the data folder next to archeion.exe."
+          Compress-Archive -Path "$dir/*" -DestinationPath "dist/$name.zip"
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip
+          generate_release_notes: true

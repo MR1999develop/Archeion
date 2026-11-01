@@ -1,0 +1,16 @@
+# Build output
+/target
+/dist
+
+# Logs written by the tools\*.bat scripts
+/tools/*.log
+
+# Portable data folder, if the program is run from the repository
+/data
+
+# Editors and OS
+.vscode/
+.idea/
+*.swp
+Thumbs.db
+desktop.ini

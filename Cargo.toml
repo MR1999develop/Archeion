@@ -1,0 +1,56 @@
+[workspace]
+resolver = "3"
+members = ["crates/core", "crates/engine", "crates/scheduler", "app"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+license = "MIT OR Apache-2.0"
+authors = ["MR"]
+repository = "https://github.com/MR1999develop/archeion"
+
+[workspace.dependencies]
+archeion_core = { path = "crates/core" }
+archeion_engine = { path = "crates/engine" }
+archeion_scheduler = { path = "crates/scheduler" }
+
+anyhow = "1"
+blake3 = "1"
+globset = "0.4"
+jiff = "0.2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tempfile = "3"
+thiserror = "2"
+toml = "0.9"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4", "serde"] }
+walkdir = "2"
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs", "aes-crypto"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_debug_implementations = "warn"
+
+[workspace.lints.clippy]
+cast_possible_truncation = "warn"
+
+[profile.dev]
+debug = "line-tables-only"
+
+# Hashing and compression are slow unoptimised: keep debug builds usable.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+debug = "line-tables-only"
+split-debuginfo = "packed"
+
+[profile.release.package.archeion_core]
+overflow-checks = true
+
+[profile.release.package.archeion_engine]
+overflow-checks = true

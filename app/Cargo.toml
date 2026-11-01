@@ -1,0 +1,40 @@
+[package]
+name = "archeion"
+description = "Archeion: incremental, encrypted, scheduled backups for Windows."
+version.workspace = true
+edition.workspace = true
+rust-version = "1.95"
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "archeion"
+path = "src/main.rs"
+
+[dependencies]
+archeion_core = { workspace = true }
+archeion_engine = { workspace = true }
+archeion_scheduler = { workspace = true }
+
+anyhow = { workspace = true }
+clap = { version = "4", features = ["derive"] }
+directories = "6"
+jiff = { workspace = true }
+keyring = "4"
+eframe = "0.37"
+fluent-templates = "0.15"
+rfd = "0.17"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sys-locale = "0.3"
+toml = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

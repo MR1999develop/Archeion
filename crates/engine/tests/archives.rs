@@ -1,0 +1,842 @@
+//! End-to-end tests of the archive engine in temporary folders.
+
+use archeion_core::{
+    ArchiveKind, BackupMode, Container, Destination, FullBackupRule, Profile, Retention, RunEvent,
+};
+use archeion_engine::{
+    EngineError, EventSink, ExistingFormat, Password, RestoreRequest, RestoreTarget, backup,
+    backup_stopping_after, check_password, delete_archive, file_versions, list_archives, merge, merge_range,
+    restore, search, verify,
+};
+use std::{fs, path::PathBuf, sync::Mutex, thread::sleep, time::Duration};
+
+#[derive(Default)]
+struct Recorder(Mutex<Vec<RunEvent>>);
+
+impl EventSink for Recorder {
+    fn emit(&self, event: RunEvent) {
+        self.0.lock().unwrap().push(event);
+    }
+}
+
+struct Fixture {
+    _dir: tempfile::TempDir,
+    source: PathBuf,
+    restore_to: PathBuf,
+    profile: Profile,
+}
+
+fn fixture(container: Container) -> Fixture {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source folder");
+    fs::create_dir_all(source.join("sub")).unwrap();
+    fs::create_dir_all(source.join("empty")).unwrap();
+    fs::write(source.join("a.txt"), "alpha").unwrap();
+    fs::write(source.join("sub").join("ünicode è.txt"), "beta").unwrap();
+    fs::write(source.join("skip.tmp"), "temp").unwrap();
+    let mut profile = Profile::new("Test");
+    profile.sources.push(source.clone());
+    profile.excludes.push(archeion_core::Exclusion::extension("tmp").unwrap());
+    profile.destination = Destination::Local { path: dir.path().join("backups") };
+    profile.container = container;
+    profile.merge.rules = Retention::KEEP_ALL;
+    let restore_to = dir.path().join("restored");
+    Fixture { _dir: dir, source, restore_to, profile }
+}
+
+fn run_backup(p: &Profile) -> archeion_core::BackupReport {
+    // Archive names have one-second resolution.
+    sleep(Duration::from_millis(1100));
+    backup(p, None, BackupMode::Auto, &Recorder::default()).unwrap()
+}
+
+fn restore_all(f: &Fixture, archive: &str) {
+    let req = RestoreRequest {
+        archive: archive.to_owned(),
+        keys: Vec::new(),
+        target: RestoreTarget::Folder { path: f.restore_to.clone() },
+        overwrite: true,
+    };
+    let r = restore(&f.profile, None, &req, &Recorder::default()).unwrap();
+    assert!(r.skipped.is_empty(), "{:?}", r.skipped);
+}
+
+fn restored(f: &Fixture, relative: &str) -> PathBuf {
+    let key = archeion_core::keys::key_for(&f.source.join(relative)).unwrap();
+    archeion_core::keys::path_under(&f.restore_to, &key)
+}
+
+fn check_both_containers(test: impl Fn(Container)) {
+    test(Container::ZipPerFile);
+    test(Container::Folder);
+}
+
+#[test]
+fn first_backup_is_complete_and_restorable() {
+    check_both_containers(|c| {
+        let f = fixture(c);
+        let report = run_backup(&f.profile);
+        assert_eq!(report.files_new, 2, "the .tmp file is excluded");
+
+        let list = list_archives(&f.profile, None).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].kind, ArchiveKind::Complete);
+        assert_eq!(list[0].container, c);
+
+        restore_all(&f, &list[0].name);
+        assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
+        assert_eq!(fs::read_to_string(restored(&f, "sub/ünicode è.txt")).unwrap(), "beta");
+        assert!(restored(&f, "empty").is_dir());
+        assert!(!restored(&f, "skip.tmp").exists());
+    });
+}
+
+#[test]
+fn incremental_stores_only_changes_and_any_date_restores() {
+    check_both_containers(|c| {
+        let f = fixture(c);
+        run_backup(&f.profile);
+        fs::write(f.source.join("a.txt"), "alpha v2").unwrap();
+        fs::remove_file(f.source.join("sub").join("ünicode è.txt")).unwrap();
+        fs::write(f.source.join("new.txt"), "gamma").unwrap();
+
+        let report = run_backup(&f.profile);
+        assert_eq!((report.files_new, report.files_changed, report.files_deleted), (1, 1, 1));
+        assert_eq!(report.files_unchanged, 0);
+
+        let list = list_archives(&f.profile, None).unwrap(); // newest first
+        assert_eq!(list[0].kind, ArchiveKind::Incremental);
+        assert_eq!(list[0].files_stored, 2);
+
+        restore_all(&f, &list[1].name); // the first date
+        assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
+        assert!(restored(&f, "sub/ünicode è.txt").exists());
+
+        fs::remove_dir_all(&f.restore_to).unwrap();
+        restore_all(&f, &list[0].name); // the second date
+        assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha v2");
+        assert!(!restored(&f, "sub/ünicode è.txt").exists());
+        assert_eq!(fs::read_to_string(restored(&f, "new.txt")).unwrap(), "gamma");
+    });
+}
+
+#[test]
+fn the_first_format_stays_even_if_the_profile_changes() {
+    let mut f = fixture(Container::ZipPerFile);
+    assert_eq!(archeion_engine::existing_format(&f.profile).unwrap(), None);
+    run_backup(&f.profile);
+    f.profile.container = Container::Folder;
+    fs::write(f.source.join("a.txt"), "changed").unwrap();
+    run_backup(&f.profile);
+    assert!(list_archives(&f.profile, None).unwrap().iter().all(|a| a.container == Container::ZipPerFile));
+    assert_eq!(
+        archeion_engine::existing_format(&f.profile).unwrap(),
+        Some(ExistingFormat { container: Container::ZipPerFile, encrypted: false })
+    );
+}
+
+#[test]
+fn excluded_folders_and_files_are_left_out() {
+    let mut f = fixture(Container::Folder);
+    fs::create_dir_all(f.source.join("cache")).unwrap();
+    fs::write(f.source.join("cache").join("x.bin"), "x").unwrap();
+    f.profile.excludes.push(archeion_core::Exclusion::Folder { path: f.source.join("CACHE") });
+    f.profile.excludes.push(archeion_core::Exclusion::File { path: f.source.join("a.txt") });
+    let report = run_backup(&f.profile);
+    assert_eq!(report.files_new, 1, "only sub/ünicode è.txt");
+    let name = list_archives(&f.profile, None).unwrap().remove(0).name;
+    restore_all(&f, &name);
+    assert!(!restored(&f, "cache").exists());
+    assert!(!restored(&f, "a.txt").exists());
+}
+
+#[test]
+fn unchanged_files_are_not_copied_again() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    let report = run_backup(&f.profile);
+    assert_eq!(report.bytes_copied, 0);
+    assert_eq!(report.files_unchanged, 2);
+}
+
+#[test]
+fn automatic_merge_keeps_the_initial_complete_and_fuses_the_rest() {
+    check_both_containers(|c| {
+        let mut f = fixture(c);
+        run_backup(&f.profile); // C
+        fs::write(f.source.join("a.txt"), "v2").unwrap();
+        run_backup(&f.profile); // I1
+        fs::write(f.source.join("a.txt"), "v3").unwrap();
+        fs::write(f.source.join("late.txt"), "late").unwrap();
+        run_backup(&f.profile); // I2
+
+        f.profile.merge.rules = Retention { keep_last: 1, ..Retention::KEEP_ALL };
+        let report = merge(&f.profile, None, &Recorder::default()).unwrap();
+        assert_eq!((report.archives_before, report.archives_after), (3, 2));
+        assert!(report.bytes_freed > 0, "the v2 content is gone");
+
+        let list = list_archives(&f.profile, None).unwrap(); // newest first
+        assert_eq!(list[1].kind, ArchiveKind::Complete, "the initial complete is untouched");
+        assert_eq!(list[0].kind, ArchiveKind::Incremental);
+        restore_all(&f, &list[0].name);
+        assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "v3");
+        assert_eq!(fs::read_to_string(restored(&f, "late.txt")).unwrap(), "late");
+        assert_eq!(fs::read_to_string(restored(&f, "sub/ünicode è.txt")).unwrap(), "beta");
+        fs::remove_dir_all(&f.restore_to).unwrap();
+        restore_all(&f, &list[1].name);
+        assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
+
+        let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+        assert!(v.problems.is_empty(), "{:?}", v.problems);
+    });
+}
+
+/// C, I1 (a v2), I2 (b), I3 (c): a and b live in older archives.
+fn four_backups() -> Fixture {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    fs::write(f.source.join("a.txt"), "v2").unwrap();
+    run_backup(&f.profile);
+    fs::write(f.source.join("b.txt"), "b").unwrap();
+    run_backup(&f.profile);
+    fs::write(f.source.join("c.txt"), "c").unwrap();
+    run_backup(&f.profile);
+    f
+}
+
+#[test]
+fn manual_merge_of_chosen_incrementals() {
+    let f = four_backups();
+    let names: Vec<String> =
+        list_archives(&f.profile, None).unwrap().into_iter().rev().map(|a| a.name).collect();
+    // Choose I2 and I1, in either order.
+    merge_range(&f.profile, None, &names[2], &names[1], &Recorder::default()).unwrap();
+
+    let after = list_archives(&f.profile, None).unwrap();
+    assert_eq!(after.len(), 3);
+    assert_eq!(after[2].name, names[0], "the complete is untouched");
+    assert_eq!(after[1].name, names[2], "the merged archive keeps the newest date");
+    restore_all(&f, &after[0].name);
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "v2");
+    assert_eq!(fs::read_to_string(restored(&f, "c.txt")).unwrap(), "c");
+}
+
+#[test]
+fn manual_merge_can_include_the_initial_complete() {
+    let f = four_backups();
+    let names: Vec<String> =
+        list_archives(&f.profile, None).unwrap().into_iter().rev().map(|a| a.name).collect();
+    merge_range(&f.profile, None, &names[0], &names[2], &Recorder::default()).unwrap();
+
+    let after = list_archives(&f.profile, None).unwrap(); // newest first
+    assert_eq!(after.len(), 2);
+    assert_eq!(after[1].kind, ArchiveKind::Complete, "a new, later complete archive");
+    restore_all(&f, &after[0].name);
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "v2");
+    assert_eq!(fs::read_to_string(restored(&f, "b.txt")).unwrap(), "b");
+    assert_eq!(fs::read_to_string(restored(&f, "c.txt")).unwrap(), "c");
+    fs::remove_dir_all(&f.restore_to).unwrap();
+    restore_all(&f, &after[1].name);
+    assert!(!restored(&f, "c.txt").exists());
+
+    let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+}
+
+#[test]
+fn manual_merge_needs_two_backups() {
+    let f = four_backups();
+    let name = list_archives(&f.profile, None).unwrap().remove(0).name;
+    assert!(matches!(
+        merge_range(&f.profile, None, &name, &name, &Recorder::default()),
+        Err(EngineError::InvalidProfile(_))
+    ));
+}
+
+#[test]
+fn verify_detects_damaged_content() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    let name = list_archives(&f.profile, None).unwrap().remove(0).name;
+    let key = archeion_core::keys::key_for(&f.source.join("a.txt")).unwrap();
+    let stored =
+        archeion_core::keys::path_under(&f.profile.destination.path().join(&name).join("data"), &key);
+    fs::write(&stored, "tampered").unwrap();
+
+    let full = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+    assert_eq!(full.problems.len(), 1, "{:?}", full.problems);
+    let sample = verify(&f.profile, None, Some(10), &Recorder::default()).unwrap();
+    assert_eq!(sample.files_checked, 2);
+    assert_eq!(sample.problems.len(), 1);
+}
+
+#[test]
+fn restore_does_not_overwrite_unless_asked() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    let name = list_archives(&f.profile, None).unwrap().remove(0).name;
+    fs::write(f.source.join("a.txt"), "edited").unwrap();
+    let req = RestoreRequest {
+        archive: name,
+        keys: vec![archeion_core::keys::key_for(&f.source.join("a.txt")).unwrap()],
+        target: RestoreTarget::Original,
+        overwrite: false,
+    };
+    let r = restore(&f.profile, None, &req, &Recorder::default()).unwrap();
+    assert_eq!((r.files_restored, r.files_kept), (0, 1));
+    assert_eq!(fs::read_to_string(f.source.join("a.txt")).unwrap(), "edited");
+
+    let r =
+        restore(&f.profile, None, &RestoreRequest { overwrite: true, ..req }, &Recorder::default()).unwrap();
+    assert_eq!(r.files_restored, 1);
+    assert_eq!(fs::read_to_string(f.source.join("a.txt")).unwrap(), "alpha");
+}
+
+#[test]
+fn an_unfinished_backup_older_than_the_last_archive_is_removed() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    let leftover = f.profile.destination.path().join("2026-01-01_000000_I.partial");
+    fs::create_dir_all(leftover.join("data")).unwrap();
+    run_backup(&f.profile);
+    assert!(!leftover.exists());
+    assert_eq!(list_archives(&f.profile, None).unwrap().len(), 2);
+}
+
+#[test]
+fn destination_in_use_is_busy() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    let lock =
+        fs::File::options().write(true).open(f.profile.destination.path().join("archeion.lock")).unwrap();
+    lock.lock().unwrap();
+    assert!(matches!(
+        backup(&f.profile, None, BackupMode::Auto, &Recorder::default()),
+        Err(EngineError::Busy)
+    ));
+}
+
+#[test]
+fn destination_of_another_profile_is_refused() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    let mut other = f.profile.clone();
+    other.id = archeion_core::ProfileId::new_random();
+    assert!(matches!(
+        backup(&other, None, BackupMode::Auto, &Recorder::default()),
+        Err(EngineError::ForeignDestination)
+    ));
+}
+
+#[cfg(windows)]
+#[test]
+fn missing_drive_is_unavailable() {
+    let mut f = fixture(Container::Folder);
+    if std::path::Path::new(r"Q:\").exists() {
+        return;
+    }
+    f.profile.destination = Destination::Local { path: r"Q:\backups".into() };
+    assert!(matches!(
+        backup(&f.profile, None, BackupMode::Auto, &Recorder::default()),
+        Err(EngineError::DestinationUnavailable(_))
+    ));
+}
+
+#[cfg(windows)]
+#[test]
+fn locked_file_is_skipped_and_its_old_version_kept() {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    fs::write(f.source.join("a.txt"), "changed while locked").unwrap();
+    // No sharing: other programs cannot open it, like an open Outlook .pst.
+    let _held = fs::OpenOptions::new().read(true).share_mode(0).open(f.source.join("a.txt")).unwrap();
+
+    let report = run_backup(&f.profile);
+    assert_eq!(report.skipped.len(), 1);
+    let name = list_archives(&f.profile, None).unwrap().remove(0).name;
+    restore_all(&f, &name);
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
+}
+
+#[test]
+fn zip_per_file_keeps_the_name_inside_and_opens_with_any_zip_tool() {
+    let f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile);
+    let name = list_archives(&f.profile, None).unwrap().remove(0).name;
+    let key = archeion_core::keys::key_for(&f.source.join("a.txt")).unwrap();
+    let mut zipped =
+        archeion_core::keys::path_under(&f.profile.destination.path().join(&name).join("zipped"), &key)
+            .into_os_string();
+    zipped.push(".zip");
+    let mut zip = zip::ZipArchive::new(fs::File::open(PathBuf::from(zipped)).unwrap()).unwrap();
+    assert_eq!(zip.len(), 1);
+    let mut entry = zip.by_index(0).unwrap();
+    assert_eq!(entry.name().unwrap(), "a.txt");
+    let mut text = String::new();
+    std::io::Read::read_to_string(&mut entry, &mut text).unwrap();
+    assert_eq!(text, "alpha");
+}
+
+#[test]
+fn versions_list_only_real_changes_and_each_restores_beside_the_original() {
+    let f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile); // v1 "alpha"
+    run_backup(&f.profile); // unchanged: no new version
+    fs::write(f.source.join("a.txt"), "second").unwrap();
+    run_backup(&f.profile); // v2
+
+    let key = archeion_core::keys::key_for(&f.source.join("a.txt")).unwrap();
+    let versions = file_versions(&f.profile, None, &key).unwrap();
+    assert_eq!(versions.len(), 2, "newest first, one per content");
+    assert_eq!(versions[0].size, 6);
+    assert_eq!(versions[1].size, 5);
+
+    let req = RestoreRequest {
+        archive: versions[1].archive.clone(),
+        keys: vec![key],
+        target: RestoreTarget::BesideOriginal,
+        overwrite: false,
+    };
+    let r = restore(&f.profile, None, &req, &Recorder::default()).unwrap();
+    assert_eq!(r.files_restored, 1);
+    assert_eq!(fs::read_to_string(f.source.join("a.txt")).unwrap(), "second", "current file untouched");
+    let tag = versions[1].backup_label.replace(':', ".");
+    let beside = f.source.join(format!("a ({tag}).txt"));
+    assert_eq!(fs::read_to_string(beside).unwrap(), "alpha");
+}
+
+#[test]
+fn search_finds_files_by_name_across_dates() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    fs::remove_file(f.source.join("a.txt")).unwrap();
+    run_backup(&f.profile);
+
+    let hits = search(&f.profile, None, "A.TX", 10).unwrap();
+    assert_eq!(hits.len(), 1);
+    assert!(!hits[0].present_now, "deleted in the newest backup");
+    assert_eq!(hits[0].versions, 1);
+    assert!(search(&f.profile, None, "  ", 10).unwrap().is_empty());
+    assert_eq!(search(&f.profile, None, "txt", 1).unwrap().len(), 1, "limit applies");
+}
+
+fn backup_as(p: &Profile, mode: BackupMode) -> archeion_core::BackupReport {
+    sleep(Duration::from_millis(1100));
+    backup(p, None, mode, &Recorder::default()).unwrap()
+}
+
+fn kinds(f: &Fixture) -> String {
+    list_archives(&f.profile, None)
+        .unwrap()
+        .iter()
+        .rev()
+        .map(|a| if a.kind == ArchiveKind::Complete { 'C' } else { 'I' })
+        .collect()
+}
+
+#[test]
+fn complete_backup_on_demand_starts_a_new_chain() {
+    let f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile);
+    fs::write(f.source.join("a.txt"), "v2").unwrap();
+    backup_as(&f.profile, BackupMode::Incremental);
+    let report = backup_as(&f.profile, BackupMode::Complete);
+    assert!(report.complete);
+    assert_eq!(report.files_unchanged, 2, "nothing changed, everything copied");
+    assert!(report.bytes_copied > 0);
+    assert_eq!(kinds(&f), "CIC");
+
+    let newest = list_archives(&f.profile, None).unwrap().remove(0);
+    assert_eq!(newest.files_stored, newest.files_total, "a complete archive holds every file");
+    restore_all(&f, &newest.name);
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "v2");
+
+    let key = archeion_core::keys::key_for(&f.source.join("sub").join("ünicode è.txt")).unwrap();
+    assert_eq!(file_versions(&f.profile, None, &key).unwrap().len(), 1, "copied again, same version");
+    let key = archeion_core::keys::key_for(&f.source.join("a.txt")).unwrap();
+    assert_eq!(file_versions(&f.profile, None, &key).unwrap().len(), 2);
+}
+
+#[test]
+fn full_backup_rule_applies_to_automatic_backups_only() {
+    let mut f = fixture(Container::Folder);
+    f.profile.full_backup = FullBackupRule::Backups { count: 2 };
+    run_backup(&f.profile);
+    run_backup(&f.profile);
+    run_backup(&f.profile);
+    assert_eq!(kinds(&f), "CIC");
+    backup_as(&f.profile, BackupMode::Incremental);
+    backup_as(&f.profile, BackupMode::Incremental);
+    assert_eq!(kinds(&f), "CICII", "the user's choice wins");
+}
+
+#[test]
+fn automatic_merge_across_chains_keeps_every_date_restorable() {
+    let mut f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile); // C
+    fs::write(f.source.join("a.txt"), "v2").unwrap();
+    run_backup(&f.profile); // I
+    backup_as(&f.profile, BackupMode::Complete); // C2
+    fs::write(f.source.join("c.txt"), "c").unwrap();
+    run_backup(&f.profile); // I
+    f.profile.merge.rules = Retention { keep_last: 1, ..Retention::KEEP_ALL };
+    merge(&f.profile, None, &Recorder::default()).unwrap();
+    assert_eq!(kinds(&f), "CC", "the initial complete stays; the rest becomes one complete archive");
+
+    let list = list_archives(&f.profile, None).unwrap();
+    restore_all(&f, &list[0].name);
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "v2");
+    assert_eq!(fs::read_to_string(restored(&f, "c.txt")).unwrap(), "c");
+    let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+}
+
+#[test]
+fn deleting_an_intermediate_backup_keeps_the_later_ones_whole() {
+    let f = four_backups(); // C, I1 (a v2), I2 (b), I3 (c)
+    let names: Vec<String> =
+        list_archives(&f.profile, None).unwrap().into_iter().rev().map(|a| a.name).collect();
+
+    delete_archive(&f.profile, None, &names[1], &Recorder::default()).unwrap();
+    let after: Vec<String> =
+        list_archives(&f.profile, None).unwrap().into_iter().rev().map(|a| a.name).collect();
+    assert_eq!(after, vec![names[0].clone(), names[2].clone(), names[3].clone()]);
+    restore_all(&f, &names[3]);
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "v2", "moved into the next backup");
+    assert_eq!(fs::read_to_string(restored(&f, "b.txt")).unwrap(), "b");
+    fs::remove_dir_all(&f.restore_to).unwrap();
+    restore_all(&f, &names[0]);
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
+
+    delete_archive(&f.profile, None, &names[3], &Recorder::default()).unwrap();
+    assert_eq!(list_archives(&f.profile, None).unwrap().len(), 2, "the newest is simply removed");
+
+    let refused = delete_archive(&f.profile, None, &names[0], &Recorder::default());
+    assert!(matches!(refused, Err(EngineError::InvalidProfile(_))), "the initial complete stays");
+    let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+}
+
+#[test]
+fn the_only_backup_can_be_deleted() {
+    let f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile);
+    let name = list_archives(&f.profile, None).unwrap().remove(0).name;
+    delete_archive(&f.profile, None, &name, &Recorder::default()).unwrap();
+    assert!(list_archives(&f.profile, None).unwrap().is_empty());
+    assert_eq!(archeion_engine::existing_format(&f.profile).unwrap(), None, "the format is free again");
+    assert!(run_backup(&f.profile).complete, "the next backup starts over");
+}
+
+fn pw(s: &str) -> Password {
+    Password::new(s.to_owned()).unwrap()
+}
+
+/// Every path below `dir`, relative, with `/`.
+fn all_paths(dir: &std::path::Path) -> Vec<String> {
+    walkdir_paths(dir).into_iter().map(|p| p.to_string_lossy().replace('\\', "/")).collect()
+}
+
+fn walkdir_paths(dir: &std::path::Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(d) = stack.pop() {
+        for e in fs::read_dir(&d).unwrap().flatten() {
+            let p = e.path();
+            out.push(p.strip_prefix(dir).unwrap().to_path_buf());
+            if p.is_dir() {
+                stack.push(p);
+            }
+        }
+    }
+    out
+}
+
+#[test]
+fn encrypted_backups_hide_names_and_content_and_need_the_password() {
+    let mut f = fixture(Container::ZipPerFile);
+    f.profile.encrypted = true;
+    let secret = pw("correct horse battery");
+    let rec = Recorder::default();
+    assert!(matches!(backup(&f.profile, None, BackupMode::Auto, &rec), Err(EngineError::PasswordNeeded)));
+    backup(&f.profile, Some(&secret), BackupMode::Auto, &rec).unwrap();
+    sleep(Duration::from_millis(1100));
+    fs::write(f.source.join("a.txt"), "v2").unwrap();
+    backup(&f.profile, Some(&secret), BackupMode::Auto, &rec).unwrap();
+
+    let dest = f.profile.destination.path().to_path_buf();
+    for p in all_paths(&dest) {
+        assert!(!p.contains("a.txt") && !p.contains("sub") && !p.contains("nicode"), "name visible: {p}");
+        assert!(!p.ends_with("manifest.jsonl"), "manifest in clear: {p}");
+    }
+    for p in walkdir_paths(&dest).into_iter().map(|p| dest.join(p)).filter(|p| p.is_file()) {
+        let bytes = fs::read(&p).unwrap();
+        assert!(!bytes.windows(5).any(|w| w == b"alpha"), "content in clear: {}", p.display());
+        assert!(!bytes.windows(5).any(|w| w == b"a.txt"), "name inside: {}", p.display());
+    }
+
+    assert!(matches!(list_archives(&f.profile, None), Err(EngineError::PasswordNeeded)));
+    assert!(matches!(list_archives(&f.profile, Some(&pw("nope"))), Err(EngineError::WrongPassword)));
+    assert!(matches!(check_password(&f.profile, &pw("nope")), Err(EngineError::WrongPassword)));
+    check_password(&f.profile, &secret).unwrap();
+    assert_eq!(
+        archeion_engine::existing_format(&f.profile).unwrap(),
+        Some(ExistingFormat { container: Container::ZipPerFile, encrypted: true })
+    );
+
+    let list = list_archives(&f.profile, Some(&secret)).unwrap();
+    assert_eq!(list.len(), 2);
+    let req = RestoreRequest {
+        archive: list[1].name.clone(),
+        keys: Vec::new(),
+        target: RestoreTarget::Folder { path: f.restore_to.clone() },
+        overwrite: true,
+    };
+    let r = restore(&f.profile, Some(&secret), &req, &rec).unwrap();
+    assert!(r.skipped.is_empty(), "{:?}", r.skipped);
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
+    assert_eq!(fs::read_to_string(restored(&f, "sub/ünicode è.txt")).unwrap(), "beta");
+
+    let key = archeion_core::keys::key_for(&f.source.join("a.txt")).unwrap();
+    assert_eq!(file_versions(&f.profile, Some(&secret), &key).unwrap().len(), 2);
+    assert_eq!(search(&f.profile, Some(&secret), "a.tx", 10).unwrap().len(), 1);
+
+    f.profile.merge.rules = Retention { keep_last: 1, ..Retention::KEEP_ALL };
+    merge_range(&f.profile, Some(&secret), &list[1].name, &list[0].name, &rec).unwrap();
+    let v = verify(&f.profile, Some(&secret), None, &rec).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+    assert_eq!(v.files_checked, 2);
+}
+
+#[test]
+fn encryption_cannot_be_switched_on_once_backups_exist() {
+    let mut f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile);
+    f.profile.encrypted = true;
+    sleep(Duration::from_millis(1100));
+    backup(&f.profile, Some(&pw("late")), BackupMode::Auto, &Recorder::default()).unwrap();
+    assert_eq!(
+        archeion_engine::existing_format(&f.profile).unwrap(),
+        Some(ExistingFormat { container: Container::ZipPerFile, encrypted: false })
+    );
+    assert_eq!(list_archives(&f.profile, None).unwrap().len(), 2, "still readable without a password");
+}
+
+#[test]
+fn the_recovery_key_opens_the_zips_and_the_password_can_change() {
+    use std::io::Read as _;
+    let mut f = fixture(Container::ZipPerFile);
+    f.profile.encrypted = true;
+    let rec = Recorder::default();
+    let old = pw("first password");
+    backup(&f.profile, Some(&old), BackupMode::Auto, &rec).unwrap();
+    let key = archeion_engine::recovery_key(&f.profile, &old).unwrap().unwrap().replace(' ', "");
+    assert_eq!(key.len(), 64);
+
+    // What 7-Zip does with the recovery key: open the manifest, find the
+    // stored name of a file, open that file.
+    let archive = list_archives(&f.profile, Some(&old)).unwrap().remove(0).name;
+    let dir = f.profile.destination.path().join(&archive);
+    let mut z = zip::ZipArchive::new(fs::File::open(dir.join("manifest.zip")).unwrap()).unwrap();
+    let mut text = String::new();
+    z.by_index_decrypt(0, key.as_bytes()).unwrap().read_to_string(&mut text).unwrap();
+    let line = text.lines().find(|l| l.contains("/a.txt\"")).unwrap();
+    let entry: serde_json::Value = serde_json::from_str(line).unwrap();
+    let blob = entry["blob"].as_str().unwrap().to_owned();
+    assert!(blob.starts_with("vault/"));
+    let mut z = zip::ZipArchive::new(fs::File::open(dir.join(&blob)).unwrap()).unwrap();
+    let mut content = String::new();
+    z.by_index_decrypt(0, key.as_bytes()).unwrap().read_to_string(&mut content).unwrap();
+    assert_eq!(content, "alpha");
+
+    let new = pw("second password");
+    archeion_engine::change_password(&f.profile, &old, &new).unwrap();
+    assert!(matches!(list_archives(&f.profile, Some(&old)), Err(EngineError::WrongPassword)));
+    assert_eq!(list_archives(&f.profile, Some(&new)).unwrap().len(), 1);
+    let same = archeion_engine::recovery_key(&f.profile, &new).unwrap().unwrap().replace(' ', "");
+    assert_eq!(same, key, "the backups were not re-encrypted");
+}
+
+#[test]
+fn a_backup_removed_from_outside_is_noticed_by_the_check() {
+    let mut f = fixture(Container::ZipPerFile);
+    f.profile.encrypted = true;
+    let secret = pw("a long enough secret");
+    let rec = Recorder::default();
+    backup(&f.profile, Some(&secret), BackupMode::Auto, &rec).unwrap();
+    sleep(Duration::from_millis(1100));
+    fs::write(f.source.join("a.txt"), "v2").unwrap();
+    backup(&f.profile, Some(&secret), BackupMode::Auto, &rec).unwrap();
+    let clean = verify(&f.profile, Some(&secret), None, &rec).unwrap();
+    assert!(clean.problems.is_empty(), "{:?}", clean.problems);
+
+    let newest = list_archives(&f.profile, Some(&secret)).unwrap().remove(0).name;
+    fs::remove_dir_all(f.profile.destination.path().join(newest)).unwrap();
+    let v = verify(&f.profile, Some(&secret), None, &rec).unwrap();
+    assert!(v.problems.iter().any(|p| p.contains("signature")), "{:?}", v.problems);
+}
+
+/// Adds `b1.txt` … `b4.txt`, copied in name order after `a.txt`.
+fn more_files(f: &Fixture) {
+    for i in 1..=4 {
+        fs::write(f.source.join(format!("b{i}.txt")), format!("bravo {i}")).unwrap();
+    }
+}
+
+fn partials(f: &Fixture) -> Vec<PathBuf> {
+    fs::read_dir(f.profile.destination.path())
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.to_string_lossy().ends_with(".partial"))
+        .collect()
+}
+
+fn stop_after(f: &Fixture, password: Option<&Password>, mode: BackupMode, files: u64) {
+    sleep(Duration::from_millis(1100));
+    let r = backup_stopping_after(&f.profile, password, mode, &Recorder::default(), files);
+    assert!(r.is_err(), "the test run stops");
+}
+
+#[test]
+fn an_interrupted_backup_resumes_where_it_stopped() {
+    check_both_containers(|c| {
+        let f = fixture(c);
+        more_files(&f);
+        stop_after(&f, None, BackupMode::Auto, 2);
+        assert_eq!(partials(&f).len(), 1, "the unfinished backup is kept");
+        assert!(list_archives(&f.profile, None).unwrap().is_empty(), "nothing committed");
+
+        let report = backup(&f.profile, None, BackupMode::Auto, &Recorder::default()).unwrap();
+        assert_eq!(report.resumed_files, 2);
+        assert_eq!(report.files_new, 6);
+        assert!(report.complete);
+        assert!(partials(&f).is_empty());
+        let dir = f.profile.destination.path().join(&report.archive);
+        assert!(!dir.join("resume.jsonl").exists(), "the journal is not committed");
+
+        restore_all(&f, &report.archive);
+        assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
+        assert_eq!(fs::read_to_string(restored(&f, "b4.txt")).unwrap(), "bravo 4");
+        let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+        assert!(v.problems.is_empty(), "{:?}", v.problems);
+    });
+}
+
+#[test]
+fn files_changed_or_deleted_since_the_interruption_are_handled() {
+    let f = fixture(Container::Folder);
+    more_files(&f);
+    stop_after(&f, None, BackupMode::Auto, 3); // a.txt, b1.txt, b2.txt
+    sleep(Duration::from_millis(50));
+    fs::write(f.source.join("a.txt"), "alpha, edited").unwrap();
+    fs::remove_file(f.source.join("b1.txt")).unwrap();
+
+    let report = backup(&f.profile, None, BackupMode::Auto, &Recorder::default()).unwrap();
+    assert_eq!(report.resumed_files, 1, "only b2.txt is kept as it was");
+    let paths = all_paths(&f.profile.destination.path().join(&report.archive));
+    assert!(!paths.iter().any(|p| p.ends_with("b1.txt")), "leftover removed: {paths:?}");
+    restore_all(&f, &report.archive);
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha, edited");
+    let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+}
+
+#[test]
+fn a_different_kind_chosen_by_the_user_starts_over() {
+    let f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile);
+    more_files(&f);
+    stop_after(&f, None, BackupMode::Incremental, 2);
+    let report = backup_as(&f.profile, BackupMode::Complete);
+    assert_eq!(report.resumed_files, 0);
+    assert_eq!(kinds(&f), "CC");
+    assert!(partials(&f).is_empty());
+}
+
+#[test]
+fn a_scheduled_backup_resumes_an_incremental() {
+    let f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile);
+    more_files(&f);
+    stop_after(&f, None, BackupMode::Incremental, 2);
+    let report = backup(&f.profile, None, BackupMode::Auto, &Recorder::default()).unwrap();
+    assert_eq!(report.resumed_files, 2);
+    assert_eq!(report.files_new, 4);
+    assert_eq!(kinds(&f), "CI");
+}
+
+#[test]
+fn an_encrypted_backup_resumes_without_revealing_names() {
+    let mut f = fixture(Container::ZipPerFile);
+    f.profile.encrypted = true;
+    let secret = pw("correct horse battery");
+    more_files(&f);
+    stop_after(&f, Some(&secret), BackupMode::Auto, 2);
+    let partial = partials(&f).pop().unwrap();
+    let journal = fs::read_to_string(partial.join("resume.jsonl")).unwrap();
+    assert_eq!(journal.lines().count(), 2);
+    assert!(!journal.contains("a.txt") && !journal.contains("b1.txt"), "names in the journal: {journal}");
+    let alpha = blake3::hash(b"alpha").to_hex().to_string();
+    assert!(!journal.contains(&alpha), "hashes in the journal");
+
+    assert!(matches!(
+        backup(&f.profile, Some(&pw("wrong password")), BackupMode::Auto, &Recorder::default()),
+        Err(EngineError::WrongPassword)
+    ));
+    let report = backup(&f.profile, Some(&secret), BackupMode::Auto, &Recorder::default()).unwrap();
+    assert_eq!(report.resumed_files, 2);
+    let v = verify(&f.profile, Some(&secret), None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+    assert_eq!(v.files_checked, 6);
+}
+
+#[test]
+fn a_damaged_copy_in_the_unfinished_backup_is_copied_again() {
+    let f = fixture(Container::ZipPerFile);
+    more_files(&f);
+    stop_after(&f, None, BackupMode::Auto, 2);
+    let partial = partials(&f).pop().unwrap();
+    let zip = walkdir_paths(&partial)
+        .into_iter()
+        .map(|p| partial.join(p))
+        .find(|p| p.to_string_lossy().ends_with("a.txt.zip"))
+        .unwrap();
+    let bytes = fs::read(&zip).unwrap();
+    fs::write(&zip, &bytes[..bytes.len() / 2]).unwrap();
+
+    let report = backup(&f.profile, None, BackupMode::Auto, &Recorder::default()).unwrap();
+    assert_eq!(report.resumed_files, 1);
+    restore_all(&f, &report.archive);
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
+}
+
+#[test]
+fn a_destination_written_by_archeion_is_renamed_and_still_opens() {
+    let mut f = fixture(Container::ZipPerFile);
+    f.profile.encrypted = true;
+    let secret = pw("correct horse battery");
+    backup(&f.profile, Some(&secret), BackupMode::Auto, &Recorder::default()).unwrap();
+    let dest = f.profile.destination.path().to_path_buf();
+    for (new, old) in [
+        ("archeion.json", "archeion.json"),
+        ("archeion.key.json", "archeion.key.json"),
+        ("archeion.archives.mac", "archeion.archives.mac"),
+        ("archeion.lock", "archeion.lock"),
+    ] {
+        fs::rename(dest.join(new), dest.join(old)).unwrap();
+    }
+
+    // Read-only queries work before the first write…
+    assert_eq!(list_archives(&f.profile, Some(&secret)).unwrap().len(), 1);
+    check_password(&f.profile, &secret).unwrap();
+    // …and the next backup renames everything.
+    sleep(Duration::from_millis(1100));
+    backup(&f.profile, Some(&secret), BackupMode::Auto, &Recorder::default()).unwrap();
+    let names = all_paths(&dest);
+    assert!(!names.iter().any(|n| n.starts_with("archeion")), "{names:?}");
+    assert!(names.iter().any(|n| n == "archeion.key.json"));
+    let v = verify(&f.profile, Some(&secret), None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+}
