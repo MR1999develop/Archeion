@@ -4,15 +4,14 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con i test end-to-end e della finestra (ramo
-`feature/e2e-tests` unito; `tools\check.bat` verde: fmt, clippy,
-310 test). La build di rilascio è stata controllata al commit GPLv3
+`main` con il nuovo aspetto dell'interfaccia (ramo `feature/ui-look`
+unito; `tools\check.bat` verde: fmt, clippy, 311 test, 1 ignorato: le
+schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
 ## Lavoro in corso
 
-- Nessuno. Da guardare a mano solo l'aspetto dell'albero di ripristino
-  (vedi `TIDY.md`).
+- Nessuno. Ritocchi dell'interfaccia rimasti in `TIDY.md`.
 
 ## Punti aperti
 
@@ -51,3 +50,10 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
   (`egui_system_font_provider`), un test controlla che ogni carattere
   dell'interfaccia e delle 9 lingue si possa disegnare. Permessi dei
   comandi ripetitivi in `.claude/settings.json` (push e publish negati).
+- Aspetto: tutti i colori, le misure e i font in `ui/theme.rs` (token
+  chiaro/scuro in stile Windows 11, contrasti testati), i componenti
+  comuni in `ui/widgets.rs` (titoli di sezione, schede, bottone primario e
+  distruttivo, finestre e modali), il font di sistema in `ui/platform.rs`
+  (Segoe UI letto da Windows, mai distribuito). Le schermate di tutte le
+  viste si generano con il test ignorato `screens` (egui_kittest con wgpu)
+  e passano il controllo di accessibilità di kittest.

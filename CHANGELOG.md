@@ -17,6 +17,15 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Changed
 
+- A cleaner, more uniform window: Segoe UI (regular and semibold) from
+  Windows instead of egui's thin font; Windows 11 greys with one blue
+  accent for what can be clicked, in light and dark; the profile name as
+  page title; tabs as text with an accent bar, so they no longer look
+  like selected list items; semibold section titles everywhere; one
+  primary button per view and a red one only to delete; Preferences, Help
+  and About open centred, with window margins. Text, links and field
+  borders keep the WCAG contrasts in both themes (tested). Fields and
+  menus without a label beside them have an accessible name.
 - Encrypted destinations use new key derivation contexts (key format 3):
   those created before cannot be opened any more and must be created
   again. Settings, saved passwords and scheduled tasks of earlier test

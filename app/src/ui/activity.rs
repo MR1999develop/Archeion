@@ -1,7 +1,7 @@
 //! Activity tab: what the running backup, merge or restore is doing. Once
 //! it ends, the tab shows its log like any past run.
 
-use super::theme;
+use super::{theme, widgets};
 use crate::{
     activity::{Activity, Count, Handled, Op, Outcome, PhaseState, RecentFile, Step, format_duration},
     history,
@@ -142,7 +142,7 @@ fn group_text(tr: &Tr, g: &MergeGroup) -> String {
 
 /// The files handled last, newest on top, in a fixed-height list.
 fn recent_ui(ui: &mut Ui, tr: &Tr, a: &Activity) {
-    ui.strong(tr.t("recent-title"));
+    widgets::section_title(ui, tr.t("recent-title"));
     egui::ScrollArea::vertical()
         .id_salt("recent-files")
         .max_height(RECENT_HEIGHT)

@@ -21,6 +21,10 @@
   test della finestra con egui_kittest (`app/src/ui/restore_tests.rs`).
   Ogni nuova funzione di backup o ripristino aggiunge un caso lì; un test
   nuovo si vede fallire iniettando un guasto prima di fidarsene.
+- Interfaccia: colori, misure e font solo da `ui/theme.rs`, componenti da
+  `ui/widgets.rs`; dopo ogni modifica visibile rigenerare e guardare le
+  schermate (`cargo test -p archeion --bin archeion screens -- --ignored`,
+  file in `target/ui-screens`), in italiano e inglese, chiaro e scuro.
 - Licenza `GPL-3.0-only` (testo in `LICENSE`), copyright e autori **MR**;
   nessun dato personale (nome, email, percorsi locali) nei file né negli
   eseguibili: `tools\release.bat` riscrive i percorsi e controlla l'exe.

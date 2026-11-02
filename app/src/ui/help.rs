@@ -3,7 +3,7 @@
 //! The guide is a resizable window that stays open beside the main window
 //! while the user tries what it describes; About is a small modal.
 
-use super::{shell, theme};
+use super::{shell, theme, widgets};
 use crate::{
     i18n::{Tr, arg},
     storage::Storage,
@@ -113,6 +113,12 @@ impl Help {
         self.docs_open = true;
     }
 
+    /// Opens the About window (tests).
+    #[cfg(test)]
+    pub fn open_about(&mut self) {
+        self.about_open = true;
+    }
+
     /// The entries of the Help menu.
     pub fn menu(&mut self, ui: &mut egui::Ui, tr: &Tr) {
         let docs = egui::Button::new(tr.t("menu-documentation")).shortcut_text("F1");
@@ -148,10 +154,9 @@ impl Help {
             self.docs_open = false;
             return;
         }
-        egui::Window::new(tr.t("doc-title"))
+        widgets::dialog(ctx, tr.t("doc-title"))
             .id(id)
             .open(&mut self.docs_open)
-            .collapsible(false)
             .resizable(true)
             .vscroll(true)
             .default_size([560.0, 480.0])
@@ -161,7 +166,7 @@ impl Help {
                 ui.label(tr.t("doc-intro"));
                 ui.add_space(theme::SPACE_S);
                 for (n, section) in SECTIONS.iter().enumerate() {
-                    egui::CollapsingHeader::new(RichText::new(tr.t(section.title)).strong())
+                    egui::CollapsingHeader::new(widgets::section_text(tr.t(section.title)))
                         .id_salt(section.title)
                         .default_open(n == 0)
                         .show(ui, |ui| section_body(ui, tr, section));
@@ -187,7 +192,7 @@ fn section_body(ui: &mut egui::Ui, tr: &Tr, section: &Section) {
 /// Draws the About modal; false once the user closed it.
 fn about(ctx: &egui::Context, tr: &Tr, storage: &Storage) -> bool {
     let mut close = false;
-    let response = egui::Modal::new(Id::unique(ABOUT_ID)).show(ctx, |ui| {
+    let response = widgets::modal(ctx, Id::unique(ABOUT_ID)).show(ctx, |ui| {
         ui.set_max_width(ABOUT_WIDTH);
         ui.horizontal(|ui| {
             ui.heading("Archeion");
@@ -224,7 +229,7 @@ fn about(ctx: &egui::Context, tr: &Tr, storage: &Storage) -> bool {
 /// A folder's name and path, with a button that opens it in File Explorer
 /// (disabled while the folder does not exist, e.g. no log written yet).
 pub(super) fn folder_row(ui: &mut egui::Ui, tr: &Tr, label: &str, path: &Path) {
-    ui.strong(label);
+    widgets::section_title(ui, label);
     ui.horizontal(|ui| {
         let exists = path.is_dir();
         if ui

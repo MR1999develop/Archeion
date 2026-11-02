@@ -9,6 +9,7 @@ use super::{
     settings::{self, Preferences},
     theme,
     tray::{Tray, TrayCommand},
+    widgets,
 };
 use crate::{
     activity::{Activity, Op, Outcome},
@@ -121,6 +122,35 @@ impl ArcheionApp {
     /// (when there is one). `primary`: the single-instance claim, served
     /// here so that a second launch brings this window forward.
     pub fn new(storage: Storage, ctx: &egui::Context, start_hidden: bool, primary: Option<Primary>) -> Self {
+        let mut app = Self::state(storage);
+        match Tray::new(ctx, &app.tr) {
+            Ok(tray) => {
+                tray.set_visible(app.settings.window.close_to_tray);
+                app.tray = Some(tray);
+            }
+            Err(e) => tracing::warn!(error = %e, "no notification-area icon"),
+        }
+        // Hidden only where the user can get the window back.
+        app.start_hidden = start_hidden && app.hides_to_tray();
+        if let Some(primary) = primary {
+            let (tx, rx) = mpsc::channel();
+            let ctx = ctx.clone();
+            primary.serve(move || {
+                let _ = tx.send(());
+                ctx.request_repaint();
+            });
+            app.wake = Some(rx);
+        }
+        if !app.read_only {
+            crate::storage::remove_stale_requests(app.storage.dir());
+            app.start_task_sync();
+        }
+        app
+    }
+
+    /// The window's state read from `storage`, without touching Windows
+    /// (notification area, scheduled tasks): what the tests draw.
+    fn state(storage: Storage) -> Self {
         let (settings, read_only, banner) = match storage.load() {
             Ok(s) => (s, false, None),
             Err(e) => {
@@ -131,7 +161,7 @@ impl ArcheionApp {
         let tr = Tr::new(settings.language);
         let banner = banner.map(|detail| tr.t_args("settings-unreadable", &[("detail", arg(detail))]));
         let selected = settings.profiles.first().map(|p| p.id);
-        let mut app = Self {
+        Self {
             storage,
             settings,
             read_only,
@@ -159,30 +189,7 @@ impl ArcheionApp {
             wake: None,
             help: Help::default(),
             preferences: Preferences::default(),
-        };
-        match Tray::new(ctx, &app.tr) {
-            Ok(tray) => {
-                tray.set_visible(app.settings.window.close_to_tray);
-                app.tray = Some(tray);
-            }
-            Err(e) => tracing::warn!(error = %e, "no notification-area icon"),
         }
-        // Hidden only where the user can get the window back.
-        app.start_hidden = start_hidden && app.hides_to_tray();
-        if let Some(primary) = primary {
-            let (tx, rx) = mpsc::channel();
-            let ctx = ctx.clone();
-            primary.serve(move || {
-                let _ = tx.send(());
-                ctx.request_repaint();
-            });
-            app.wake = Some(rx);
-        }
-        if !app.read_only {
-            crate::storage::remove_stale_requests(app.storage.dir());
-            app.start_task_sync();
-        }
-        app
     }
 
     /// True when closing the window hides it in the notification area.
@@ -565,17 +572,19 @@ impl ArcheionApp {
     }
 
     fn profile_list(&mut self, ui: &mut Ui) {
-        ui.add_space(theme::SPACE_S);
-        ui.strong(self.tr.t("profiles"));
+        ui.add_space(theme::SPACE_M);
+        widgets::section_title(ui, self.tr.t("profiles"));
         let mut clicked = None;
-        for p in &self.settings.profiles {
-            let name = if p.name.trim().is_empty() { self.tr.t("unnamed") } else { p.name.clone() };
-            let running = self.job.as_ref().is_some_and(|j| j.profile() == p.id);
-            let text = if running { format!("⟳ {name}") } else { name };
-            if ui.selectable_label(self.selected == Some(p.id), text).clicked() {
-                clicked = Some(p.id);
+        ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
+            for p in &self.settings.profiles {
+                let name = if p.name.trim().is_empty() { self.tr.t("unnamed") } else { p.name.clone() };
+                let running = self.job.as_ref().is_some_and(|j| j.profile() == p.id);
+                let text = if running { format!("⟳ {name}") } else { name };
+                if ui.selectable_label(self.selected == Some(p.id), text).clicked() {
+                    clicked = Some(p.id);
+                }
             }
-        }
+        });
         if let Some(id) = clicked {
             let ctx = ui.ctx().clone();
             self.select(&ctx, id);
@@ -591,17 +600,23 @@ impl ArcheionApp {
             self.empty_state(ui);
             return;
         };
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.tab, Tab::Settings, self.tr.t("tab-settings"));
-            ui.selectable_value(&mut self.tab, Tab::Backups, self.tr.t("tab-backups"));
-            let label = if self.job.is_some() {
-                format!("⟳ {}", self.tr.t("tab-activity"))
-            } else {
-                self.tr.t("tab-activity")
-            };
-            ui.selectable_value(&mut self.tab, Tab::Activity, label);
-        });
+        let name = self.settings.profile(id).map(|p| p.name.trim().to_owned()).unwrap_or_default();
+        ui.add_space(theme::SPACE_S);
+        ui.heading(if name.is_empty() { self.tr.t("unnamed") } else { name });
+        ui.add_space(theme::SPACE_XS);
+        let activity = if self.job.is_some() {
+            format!("⟳ {}", self.tr.t("tab-activity"))
+        } else {
+            self.tr.t("tab-activity")
+        };
+        let items = [
+            (Tab::Settings, self.tr.t("tab-settings"), None),
+            (Tab::Backups, self.tr.t("tab-backups"), None),
+            (Tab::Activity, activity, None),
+        ];
+        widgets::tabs(ui, &mut self.tab, &items, false);
         ui.separator();
+        ui.add_space(theme::SPACE_XS);
         match self.tab {
             Tab::Settings => self.settings_tab(ui, id),
             Tab::Backups => self.backups_tab(ui, id),
@@ -615,7 +630,7 @@ impl ArcheionApp {
             ui.heading(self.tr.t("empty-title"));
             ui.label(self.tr.t("empty-body"));
             ui.add_space(theme::SPACE_M);
-            let b = egui::Button::new(self.tr.t("new-profile")).fill(ui.visuals().selection.bg_fill);
+            let b = widgets::primary_button(ui, self.tr.t("new-profile"));
             if ui.add(b).clicked() {
                 self.new_profile();
             }
@@ -1399,3 +1414,7 @@ fn outcome_text(tr: &Tr, name: &str, op: Op, o: &Outcome) -> (String, bool) {
         Outcome::Cancelled => (tr.t("run-cancelled"), false),
     }
 }
+
+#[cfg(test)]
+#[path = "screens.rs"]
+mod screens;

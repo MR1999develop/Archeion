@@ -25,6 +25,7 @@ use super::{
     load::{Load, Problem},
     theme,
     tree::{Node, Tick, Ticked, Tree},
+    widgets,
 };
 use crate::{
     credentials,
@@ -129,18 +130,23 @@ impl RestoreView {
         self.view = View::Files;
     }
 
+    /// Shows the "Manage backups" view (tests).
+    #[cfg(test)]
+    pub fn open_manage(&mut self) {
+        self.view = View::Backups;
+    }
+
     /// Draws the tab; returns a restore, merge or deletion to start.
     pub fn show(&mut self, ui: &mut Ui, tr: &Tr, profile: &Profile, busy: bool) -> Option<Action> {
         if self.profile != Some(profile.id) {
             self.switch_to(profile.id);
         }
-        ui.horizontal(|ui| {
-            ui.selectable_value(&mut self.view, View::Files, tr.t("backups-restore-files"))
-                .on_hover_text(tr.t("backups-restore-files-hint"));
-            ui.selectable_value(&mut self.view, View::Backups, tr.t("backups-manage"))
-                .on_hover_text(tr.t("backups-manage-hint"));
-        });
-        ui.separator();
+        let items = [
+            (View::Files, tr.t("backups-restore-files"), Some(tr.t("backups-restore-files-hint"))),
+            (View::Backups, tr.t("backups-manage"), Some(tr.t("backups-manage-hint"))),
+        ];
+        widgets::tabs(ui, &mut self.view, &items, true);
+        ui.add_space(theme::SPACE_S);
         match self.view {
             View::Files => self.files_view(ui, tr, profile, busy),
             View::Backups => {
@@ -829,6 +835,7 @@ fn folder_card(
                 }
             })
             .response
+            .accessible_name(tr.t("folder-as-of"))
             .on_hover_text(tr.t("folder-as-of-hint"));
         if chosen != archive {
             edits.push(CardEdit::Date { card, archive: chosen });
@@ -893,7 +900,7 @@ fn dest_text(tr: &Tr, dest: &Dest) -> String {
 /// The default destination, at the top of the selection.
 fn default_ui(ui: &mut Ui, tr: &Tr, default: &mut DefaultDest) {
     ui.add_space(theme::SPACE_S);
-    ui.strong(tr.t("restore-to"));
+    widgets::section_title(ui, tr.t("restore-to"));
     ui.weak(tr.t("restore-to-hint"));
     ui.radio_value(&mut default.kind, DestKind::Beside, tr.t("target-beside"))
         .on_hover_text(tr.t("target-beside-hint"));
@@ -944,8 +951,7 @@ fn go_ui(ui: &mut Ui, tr: &Tr, plan: &Plan) -> Option<RestoreRequest> {
             Blocker::Busy => "busy-hint",
         })
     });
-    let button = egui::Button::new(RichText::new(tr.t("restore-selected")).strong())
-        .fill(ui.visuals().selection.bg_fill);
+    let button = widgets::primary_button(ui, tr.t("restore-selected"));
     let resp = ui.add_enabled(why.is_none(), button);
     let mut request = None;
     match &why {

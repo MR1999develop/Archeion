@@ -19,12 +19,16 @@ trigger it. Remove an item when it is done or no longer applies.
   `feature/automatic-backup`, `tools\github_publish.bat` (pushes `main`
   and the feature branch), `tools\git_push.bat -PullRequest`; read the
   four `.log` files.
-- **Look at the restore tree** (added 2 November): ticking, unticking,
-  the filled boxes and the request are tested (`ui/restore_tests.rs`,
-  `tests/cli.rs`); what tests cannot see is whether the filled box sits
-  exactly in the tick box at every zoom, and whether the highlighted card
-  reads well. Snapshot tests (egui_kittest `snapshot` feature, needs a
-  GPU renderer) would cover it if it ever drifts.
+- **Interface polish still open** (added 2 November; screenshots with
+  `cargo test -p archeion --bin archeion screens -- --ignored`, in
+  `target/ui-screens`): the icons are emoji (📁 📄 🗑 ⟳ ✕), drawn by the
+  system emoji font, not one icon set; ticked boxes are drawn with the
+  text colour, not filled with the accent as in Windows 11; the Activity
+  log rows (time, dot, text) are not aligned in columns and its links
+  wrap under the buttons; the remove buttons of folders and cards are
+  bordered "✕" buttons rather than quiet icon buttons. The screenshots are
+  not compared automatically (no stored references): add
+  `harness.snapshot()` with references if the look starts to drift.
 - **Accessibility of the filled box**: egui exposes a partial tick box as
   neither ticked nor unticked (no "mixed" state in `WidgetInfo`), so a
   screen reader does not say "partly ticked". Add it to the hover text or

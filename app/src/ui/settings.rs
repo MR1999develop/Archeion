@@ -5,7 +5,7 @@
 //! is no OK or Cancel; ✕ or Esc closes it. This module only draws it and
 //! reports the new values; the caller saves and applies them.
 
-use super::{help, theme};
+use super::{help, theme, widgets};
 use crate::i18n::Tr;
 use archeion_core::{Language, WindowOptions};
 use eframe::egui::{self, Id, Key, KeyboardShortcut, LayerId, Modifiers, Order, RichText};
@@ -65,33 +65,35 @@ impl Preferences {
             return None;
         }
         let mut values = current;
-        egui::Window::new(tr.t("preferences-title"))
-            .id(id)
-            .open(&mut self.open)
-            .collapsible(false)
-            .resizable(false)
-            .show(ctx, |ui| {
+        widgets::dialog(ctx, tr.t("preferences-title")).id(id).open(&mut self.open).resizable(false).show(
+            ctx,
+            |ui| {
                 ui.set_max_width(WIDTH);
                 language_section(ui, tr, &mut values.language, tray);
                 ui.add_space(theme::SPACE_M);
                 window_section(ui, tr, &mut values.window, tray);
                 ui.add_space(theme::SPACE_M);
                 help::folder_row(ui, tr, &tr.t("data-folder"), data_dir);
-            });
+            },
+        );
         (values != current).then_some(values)
     }
 }
 
 /// "System language" first, then every language by its own name.
 fn language_section(ui: &mut egui::Ui, tr: &Tr, language: &mut Language, tray: bool) {
-    ui.strong(tr.t("language"));
+    widgets::section_title(ui, tr.t("language"));
     let name = |l: Language| l.native_name().map_or_else(|| tr.t("language-system"), str::to_owned);
-    egui::ComboBox::from_id_salt("language").selected_text(name(*language)).show_ui(ui, |ui| {
-        ui.selectable_value(language, Language::System, name(Language::System));
-        for l in Language::ALL {
-            ui.selectable_value(language, l, name(l));
-        }
-    });
+    egui::ComboBox::from_id_salt("language")
+        .selected_text(name(*language))
+        .show_ui(ui, |ui| {
+            ui.selectable_value(language, Language::System, name(Language::System));
+            for l in Language::ALL {
+                ui.selectable_value(language, l, name(l));
+            }
+        })
+        .response
+        .accessible_name(tr.t("language"));
     if tray {
         ui.label(RichText::new(tr.t("language-tray-restart")).weak().small());
     }
@@ -99,7 +101,7 @@ fn language_section(ui: &mut egui::Ui, tr: &Tr, language: &mut Language, tray: b
 
 /// The two window options, with their hints.
 fn window_section(ui: &mut egui::Ui, tr: &Tr, window: &mut WindowOptions, tray: bool) {
-    ui.strong(tr.t("preferences-window"));
+    widgets::section_title(ui, tr.t("preferences-window"));
     ui.add_enabled(tray, egui::Checkbox::new(&mut window.close_to_tray, tr.t("option-tray")))
         .on_hover_text(tr.t("option-tray-hint"))
         .on_disabled_hover_text(tr.t("option-tray-unavailable"));

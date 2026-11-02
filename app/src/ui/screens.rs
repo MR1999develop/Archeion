@@ -1,0 +1,106 @@
+//! Screenshots of every screen, for looking at the interface without
+//! opening it: `cargo test -p archeion --bin archeion screens -- --ignored`
+//! writes PNG files to `target/ui-screens`, in Italian and English, light
+//! and dark. Ignored by default: it needs a GPU (or the WARP adapter) and
+//! checks nothing.
+
+use super::{ArcheionApp, Tab};
+use crate::{storage::Storage, worker};
+use archeion_core::{BackupMode, Container, Destination, Language, Profile, Settings};
+use eframe::egui;
+use egui_kittest::{Harness, kittest::Queryable as _};
+use std::{fs, path::Path, time::Duration};
+
+/// A data folder with two profiles; the first has two backups and their
+/// logs, made by the same code as the Run button.
+fn sandbox(root: &Path, language: Language) -> Storage {
+    let source = root.join("Documenti");
+    fs::create_dir_all(source.join("Lavoro").join("2026")).unwrap();
+    fs::create_dir_all(source.join("Foto")).unwrap();
+    fs::write(source.join("Lavoro").join("relazione.docx"), "v1").unwrap();
+    fs::write(source.join("Lavoro").join("2026").join("bilancio.xlsx"), "x".repeat(40_000)).unwrap();
+    fs::write(source.join("Foto").join("mare.jpg"), "y".repeat(900_000)).unwrap();
+    fs::write(source.join("note.txt"), "note").unwrap();
+
+    let mut docs = Profile::new("Documenti");
+    docs.sources.push(source.clone());
+    docs.destination = Destination::Local { path: root.join("Backup") };
+    docs.container = Container::Folder;
+    let mut photos = Profile::new("Foto di famiglia");
+    photos.sources.push(root.join("Immagini"));
+    photos.destination = Destination::Local { path: root.join("Disco esterno") };
+    photos.encrypted = true;
+
+    let storage = Storage::at(root.join("data")).unwrap();
+    let settings = Settings { language, profiles: vec![docs.clone(), photos], ..Settings::default() };
+    storage.save(&settings).unwrap();
+    let backup = || worker::Work::Backup { mode: BackupMode::Auto };
+    let _ = worker::run(&storage, docs.id, backup(), false, None);
+    std::thread::sleep(Duration::from_millis(1100));
+    fs::write(source.join("Lavoro").join("relazione.docx"), "v2").unwrap();
+    let _ = worker::run(&storage, docs.id, backup(), false, None);
+    storage
+}
+
+fn harness(storage: Storage, theme: egui::Theme) -> Harness<'static, ArcheionApp> {
+    Harness::builder().with_size(egui::vec2(1100.0, 720.0)).with_theme(theme).wgpu().build_eframe(move |cc| {
+        super::theme::apply(&cc.egui_ctx);
+        cc.egui_ctx
+            .add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
+        ArcheionApp::state(storage)
+    })
+}
+
+/// A few frames, with time for background reads (tree, sizes, logs).
+fn settle(h: &mut Harness<'_, ArcheionApp>) {
+    for _ in 0..30 {
+        h.step();
+        std::thread::sleep(Duration::from_millis(30));
+    }
+}
+
+fn shot(h: &mut Harness<'_, ArcheionApp>, dir: &Path, name: &str) {
+    settle(h);
+    let image = h.render().unwrap();
+    image.save(dir.join(format!("{name}.png"))).unwrap();
+}
+
+#[test]
+#[ignore = "writes screenshots to target/ui-screens; run on demand"]
+fn screens() {
+    let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("target").join("ui-screens");
+    fs::create_dir_all(&out).unwrap();
+    for (language, lang) in [(Language::Italian, "it"), (Language::English, "en")] {
+        for (theme, mode) in [(egui::Theme::Light, "light"), (egui::Theme::Dark, "dark")] {
+            let dir = tempfile::tempdir().unwrap();
+            let storage = sandbox(dir.path(), language);
+            let mut h = harness(storage, theme);
+            let name = |screen: &str| format!("{lang}-{mode}-{screen}");
+
+            shot(&mut h, &out, &name("1-profile"));
+            h.state_mut().tab = Tab::Backups;
+            shot(&mut h, &out, &name("2-restore"));
+            if let Some(n) = h.query_all_by_label_contains("📁 Lavoro").next() {
+                n.click();
+            }
+            shot(&mut h, &out, &name("3-restore-ticked"));
+            h.state_mut().restore.open_manage();
+            shot(&mut h, &out, &name("4-manage"));
+            h.state_mut().tab = Tab::Activity;
+            shot(&mut h, &out, &name("5-activity"));
+            h.state_mut().tab = Tab::Settings;
+            let ctx = h.ctx.clone();
+            h.state_mut().preferences.open(&ctx);
+            shot(&mut h, &out, &name("6-preferences"));
+            h.state_mut().preferences = super::Preferences::default();
+            h.state_mut().help.open_docs();
+            shot(&mut h, &out, &name("7-guide"));
+            h.state_mut().help = super::Help::default();
+            h.state_mut().help.open_about();
+            shot(&mut h, &out, &name("8-about"));
+            h.state_mut().help = super::Help::default();
+            h.state_mut().selected = h.state().settings.profiles.get(1).map(|p| p.id);
+            shot(&mut h, &out, &name("9-profile-encrypted"));
+        }
+    }
+}

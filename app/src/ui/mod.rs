@@ -8,12 +8,14 @@ mod help;
 mod history;
 mod icon;
 mod load;
+mod platform;
 mod restore;
 mod settings;
 mod shell;
 mod theme;
 mod tray;
 mod tree;
+mod widgets;
 
 use crate::{instance::Primary, storage::Storage};
 

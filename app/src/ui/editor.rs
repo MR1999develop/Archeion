@@ -1,7 +1,7 @@
 //! Form for one profile. It edits the profile in place and reports what the
 //! window has to do next (save, update the scheduled tasks, start a job).
 
-use super::theme;
+use super::{theme, widgets};
 use crate::i18n::{Tr, arg};
 use archeion_core::{
     Alerts, Container, Destination, Exclusion, FullBackupRule, LargeFiles, Profile, ProfileError, ProfileId,
@@ -10,7 +10,7 @@ use archeion_core::{
     profile::Verification,
 };
 use archeion_engine::Password;
-use eframe::egui::{self, Color32, RichText, Ui};
+use eframe::egui::{self, RichText, Ui};
 
 const DELETE_DIALOG_ID: &str = "delete-profile-dialog";
 /// Width of the "Delete profile" warning: lines stay readable.
@@ -190,7 +190,8 @@ pub fn show(
     ui.set_max_width(theme::FORM_MAX_WIDTH);
 
     section(ui, "name", &tr.t("profile-name"), true, false, |ui| {
-        out.changed |= ui.text_edit_singleline(&mut p.name).changed();
+        let resp = ui.text_edit_singleline(&mut p.name).accessible_name(tr.t("profile-name"));
+        out.changed |= resp.changed();
     });
     section(ui, "folders", &tr.t("folders"), true, false, |ui| folders(ui, tr, p, &mut out));
     section(ui, "exclusions", &tr.t("exclusions"), false, false, |ui| {
@@ -337,7 +338,7 @@ fn run_now(
             (true, RunChoice::Complete) => tr.t("run-complete-button"),
             (true, RunChoice::Merge) => tr.t("merge-now"),
         };
-        let primary = egui::Button::new(RichText::new(label).strong()).fill(ui.visuals().selection.bg_fill);
+        let primary = widgets::primary_button(ui, label);
         if ui.add_enabled(ready, primary).on_disabled_hover_text(&why).clicked() {
             let choice = if started { drafts.run } else { RunChoice::Complete };
             out.command = Some(match Password::new(drafts.password.clone()) {
@@ -373,7 +374,7 @@ fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool,
     }
     let focus_cancel = std::mem::take(&mut dialog.focus_cancel);
     let (mut delete, mut cancel) = (false, false);
-    let response = egui::Modal::new(egui::Id::unique(DELETE_DIALOG_ID)).show(ui.ctx(), |ui| {
+    let response = widgets::modal(ui.ctx(), egui::Id::unique(DELETE_DIALOG_ID)).show(ui.ctx(), |ui| {
         ui.set_max_width(DELETE_DIALOG_WIDTH);
         ui.heading(tr.t_args("delete-profile-title", &[("name", arg(p.name.clone()))]));
         ui.add_space(theme::SPACE_S);
@@ -398,8 +399,7 @@ fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool,
                     cancel_button.request_focus();
                 }
                 cancel = cancel_button.clicked();
-                let text = RichText::new(tr.t("delete-profile")).strong().color(Color32::WHITE);
-                let button = egui::Button::new(text).fill(ui.visuals().error_fg_color);
+                let button = widgets::danger_button(ui, tr.t("delete-profile"));
                 delete = ui.add_enabled(!busy, button).on_disabled_hover_text(tr.t("busy-hint")).clicked();
             });
         });
@@ -603,7 +603,7 @@ fn recovery_ui(ui: &mut Ui, tr: &Tr, password: &PasswordStatus, drafts: &mut Dra
         Some(key) => {
             drafts.recovery_open = false;
             egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.strong(tr.t("recovery-title"));
+                widgets::section_title(ui, tr.t("recovery-title"));
                 ui.label(RichText::new(key).monospace().size(16.0));
                 ui.weak(tr.t("recovery-hint"));
                 ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("recovery-warning")));
@@ -739,11 +739,15 @@ fn full_backup(ui: &mut Ui, tr: &Tr, rule: &mut FullBackupRule, out: &mut Outcom
             FullEvery::Backups => tr.t("full-every-backups"),
             FullEvery::Days => tr.t("full-every-days"),
         };
-        egui::ComboBox::from_id_salt("full-every").selected_text(label(every)).show_ui(ui, |ui| {
-            for e in [FullEvery::Never, FullEvery::Backups, FullEvery::Days] {
-                ui.selectable_value(&mut every2, e, label(e));
-            }
-        });
+        egui::ComboBox::from_id_salt("full-every")
+            .selected_text(label(every))
+            .show_ui(ui, |ui| {
+                for e in [FullEvery::Never, FullEvery::Backups, FullEvery::Days] {
+                    ui.selectable_value(&mut every2, e, label(e));
+                }
+            })
+            .response
+            .accessible_name(tr.t("full-backup"));
         match every2 {
             FullEvery::Never => {}
             FullEvery::Backups => {
@@ -954,9 +958,8 @@ fn add_rule(p: &mut Profile, rule: Exclusion) -> bool {
 /// that must be seen (a problem to fix).
 fn section(ui: &mut Ui, id: &str, title: &str, open: bool, force_open: bool, add: impl FnOnce(&mut Ui)) {
     ui.add_space(theme::SPACE_S);
-    let mut header = egui::CollapsingHeader::new(RichText::new(title).strong())
-        .id_salt(("section", id))
-        .default_open(open);
+    let mut header =
+        egui::CollapsingHeader::new(widgets::section_text(title)).id_salt(("section", id)).default_open(open);
     if force_open {
         header = header.open(Some(true));
     }
@@ -1008,7 +1011,8 @@ fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, info: &DestinationInfo
         Destination::Local { path } => {
             ui.horizontal(|ui| {
                 let mut text = path.display().to_string();
-                if ui.add(egui::TextEdit::singleline(&mut text).hint_text(r"E:\Backup\Documenti")).changed() {
+                let field = egui::TextEdit::singleline(&mut text).hint_text(r"E:\Backup\Documenti");
+                if ui.add(field).accessible_name(tr.t("destination")).changed() {
                     *path = text.into();
                     out.changed = true;
                 }
@@ -1021,7 +1025,8 @@ fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, info: &DestinationInfo
             });
         }
         Destination::Network { unc } => {
-            out.changed |= ui.add(egui::TextEdit::singleline(unc).hint_text(r"\\server\backup\pc")).changed();
+            let field = egui::TextEdit::singleline(unc).hint_text(r"\\server\backup\pc");
+            out.changed |= ui.add(field).accessible_name(tr.t("destination")).changed();
         }
     }
     match &info.foreign {
@@ -1080,11 +1085,15 @@ fn schedule(ui: &mut Ui, tr: &Tr, id: &str, s: &mut Schedule, out: &mut Outcome)
         Every::Hours => tr.t("schedule-hours"),
         Every::Monthly => tr.t("schedule-monthly"),
     };
-    egui::ComboBox::from_id_salt(("every", id)).selected_text(label(every)).show_ui(ui, |ui| {
-        for e in [Every::Manual, Every::Days, Every::Hours, Every::Monthly] {
-            ui.selectable_value(&mut chosen, e, label(e));
-        }
-    });
+    egui::ComboBox::from_id_salt(("every", id))
+        .selected_text(label(every))
+        .show_ui(ui, |ui| {
+            for e in [Every::Manual, Every::Days, Every::Hours, Every::Monthly] {
+                ui.selectable_value(&mut chosen, e, label(e));
+            }
+        })
+        .response
+        .accessible_name(tr.t("schedule"));
     let mut new = if chosen == every { current.clone() } else { first_of(chosen, &current) };
     match &mut new {
         Schedule::Manual | Schedule::Daily { .. } | Schedule::Weekly { .. } => {}

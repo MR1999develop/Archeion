@@ -5,7 +5,7 @@
 use super::{
     load::{Load, Problem},
     restore::Action,
-    theme,
+    theme, widgets,
 };
 use crate::{
     credentials,
@@ -58,7 +58,7 @@ impl BackupsView {
         ui.set_max_width(theme::FORM_MAX_WIDTH);
         ui.add_space(theme::SPACE_S);
         ui.horizontal(|ui| {
-            ui.strong(tr.t("dates"));
+            widgets::section_title(ui, tr.t("dates"));
             if ui.small_button("⟳").on_hover_text(tr.t("refresh")).clicked() {
                 *refresh = true;
             }

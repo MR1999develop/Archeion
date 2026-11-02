@@ -10,7 +10,7 @@
 
 use super::{
     activity::{self as activity_tab, SKIPPED_KEY, action_key, phase_text, problem_text, summary_text},
-    shell, theme,
+    shell, theme, widgets,
 };
 use crate::{
     activity::{Activity, Op, Outcome, format_duration},
@@ -169,7 +169,7 @@ impl HistoryView {
                                 }
                             }
                             None => {
-                                ui.strong(tr.t("log-title"));
+                                widgets::section_title(ui, tr.t("log-title"));
                             }
                         }
                         lines_ui(ui, tr, a.op, &a.log);
@@ -312,7 +312,7 @@ impl HistoryView {
     ) {
         ui.add_space(theme::SPACE_S);
         ui.horizontal(|ui| {
-            ui.strong(tr.t("log-runs"));
+            widgets::section_title(ui, tr.t("log-runs"));
             if ui.small_button("⟳").on_hover_text(tr.t("refresh")).clicked() {
                 self.invalidate();
             }
@@ -445,7 +445,7 @@ fn log_header_ui(
 ) -> Option<LogAction> {
     let mut action = None;
     ui.horizontal_wrapped(|ui| {
-        ui.strong(tr.t("log-title"));
+        widgets::section_title(ui, tr.t("log-title"));
         ui.add_space(theme::SPACE_S);
         let buttons = [
             (LogAction::OpenReport, "log-open-full", "log-open-full-hint"),
