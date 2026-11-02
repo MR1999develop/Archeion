@@ -187,10 +187,13 @@ pub fn show(
     busy: bool,
 ) -> Outcome {
     let mut out = Outcome::default();
-    ui.set_max_width(theme::FORM_MAX_WIDTH);
+    ui.set_max_width(theme::SETTINGS_MAX_WIDTH);
 
-    section(ui, "name", &tr.t("profile-name"), true, false, |ui| {
-        let resp = ui.text_edit_singleline(&mut p.name).accessible_name(tr.t("profile-name"));
+    // One field: a row, not a section.
+    ui.add_space(theme::SPACE_XS);
+    ui.horizontal(|ui| {
+        let label = ui.label(widgets::section_text(tr.t("profile-name")));
+        let resp = ui.text_edit_singleline(&mut p.name).labelled_by(label.id);
         out.changed |= resp.changed();
     });
     section(ui, "folders", &tr.t("folders"), true, false, |ui| folders(ui, tr, p, &mut out));
@@ -225,7 +228,7 @@ pub fn show(
     });
     section(ui, "alerts", &tr.t("alerts"), false, false, |ui| alerts(ui, tr, p, &mut out));
 
-    ui.add_space(theme::SPACE_M);
+    ui.add_space(theme::SPACE_S);
     run_now(ui, tr, p, format, password, drafts, busy, dest.foreign.is_some(), &mut out);
     delete_dialog(ui, tr, p, drafts, busy, &mut out);
     out
@@ -973,7 +976,6 @@ fn add_rule(p: &mut Profile, rule: Exclusion) -> bool {
 /// time it is shown; `force_open` keeps it open while it shows something
 /// that must be seen (a problem to fix).
 fn section(ui: &mut Ui, id: &str, title: &str, open: bool, force_open: bool, add: impl FnOnce(&mut Ui)) {
-    ui.add_space(theme::SPACE_XS);
     let mut header =
         egui::CollapsingHeader::new(widgets::section_text(title)).id_salt(("section", id)).default_open(open);
     if force_open {
@@ -1024,10 +1026,14 @@ fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, info: &DestinationInfo
         }
     });
     match d {
+        // The free space beside the folder, wrapping below it in longer
+        // languages.
         Destination::Local { path } => {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 let mut text = path.display().to_string();
-                let field = egui::TextEdit::singleline(&mut text).hint_text(r"E:\Backup\Documenti");
+                let field = egui::TextEdit::singleline(&mut text)
+                    .hint_text(r"E:\Backup\Documenti")
+                    .desired_width(DEST_FIELD_WIDTH);
                 if ui.add(field).accessible_name(tr.t("destination")).changed() {
                     *path = text.into();
                     out.changed = true;
@@ -1038,11 +1044,17 @@ fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, info: &DestinationInfo
                     *path = dir;
                     out.changed = true;
                 }
+                free_space(ui, tr, info.free);
             });
         }
         Destination::Network { unc } => {
-            let field = egui::TextEdit::singleline(unc).hint_text(r"\\server\backup\pc");
-            out.changed |= ui.add(field).accessible_name(tr.t("destination")).changed();
+            ui.horizontal_wrapped(|ui| {
+                let field = egui::TextEdit::singleline(unc)
+                    .hint_text(r"\\server\backup\pc")
+                    .desired_width(DEST_FIELD_WIDTH);
+                out.changed |= ui.add(field).accessible_name(tr.t("destination")).changed();
+                free_space(ui, tr, info.free);
+            });
         }
     }
     match &info.foreign {
@@ -1061,15 +1073,21 @@ fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, info: &DestinationInfo
         }
         None => {}
     }
-    if let Some(free) = info.free {
-        let text = tr.t_args("dest-free", &[("free", arg(tr.bytes(free)))]);
-        if free < LOW_SPACE_BYTES {
-            ui.colored_label(ui.visuals().warn_fg_color, symbol::with(symbol::WARNING, text));
-        } else {
-            ui.label(text);
-        }
-    }
     ui.weak(tr.t("dest-hint"));
+}
+
+/// Width of the destination field: most folder paths without cutting.
+const DEST_FIELD_WIDTH: f32 = 340.0;
+
+/// Free space of the destination's drive, as a warning when low.
+fn free_space(ui: &mut Ui, tr: &Tr, free: Option<u64>) {
+    let Some(free) = free else { return };
+    let text = tr.t_args("dest-free", &[("free", arg(tr.bytes(free)))]);
+    if free < LOW_SPACE_BYTES {
+        ui.colored_label(ui.visuals().warn_fg_color, symbol::with(symbol::WARNING, text));
+    } else {
+        ui.weak(text);
+    }
 }
 
 /// Below this, the free space of the destination is shown as a warning.
