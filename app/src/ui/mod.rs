@@ -23,8 +23,9 @@ use archeion_core::WindowSize;
 
 /// Window icon size, in pixels.
 const WINDOW_ICON: u32 = 64;
-/// First size of the window, and the smallest it can be made.
-const DEFAULT_SIZE: [f32; 2] = [960.0, 640.0];
+/// First size of the window, enough for every setting of a profile without
+/// scrolling, and the smallest it can be made.
+const DEFAULT_SIZE: [f32; 2] = [1100.0, 820.0];
 const MIN_SIZE: [f32; 2] = [760.0, 480.0];
 
 /// The size to open the window with: the saved one, never below the
@@ -53,6 +54,15 @@ pub(crate) fn seen_size(
     }
     let inner = inner.filter(|v| v.x >= 1.0 && v.y >= 1.0)?;
     Some(WindowSize { width: pixels(inner.x), height: pixels(inner.y), maximized: false })
+}
+
+/// Room the screen leaves around a window: taskbar and title bar.
+const SCREEN_MARGIN: f32 = 100.0;
+
+/// Whether the first size fits a monitor of this size; when it does not,
+/// the window opens maximized instead.
+pub(crate) fn first_size_fits(monitor: eframe::egui::Vec2) -> bool {
+    monitor.x >= DEFAULT_SIZE[0] && monitor.y >= DEFAULT_SIZE[1] + SCREEN_MARGIN
 }
 
 #[expect(clippy::cast_possible_truncation, clippy::cast_sign_loss, reason = "rounded and clamped to u16")]
@@ -111,5 +121,11 @@ mod tests {
         assert_eq!(max, Some(WindowSize { maximized: true, ..SAVED }));
         assert_eq!(seen_size(Some(vec2(1024.0, 700.0)), false, true, Some(SAVED)), None, "minimized");
         assert_eq!(seen_size(None, false, false, Some(SAVED)), None, "not known yet");
+    }
+
+    #[test]
+    fn the_first_size_fits_a_full_hd_screen_at_100_but_not_at_125_percent() {
+        assert!(first_size_fits(vec2(1920.0, 1080.0)));
+        assert!(!first_size_fits(vec2(1536.0, 864.0)));
     }
 }

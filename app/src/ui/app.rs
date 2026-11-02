@@ -105,6 +105,8 @@ pub struct ArcheionApp {
     /// When the window took a size not saved yet: it is saved once the
     /// resizing stops.
     resized_at: Option<Instant>,
+    /// The first size was checked against the screen.
+    fitted: bool,
 }
 
 /// The automatic merge, which runs while the window is open (it has no
@@ -195,6 +197,7 @@ impl ArcheionApp {
             help: Help::default(),
             preferences: Preferences::default(),
             resized_at: None,
+            fitted: false,
         }
     }
 
@@ -250,15 +253,22 @@ impl ArcheionApp {
     /// Saves the window's size once the user stops resizing it (at once
     /// when the window closes), so the next start opens it the same.
     fn remember_size(&mut self, ctx: &egui::Context) {
-        let (inner, maximized, minimized, closing) = ctx.input(|i| {
+        let (inner, maximized, minimized, closing, monitor) = ctx.input(|i| {
             let v = i.viewport();
-            (
-                v.inner_rect.map(|r| r.size()),
-                v.maximized == Some(true),
-                v.minimized == Some(true),
-                v.close_requested(),
-            )
+            let size = v.inner_rect.map(|r| r.size());
+            (size, v.maximized == Some(true), v.minimized == Some(true), v.close_requested(), v.monitor_size)
         });
+        // First start on a small screen: maximized rather than cut off.
+        // The monitor may be unknown in the first frames: checked once known.
+        if self.settings.window_size.is_none()
+            && !self.fitted
+            && let Some(m) = monitor
+        {
+            self.fitted = true;
+            if !super::first_size_fits(m) {
+                ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(true));
+            }
+        }
         let seen = super::seen_size(inner, maximized, minimized, self.settings.window_size);
         if seen.is_none() || seen == self.settings.window_size {
             self.resized_at = None;

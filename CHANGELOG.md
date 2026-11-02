@@ -10,6 +10,9 @@ All notable changes to Archeion are listed here. The format follows
 
 - The window opens at the size it last had, maximized if it was; the
   size is saved a second after resizing stops, or when the window closes.
+  The first time it opens at 1100 × 820, enough for every setting of a
+  profile without scrolling, or maximized on a smaller screen. Controls
+  and rows are a little closer together.
 - `ARCHEION_DATA_DIR` names another data folder (settings and logs); the
   commands without a window read the password of an encrypted profile from
   `ARCHEION_PASSWORD` when none is saved. Both serve the end-to-end tests,

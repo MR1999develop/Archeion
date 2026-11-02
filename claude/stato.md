@@ -4,9 +4,9 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con la dimensione della finestra ricordata (ramo
-`feature/window-size` unito; `tools\check.bat` verde: fmt, clippy, 313
-test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
+`main` con la prima dimensione più grande (ramo `feature/first-size`
+unito; `tools\check.bat` verde: fmt, clippy, 314 test, 1 ignorato: le
+schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
 ## Lavoro in corso
@@ -69,3 +69,7 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   alla chiusura, applicata all'avvio mai sotto il minimo 760×480. La
   posizione non si salva: Windows la sceglie (niente finestre fuori da
   uno schermo staccato).
+- Prima dimensione 1100×820 (tutte le impostazioni di un profilo senza
+  scorrere), ingrandita se lo schermo è più basso di 920 px logici;
+  controlli alti 24 e righe a 6 px (`theme::CONTROL_HEIGHT`, `ROW_GAP`).
+  Le schermate di prova usano la stessa prima dimensione.
