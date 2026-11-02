@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` su Rust 1.99.1 con le dipendenze aggiornate (ramo
-`feature/rust-1.99` unito; `tools\check.bat` verde: fmt, clippy, 315
+`main` con la prima dimensione 1200×1000 (ramo `feature/size-1200`
+unito; `tools\check.bat` verde: fmt, clippy, 315
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -69,8 +69,9 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   alla chiusura, applicata all'avvio mai sotto il minimo 760×480. La
   posizione non si salva: Windows la sceglie (niente finestre fuori da
   uno schermo staccato).
-- Prima dimensione 1100×820 (tutte le impostazioni di un profilo senza
-  scorrere), ingrandita se lo schermo è più basso di 920 px logici;
+- Prima dimensione 1200×1000 (tutte le impostazioni di un profilo senza
+  scorrere), ingrandita se lo schermo è più basso di 1100 px logici
+  (Full HD compreso);
   controlli alti 24 e righe a 6 px (`theme::CONTROL_HEIGHT`, `ROW_GAP`).
   Le schermate di prova usano la stessa prima dimensione.
 - Toolchain fissata a 1.99.1 (`rust-toolchain.toml`, CI, MSRV 1.99): il
