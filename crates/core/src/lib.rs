@@ -44,4 +44,4 @@ pub use run::{
     RestoreReport, RunEvent, Skipped, Summary, Tally, VerifyReport,
 };
 pub use schedule::{Schedule, TimeOfDay, Weekday};
-pub use settings::{Language, Settings, WindowOptions};
+pub use settings::{Language, Settings, WindowOptions, WindowSize};

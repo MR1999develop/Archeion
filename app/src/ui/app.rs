@@ -35,6 +35,8 @@ const SPINNER_DELAY: Duration = Duration::from_secs(1);
 /// Scheduled tasks are updated this long after the last schedule edit, so
 /// dragging a time does not start `schtasks.exe` at every step.
 const SCHEDULE_DEBOUNCE: Duration = Duration::from_secs(1);
+/// A new window size is saved once it stays the same this long.
+const RESIZE_SETTLE: Duration = Duration::from_secs(1);
 /// The automatic merge looks for work this long after the window opens,
 /// then at this interval, and shortly after each backup.
 const AUTO_MERGE_FIRST: Duration = Duration::from_secs(30);
@@ -100,6 +102,9 @@ pub struct ArcheionApp {
     help: Help,
     /// The Preferences window: language and window behaviour.
     preferences: Preferences,
+    /// When the window took a size not saved yet: it is saved once the
+    /// resizing stops.
+    resized_at: Option<Instant>,
 }
 
 /// The automatic merge, which runs while the window is open (it has no
@@ -189,6 +194,7 @@ impl ArcheionApp {
             wake: None,
             help: Help::default(),
             preferences: Preferences::default(),
+            resized_at: None,
         }
     }
 
@@ -238,6 +244,33 @@ impl ArcheionApp {
             self.apply_schedule(id);
         } else {
             ctx.request_repaint_after(SCHEDULE_DEBOUNCE.saturating_sub(since.elapsed()));
+        }
+    }
+
+    /// Saves the window's size once the user stops resizing it (at once
+    /// when the window closes), so the next start opens it the same.
+    fn remember_size(&mut self, ctx: &egui::Context) {
+        let (inner, maximized, minimized, closing) = ctx.input(|i| {
+            let v = i.viewport();
+            (
+                v.inner_rect.map(|r| r.size()),
+                v.maximized == Some(true),
+                v.minimized == Some(true),
+                v.close_requested(),
+            )
+        });
+        let seen = super::seen_size(inner, maximized, minimized, self.settings.window_size);
+        if seen.is_none() || seen == self.settings.window_size {
+            self.resized_at = None;
+            return;
+        }
+        let since = *self.resized_at.get_or_insert_with(Instant::now);
+        if closing || since.elapsed() >= RESIZE_SETTLE {
+            self.settings.window_size = seen;
+            self.resized_at = None;
+            self.save();
+        } else {
+            ctx.request_repaint_after(RESIZE_SETTLE.saturating_sub(since.elapsed()));
         }
     }
 
@@ -1118,6 +1151,7 @@ impl eframe::App for ArcheionApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         self.window_events(&ctx);
+        self.remember_size(&ctx);
         self.poll();
         self.update_tray();
         if self.close_after_run && self.job.is_none() {

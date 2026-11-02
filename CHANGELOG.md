@@ -8,6 +8,8 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Added
 
+- The window opens at the size it last had, maximized if it was; the
+  size is saved a second after resizing stops, or when the window closes.
 - `ARCHEION_DATA_DIR` names another data folder (settings and logs); the
   commands without a window read the password of an encrypted profile from
   `ARCHEION_PASSWORD` when none is saved. Both serve the end-to-end tests,
