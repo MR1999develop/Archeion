@@ -82,8 +82,16 @@ if ($running.Count -gt 0) {
 Write-Log 'No copy of target\release\archeion.exe is running.' 'Green'
 $before = if (Test-Path $exe) { (Get-Item $exe).LastWriteTime } else { $null }
 
-# 2. Build, showing cargo's output as it comes.
+# 2. Build, showing cargo's output as it comes. Local folders (this one and
+# cargo's) are rewritten in the paths the compiler embeds, and the linker
+# names the .pdb without its folder, so the executable names no user or
+# folder of this PC.
 Write-Header '2/3 cargo build --release'
+$cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME '.cargo' }
+$remaps = @("--remap-path-prefix=$root=archeion", "--remap-path-prefix=$cargoHome=cargo",
+    '-Clink-arg=/PDBALTPATH:%_PDB%')
+$env:CARGO_ENCODED_RUSTFLAGS = $remaps -join [char]0x1f
+Write-Log "Paths:     $root -> archeion, $cargoHome -> cargo"
 $command = "cargo build --release --locked -p archeion $cargoVerbose".Trim()
 Write-Log "> $command" 'DarkGray'
 $watch = [System.Diagnostics.Stopwatch]::StartNew()
@@ -121,6 +129,17 @@ Write-Log "SHA-256:   $hash"
 if ($before -and $item.LastWriteTime -eq $before) {
     Write-Log 'Unchanged since the last build: nothing to recompile.' 'Yellow'
 }
+# Local folders must not appear in the executable.
+$text = [System.Text.Encoding]::GetEncoding(28591).GetString([System.IO.File]::ReadAllBytes($exe))
+$found = @($root, $HOME, $cargoHome) | Where-Object {
+    $text.IndexOf($_, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+    $text.IndexOf($_.Replace('\', '/'), [StringComparison]::OrdinalIgnoreCase) -ge 0
+}
+if ($found) {
+    Write-Log "Local paths found in the executable: $($found -join ', ')" 'Red'
+    Stop-Script 1
+}
+Write-Log 'No local path in the executable.' 'Green'
 $old = Join-Path $root 'target\release\archeion.exe'
 if (Test-Path $old) {
     Write-Log 'Note: target\release\archeion.exe (the old name) is still there; delete it.' 'Yellow'

@@ -32,8 +32,6 @@ $Trailers = @(
     'Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>'
     'Claude-Session: https://claude.ai/code/session_01MXC7KQwLfPvfbbuZdPzBSm'
 )
-$DefaultName = 'MR'
-$DefaultEmail = 'MR1999develop@users.noreply.github.com'
 $MaxSubject = 72
 $MaxFileMb = 100
 $WarnFileMb = 50
@@ -276,13 +274,10 @@ if ($tooBig.Count -gt 0) {
 Write-Header '6/6 Commit'
 $name = Get-GitValue @('config', 'user.name')
 $email = Get-GitValue @('config', 'user.email')
-if (-not $name) {
-    Invoke-Tool git @('config', 'user.name', $DefaultName) | Out-Null
-    $name = $DefaultName
-}
-if (-not $email) {
-    Invoke-Tool git @('config', 'user.email', $DefaultEmail) | Out-Null
-    $email = $DefaultEmail
+if (-not $name -or -not $email) {
+    Write-Log 'No git author: set git config user.name and user.email, then run again.' 'Red'
+    Write-Log 'Nothing was committed; the files stay staged until then.' 'Red'
+    Stop-Script 1
 }
 Write-Log "Author: $name <$email>"
 $gitDir = Get-GitValue @('rev-parse', '--absolute-git-dir')

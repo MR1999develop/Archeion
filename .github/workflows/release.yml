@@ -37,7 +37,7 @@ jobs:
           $name = "Archeion-$env:GITHUB_REF_NAME-windows-x64-portable"
           $dir = "dist/$name"
           New-Item -ItemType Directory -Force $dir | Out-Null
-          Copy-Item target/release/archeion.exe, README.md, CHANGELOG.md, LICENSE-MIT, LICENSE-APACHE $dir
+          Copy-Item target/release/archeion.exe, README.md, CHANGELOG.md, LICENSE $dir
           # portable.txt keeps settings and logs in a data folder next to the exe.
           Set-Content "$dir/portable.txt" "Settings and logs are kept in the data folder next to archeion.exe."
           Compress-Archive -Path "$dir/*" -DestinationPath "dist/$name.zip"

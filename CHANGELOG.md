@@ -8,6 +8,10 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Changed
 
+- Archeion is now licensed under the GNU General Public License,
+  version 3 only (`LICENSE`), instead of MIT or Apache-2.0. The release
+  build leaves no local folder in `archeion.exe`.
+
 - Restoring is redesigned. Backups > "Restore files" shows one tree of
   every file and folder the profile's backups ever saved, with the search
   above it; files no longer at the source are marked "deleted" (icon and

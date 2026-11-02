@@ -17,8 +17,8 @@ if exist app\src\secrets.rs del /q app\src\secrets.rs
 if exist crates\engine\tests\local_repository.rs del /q crates\engine\tests\local_repository.rs
 echo == git init
 git init -b main || exit /b 1
-git config user.email >nul 2>&1 || git config user.email "MR1999develop@users.noreply.github.com"
-git config user.name >nul 2>&1 || git config user.name "MR"
+git config user.email >nul 2>&1 || (echo No git author: set git config user.email first. & exit /b 1)
+git config user.name >nul 2>&1 || (echo No git author: set git config user.name first. & exit /b 1)
 echo == git add
 git add -A || exit /b 1
 git status --short

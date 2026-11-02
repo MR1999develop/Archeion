@@ -28,9 +28,6 @@ trigger it. Remove an item when it is done or no longer applies.
   `archeion.exe` window is closed: Windows locks a running executable.
 - **Old `target\release\archeion.exe`** stays after the rename to
   Archeion; delete it by hand (or with `cargo clean`) so nobody starts it.
-- **Repository folder** on the PC is
-  `the repository folder` (since 1
-  November; before, `another folder` on another PC).
 
 ## Encryption, backup kinds and deletion (added 30/10)
 
