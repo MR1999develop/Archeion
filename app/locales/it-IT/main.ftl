@@ -179,6 +179,16 @@ deleted-since = Non è nel backup più recente: eliminato dall'origine.
 tree-deleted-file = Non è nel backup più recente: eliminato dall'origine. Spuntalo per ripristinarne una versione.
 tree-deleted-folder = Non è nel backup più recente: eliminata dall'origine. Spuntala per ripristinarla com'era in una data.
 remove-from-selection = Togli dalla selezione
+tick-in-folder = Ripristinato con la cartella spuntata { $folder }. Togli la spunta a quella cartella per scegliere i file uno per uno.
+tick-not-in-folder-date = Non è nel backup con cui torna la cartella spuntata { $folder }: non viene ripristinato. Togli la spunta a quella cartella per sceglierlo da solo.
+tick-partial = Dentro questa cartella c'è qualcosa di spuntato. Spunta la cartella per ripristinarla tutta.
+card-show-options = Fai clic per vedere e cambiare versioni, data e destinazione.
+card-summary-file = { $versions ->
+    [one] 1 versione → { $dest }
+   *[other] { $versions } versioni → { $dest }
+}
+card-summary-folder = Com'era il { $date } → { $dest }
+dest-several = più destinazioni
 selection-empty = Ancora niente da ripristinare. Spunta file o cartelle nell'albero: ognuno compare qui con le sue versioni o la sua data, e con la destinazione.
 folder-as-of = Com'era il:
 folder-as-of-hint = La cartella torna per intero, con tutto quello che conteneva in quella data.

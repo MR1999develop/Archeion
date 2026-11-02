@@ -4,12 +4,14 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` dopo il passaggio a GPLv3 (`tools\check.bat` verde: fmt, clippy,
-294 test; `tools\release.bat` verde, nessun percorso locale nell'exe).
+`main` con le spunte dell'albero di ripristino (ramo
+`feature/restore-tree-ticks` unito; `tools\check.bat` verde: fmt, clippy,
+297 test). La build di rilascio è stata controllata al commit GPLv3
+(nessun percorso locale nell'exe).
 
 ## Lavoro in corso
 
-- Nessuno.
+- Nessuno. Da provare a mano: albero di ripristino (vedi `TIDY.md`).
 
 ## Punti aperti
 
@@ -30,3 +32,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
   quella di cargo nell'exe e fallisce se le trova.
 - Gli script git non impostano più un autore predefinito: senza
   `user.name`/`user.email` si fermano.
+- Albero di ripristino: una cartella spuntata decide per tutto ciò che
+  contiene (spunte grigie, non modificabili) e sostituisce le scelte fatte
+  dentro di essa; lo stato si calcola in `Tree::tick`, testato senza egui.
+  Lo stato parziale è la casella "indeterminate" di egui riempita
+  (`fill_box`). Con più schede, solo quella evidenziata mostra le opzioni.

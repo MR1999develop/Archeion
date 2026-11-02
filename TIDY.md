@@ -19,6 +19,14 @@ trigger it. Remove an item when it is done or no longer applies.
   `feature/automatic-backup`, `tools\github_publish.bat` (pushes `main`
   and the feature branch), `tools\git_push.bat -PullRequest`; read the
   four `.log` files.
+- **Try the restore tree by hand** (added 2 November): tick a folder
+  (its content ticked and greyed, files missing at its date unticked),
+  tick a file deep inside a folder (filled box on every folder above,
+  aligned with the box at every zoom), several items (only the
+  highlighted card shows its options; clicking another card's name or
+  line moves the highlight). Unticking one file inside a ticked folder is
+  not possible: it would need exclusions in the engine's restore items;
+  add them if the folder-then-untick habit turns out common.
 - **Try the window by hand**: the tests cover the engine, not the egui
   screens. Create a profile, back up, browse versions, merge, restore.
   Check also the Activity tab during a long backup, the exclusion list

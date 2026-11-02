@@ -33,6 +33,34 @@ impl Node {
     }
 }
 
+/// Something ticked in the selection, as the tree needs it.
+#[derive(Debug, Clone, Copy)]
+pub struct Ticked<'a> {
+    pub key: &'a str,
+    /// For a folder, the backup it comes back as.
+    pub folder_archive: Option<&'a str>,
+}
+
+/// How the tick box of a node shows the selection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tick {
+    Off,
+    /// Ticked itself.
+    On,
+    /// A folder with something ticked inside it.
+    Partial,
+    /// Inside a ticked folder, in the backup that folder comes back as:
+    /// restored with it. `folder` is the nearest ticked folder.
+    InFolder {
+        folder: usize,
+    },
+    /// Inside a ticked folder but not in the backup it comes back as: the
+    /// folder does not bring it back.
+    NotInFolderDate {
+        folder: usize,
+    },
+}
+
 #[derive(Debug, Default)]
 pub struct Tree {
     /// Sorted by key.
@@ -93,6 +121,32 @@ impl Tree {
     /// The backups listing `node`, newest first.
     pub fn dates(&self, node: &Node) -> Vec<&CatalogArchive> {
         node.entry.archives_newest_first().filter_map(|i| self.archives.get(i)).collect()
+    }
+
+    /// How `node` shows `ticked`. Its own tick wins; then the nearest
+    /// ticked folder holding it; then, for a folder, anything ticked inside.
+    pub fn tick(&self, node: &Node, ticked: &[Ticked<'_>]) -> Tick {
+        let key = node.key();
+        if ticked.iter().any(|t| t.key == key) {
+            return Tick::On;
+        }
+        let holder = ticked
+            .iter()
+            .filter_map(|t| t.folder_archive.map(|a| (t.key, a)))
+            .filter(|(k, _)| keys::is_within(key, k))
+            .max_by_key(|(k, _)| k.len());
+        if let Some((folder_key, archive)) = holder
+            && let Ok(folder) = self.nodes.binary_search_by(|n| n.key().cmp(folder_key))
+        {
+            let listed = self.archives.iter().position(|a| a.name == archive).is_some_and(|pos| {
+                node.entry.present.iter().any(|&(first, last)| (first..=last).contains(&pos))
+            });
+            return if listed { Tick::InFolder { folder } } else { Tick::NotInFolderDate { folder } };
+        }
+        if node.is_dir() && ticked.iter().any(|t| t.key != key && keys::is_within(t.key, key)) {
+            return Tick::Partial;
+        }
+        Tick::Off
     }
 
     /// Files whose name contains `query` (case-insensitive), in key order,
@@ -174,6 +228,72 @@ mod tests {
         assert_eq!(hits, vec!["C/Report/REPORT.docx"]);
         assert!(t.search("", 10).is_empty());
         assert_eq!(t.search("t", 1).len(), 1);
+    }
+
+    fn tick_of(t: &Tree, key: &str, ticked: &[Ticked<'_>]) -> Tick {
+        t.tick(t.find(key).unwrap(), ticked)
+    }
+
+    fn folder<'a>(key: &'a str, archive: &'a str) -> Ticked<'a> {
+        Ticked { key, folder_archive: Some(archive) }
+    }
+
+    fn file(key: &str) -> Ticked<'_> {
+        Ticked { key, folder_archive: None }
+    }
+
+    #[test]
+    fn a_ticked_folder_ticks_what_it_held_at_its_date() {
+        let t = Tree::build(catalog(vec![
+            entry("C/Docs", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/old.txt", EntryKind::File, vec![(0, 0)]),
+            entry("C/Docs/sub", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/sub/a.txt", EntryKind::File, vec![(1, 2)]),
+            entry("C/Docs2/b.txt", EntryKind::File, vec![(0, 2)]),
+        ]));
+        let docs = t.nodes.binary_search_by(|n| n.key().cmp("C/Docs")).unwrap();
+        let ticked = [folder("C/Docs", "a2")];
+        assert_eq!(tick_of(&t, "C/Docs", &ticked), Tick::On);
+        assert_eq!(tick_of(&t, "C/Docs/sub", &ticked), Tick::InFolder { folder: docs });
+        assert_eq!(tick_of(&t, "C/Docs/sub/a.txt", &ticked), Tick::InFolder { folder: docs });
+        assert_eq!(tick_of(&t, "C/Docs/old.txt", &ticked), Tick::NotInFolderDate { folder: docs });
+        assert_eq!(tick_of(&t, "C/Docs2/b.txt", &ticked), Tick::Off, "a sibling sharing the prefix");
+
+        // At the oldest date, old.txt is there and a.txt is not.
+        let ticked = [folder("C/Docs", "a0")];
+        assert_eq!(tick_of(&t, "C/Docs/old.txt", &ticked), Tick::InFolder { folder: docs });
+        assert_eq!(tick_of(&t, "C/Docs/sub/a.txt", &ticked), Tick::NotInFolderDate { folder: docs });
+    }
+
+    #[test]
+    fn the_nearest_ticked_folder_decides() {
+        let t = Tree::build(catalog(vec![
+            entry("C/Docs", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/sub", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/sub/a.txt", EntryKind::File, vec![(2, 2)]),
+        ]));
+        let sub = t.nodes.binary_search_by(|n| n.key().cmp("C/Docs/sub")).unwrap();
+        let ticked = [folder("C/Docs", "a0"), folder("C/Docs/sub", "a2")];
+        assert_eq!(tick_of(&t, "C/Docs/sub", &ticked), Tick::On);
+        assert_eq!(tick_of(&t, "C/Docs/sub/a.txt", &ticked), Tick::InFolder { folder: sub });
+    }
+
+    #[test]
+    fn folders_above_a_ticked_file_are_partial() {
+        let t = Tree::build(catalog(vec![
+            entry("C/Docs", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/sub", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/sub/a.txt", EntryKind::File, vec![(0, 2)]),
+            entry("C/Docs/z.txt", EntryKind::File, vec![(0, 2)]),
+            entry("C/Other", EntryKind::Dir, vec![(0, 2)]),
+        ]));
+        let ticked = [file("C/Docs/sub/a.txt")];
+        assert_eq!(tick_of(&t, "C/Docs", &ticked), Tick::Partial);
+        assert_eq!(tick_of(&t, "C/Docs/sub", &ticked), Tick::Partial);
+        assert_eq!(tick_of(&t, "C/Docs/sub/a.txt", &ticked), Tick::On);
+        assert_eq!(tick_of(&t, "C/Docs/z.txt", &ticked), Tick::Off, "a file is never partial");
+        assert_eq!(tick_of(&t, "C/Other", &ticked), Tick::Off);
+        assert_eq!(tick_of(&t, "C/Docs", &[]), Tick::Off);
     }
 
     #[test]

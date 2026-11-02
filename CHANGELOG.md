@@ -8,6 +8,13 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Changed
 
+- Restore files: ticking a folder ticks everything it held at the date it
+  comes back as (greyed: the folder decides; files missing from that
+  backup stay unticked) and replaces what was ticked inside it. The
+  folders above a ticked file or folder show a filled box. With several
+  items in the selection, only the highlighted card (the last ticked, or
+  the one clicked) shows its versions, date and destination; the others
+  show one line with what goes where.
 - Archeion is now licensed under the GNU General Public License,
   version 3 only (`LICENSE`), instead of MIT or Apache-2.0. The release
   build leaves no local folder in `archeion.exe`.

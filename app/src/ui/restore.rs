@@ -6,7 +6,11 @@
 //! one card per ticked file (its versions, the newest ticked) or folder
 //! (the date it comes back as), each version or folder with its
 //! destination, the default destination at the top and the Restore button
-//! at the bottom. The decisions are in [`crate::restore_plan`].
+//! at the bottom. A ticked folder ticks everything it held at its date;
+//! the folders above a ticked item show a filled box. With several cards,
+//! only the highlighted one (the last ticked, or the last clicked) shows
+//! its options; the others show one line. The decisions are in
+//! [`crate::restore_plan`].
 //!
 //! "Manage backups": the list of dates with the manual merge and the
 //! deletion of one backup ([`super::backups`]).
@@ -20,7 +24,7 @@ use super::{
     backups::BackupsView,
     load::{Load, Problem},
     theme,
-    tree::{Node, Tree},
+    tree::{Node, Tick, Ticked, Tree},
 };
 use crate::{
     credentials,
@@ -31,7 +35,7 @@ use archeion_core::{EntryKind, Profile, ProfileId, keys};
 use archeion_engine::{FileVersion, RestoreRequest};
 use eframe::egui::{self, Context, RichText, Ui, collapsing_header::CollapsingState};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
@@ -77,6 +81,8 @@ pub struct RestoreView {
     hits: Option<Vec<usize>>,
     /// The selection, in the order things were ticked.
     picks: Vec<Pick>,
+    /// Key of the highlighted card, the one showing its options.
+    focused: Option<String>,
     /// Versions of the ticked files, by key.
     versions: HashMap<String, Load<Vec<FileVersion>>>,
     /// Bytes of a ticked folder at a date, by key and archive.
@@ -91,6 +97,8 @@ pub struct RestoreView {
 #[derive(Debug)]
 enum CardEdit {
     Remove(usize),
+    /// Highlight this card.
+    Focus(usize),
     /// Tick or untick the version at this position of the file's list.
     Version {
         card: usize,
@@ -148,6 +156,7 @@ impl RestoreView {
         self.profile = Some(id);
         self.trees.retain(|_, (_, t)| !matches!(t, Load::Failed(_)));
         self.picks.clear();
+        self.focused = None;
         self.versions.clear();
         self.folder_sizes.clear();
         self.query.clear();
@@ -235,18 +244,25 @@ impl RestoreView {
     }
 
     /// Ticks or unticks the node `idx`. A ticked file reads its versions,
-    /// a ticked folder comes back as it was in the newest backup listing it.
+    /// a ticked folder comes back as it was in the newest backup listing it
+    /// and takes the place of what was ticked inside it. What is ticked
+    /// becomes the highlighted card.
     fn toggle(&mut self, ctx: &Context, profile: &Profile, idx: usize) {
         let Some(tree) = self.trees.get(&profile.id).and_then(|(_, t)| t.ready()) else { return };
         let Some(node) = tree.node(idx) else { return };
         let key = node.key().to_owned();
         if let Some(pos) = self.picks.iter().position(|p| p.key() == key) {
             self.picks.remove(pos);
+            if self.focused.as_deref() == Some(key.as_str()) {
+                self.focused = None;
+            }
             return;
         }
+        self.focused = Some(key.clone());
         if node.is_dir() {
             let Some(newest) = tree.dates(node).first().map(|a| a.name.clone()) else { return };
             spawn_folder_size(&mut self.folder_sizes, ctx, profile, &key, &newest);
+            self.picks.retain(|p| !keys::is_within(p.key(), &key));
             self.picks.push(Pick::Folder { key, archive: newest, dest: None, size: None });
         } else {
             if self.versions.get(&key).is_none_or(|l| matches!(l, Load::Failed(_))) {
@@ -287,13 +303,13 @@ impl RestoreView {
         let mut toggled: Vec<usize> = Vec::new();
         match self.trees.get(&profile.id).map(|(_, t)| t) {
             Some(Load::Ready(tree)) => {
-                let picked: HashSet<&str> = self.picks.iter().map(Pick::key).collect();
+                let ticked: Vec<Ticked<'_>> = self.picks.iter().map(ticked).collect();
                 if tree.files == 0 {
                     ui.weak(tr.t("no-backups-yet"));
                 } else if self.query.trim().is_empty() {
-                    tree_list_ui(ui, tr, tree, &picked, &mut toggled);
+                    tree_list_ui(ui, tr, tree, &ticked, &mut toggled);
                 } else {
-                    hits_ui(ui, tr, tree, self.hits.as_deref(), &picked, &mut toggled);
+                    hits_ui(ui, tr, tree, self.hits.as_deref(), &ticked, &mut toggled);
                 }
             }
             Some(other) => other.status_ui(ui, tr, &tr.t("reading-backups")),
@@ -320,6 +336,7 @@ impl RestoreView {
             request = go_ui(ui, tr, &plan);
             if !self.picks.is_empty() && ui.link(tr.t("clear-selection")).clicked() {
                 self.picks.clear();
+                self.focused = None;
             }
             ui.add_space(theme::SPACE_S);
         });
@@ -327,6 +344,7 @@ impl RestoreView {
         if request.is_some() {
             // Started: the Activity tab shows it; the selection is done.
             self.picks.clear();
+            self.focused = None;
         }
         request
     }
@@ -338,36 +356,56 @@ impl RestoreView {
             return;
         }
         let tree = self.trees.get(&profile.id).and_then(|(_, t)| t.ready());
+        let several = self.picks.len() > 1;
         let mut edits: Vec<CardEdit> = Vec::new();
         egui::ScrollArea::vertical().id_salt("cards").auto_shrink(false).show(ui, |ui| {
             for (card, pick) in self.picks.iter_mut().enumerate() {
-                ui.push_id(("card", pick.key().to_owned()), |ui| {
-                    let node = tree.and_then(|t| t.find(pick.key()));
-                    if card_header(ui, tr, pick.key(), node) {
-                        edits.push(CardEdit::Remove(card));
-                    }
-                    match pick {
-                        Pick::File { key, versions, .. } => {
-                            let read = self.versions.get(key.as_str());
-                            file_card(ui, tr, &self.default, plan, card, read, versions, &mut edits);
+                let focused = !several || self.focused.as_deref() == Some(pick.key());
+                let mut frame = egui::Frame::new().inner_margin(theme::SPACE_S).corner_radius(theme::RADIUS);
+                if several && focused {
+                    frame = frame.fill(ui.visuals().faint_bg_color).stroke(ui.visuals().selection.stroke);
+                }
+                frame.show(ui, |ui| {
+                    ui.push_id(("card", pick.key().to_owned()), |ui| {
+                        let node = tree.and_then(|t| t.find(pick.key()));
+                        match card_header(ui, tr, pick.key(), node, several.then_some(focused)) {
+                            HeaderClick::Remove => edits.push(CardEdit::Remove(card)),
+                            HeaderClick::Focus => edits.push(CardEdit::Focus(card)),
+                            HeaderClick::None => {}
                         }
-                        Pick::Folder { key, archive, dest, .. } => {
-                            let size = self.folder_sizes.get(&(key.clone(), archive.clone()));
-                            let dates = match (tree, node) {
-                                (Some(t), Some(n)) => t.dates(n),
-                                _ => Vec::new(),
-                            };
-                            folder_card(ui, tr, &self.default, card, archive, dest, &dates, size, &mut edits);
+                        let dates = match (tree, node) {
+                            (Some(t), Some(n)) => t.dates(n),
+                            _ => Vec::new(),
+                        };
+                        if focused {
+                            card_body(
+                                ui,
+                                tr,
+                                &self.default,
+                                plan,
+                                card,
+                                pick,
+                                &self.versions,
+                                &self.folder_sizes,
+                                &dates,
+                                &mut edits,
+                            );
+                        } else {
+                            let line = RichText::new(card_summary(tr, &self.default, pick, &dates)).weak();
+                            let resp = ui.add(egui::Label::new(line).sense(egui::Sense::click()));
+                            if resp.on_hover_text(tr.t("card-show-options")).clicked() {
+                                edits.push(CardEdit::Focus(card));
+                            }
                         }
-                    }
-                    if plan.conflicts.contains(&card) {
-                        ui.colored_label(
-                            ui.visuals().error_fg_color,
-                            format!("⚠ {}", tr.t("restore-conflict")),
-                        );
-                    }
+                        if plan.conflicts.contains(&card) {
+                            ui.colored_label(
+                                ui.visuals().error_fg_color,
+                                format!("⚠ {}", tr.t("restore-conflict")),
+                            );
+                        }
+                    });
                 });
-                ui.separator();
+                ui.add_space(theme::SPACE_XS);
             }
         });
         self.apply(ui.ctx(), profile, edits);
@@ -378,6 +416,7 @@ impl RestoreView {
         for edit in edits {
             match edit {
                 CardEdit::Remove(card) => removed.push(card),
+                CardEdit::Focus(card) => self.focused = self.picks.get(card).map(|p| p.key().to_owned()),
                 CardEdit::Version { card, index, on } => {
                     let Some(Pick::File { key, versions, .. }) = self.picks.get_mut(card) else { continue };
                     let Some(list) = self.versions.get(key.as_str()).and_then(Load::ready) else { continue };
@@ -405,7 +444,10 @@ impl RestoreView {
         removed.sort_unstable();
         for card in removed.into_iter().rev() {
             if card < self.picks.len() {
-                self.picks.remove(card);
+                let pick = self.picks.remove(card);
+                if self.focused.as_deref() == Some(pick.key()) {
+                    self.focused = None;
+                }
             }
         }
     }
@@ -434,15 +476,23 @@ fn spawn_folder_size(
     sizes.insert(slot, load);
 }
 
+/// What the tree needs to know of a card.
+fn ticked(pick: &Pick) -> Ticked<'_> {
+    match pick {
+        Pick::File { key, .. } => Ticked { key, folder_archive: None },
+        Pick::Folder { key, archive, .. } => Ticked { key, folder_archive: Some(archive) },
+    }
+}
+
 /// The whole tree, with its counts.
-fn tree_list_ui(ui: &mut Ui, tr: &Tr, tree: &Tree, picked: &HashSet<&str>, toggled: &mut Vec<usize>) {
+fn tree_list_ui(ui: &mut Ui, tr: &Tr, tree: &Tree, ticked: &[Ticked<'_>], toggled: &mut Vec<usize>) {
     ui.weak(
         tr.t_args("restore-tree-count", &[("files", arg(tree.files)), ("deleted", arg(tree.deleted_files))]),
     );
     ui.weak(tr.t("restore-tree-hint"));
     egui::ScrollArea::vertical().id_salt("tree").auto_shrink(false).show(ui, |ui| {
         for &r in &tree.roots {
-            node_ui(ui, tr, tree, r, picked, toggled);
+            node_ui(ui, tr, tree, r, ticked, toggled);
         }
     });
 }
@@ -453,7 +503,7 @@ fn hits_ui(
     tr: &Tr,
     tree: &Tree,
     hits: Option<&[usize]>,
-    picked: &HashSet<&str>,
+    ticked: &[Ticked<'_>],
     toggled: &mut Vec<usize>,
 ) {
     let Some(hits) = hits else { return };
@@ -465,10 +515,9 @@ fn hits_ui(
     egui::ScrollArea::vertical().id_salt("hits").auto_shrink(false).show(ui, |ui| {
         for &idx in hits {
             let Some(n) = tree.node(idx) else { continue };
-            let mut on = picked.contains(n.key());
             let path = keys::path_for(n.key()).display().to_string();
             let text = node_text(ui, tr, n, format!("📄 {path}   {}", tr.bytes(n.entry.size)));
-            if ui.checkbox(&mut on, text).on_hover_text(node_hint(tr, n)).changed() {
+            if tick_box(ui, tr, tree, n, tree.tick(n, ticked), text) {
                 toggled.push(idx);
             }
         }
@@ -477,30 +526,65 @@ fn hits_ui(
 
 /// One node of the tree, its children inside a collapsible header. Only
 /// the roots start open.
-fn node_ui(ui: &mut Ui, tr: &Tr, tree: &Tree, idx: usize, picked: &HashSet<&str>, toggled: &mut Vec<usize>) {
+fn node_ui(ui: &mut Ui, tr: &Tr, tree: &Tree, idx: usize, ticked: &[Ticked<'_>], toggled: &mut Vec<usize>) {
     let Some(n) = tree.node(idx) else { return };
-    let mut on = picked.contains(n.key());
+    let tick = tree.tick(n, ticked);
     if n.is_dir() {
         let id = ui.make_persistent_id(("tree", n.key()));
         let open = tree.roots.contains(&idx);
         CollapsingState::load_with_default_open(ui.ctx(), id, open)
             .show_header(ui, |ui| {
                 let text = node_text(ui, tr, n, format!("📁 {}", n.label));
-                if ui.checkbox(&mut on, text).on_hover_text(node_hint(tr, n)).changed() {
+                if tick_box(ui, tr, tree, n, tick, text) {
                     toggled.push(idx);
                 }
             })
             .body(|ui| {
                 for &c in &n.children {
-                    node_ui(ui, tr, tree, c, picked, toggled);
+                    node_ui(ui, tr, tree, c, ticked, toggled);
                 }
             });
     } else {
         let text = node_text(ui, tr, n, format!("📄 {}   {}", n.label, tr.bytes(n.entry.size)));
-        if ui.checkbox(&mut on, text).on_hover_text(node_hint(tr, n)).changed() {
+        if tick_box(ui, tr, tree, n, tick, text) {
             toggled.push(idx);
         }
     }
+}
+
+/// The tick box of a node; true when clicked. Inside a ticked folder the
+/// folder decides: the box is ticked (or not, if the folder's date lacks
+/// the item) and greyed. A folder with something ticked inside shows a
+/// filled box; clicking it ticks the whole folder.
+fn tick_box(ui: &mut Ui, tr: &Tr, tree: &Tree, n: &Node, tick: Tick, text: RichText) -> bool {
+    match tick {
+        Tick::InFolder { folder } | Tick::NotInFolderDate { folder } => {
+            let mut on = matches!(tick, Tick::InFolder { .. });
+            let id = if on { "tick-in-folder" } else { "tick-not-in-folder-date" };
+            let path = tree.node(folder).map(|f| keys::path_for(f.key()).display().to_string());
+            let hint = tr.t_args(id, &[("folder", arg(path.unwrap_or_default()))]);
+            ui.add_enabled(false, egui::Checkbox::new(&mut on, text)).on_disabled_hover_text(hint);
+            false
+        }
+        Tick::Partial => {
+            let mut on = false;
+            let resp = ui.add(egui::Checkbox::new(&mut on, text).indeterminate(true));
+            fill_box(ui, &resp);
+            resp.on_hover_text(format!("{}\n{}", tr.t("tick-partial"), node_hint(tr, n))).changed()
+        }
+        Tick::On | Tick::Off => {
+            let mut on = tick == Tick::On;
+            ui.checkbox(&mut on, text).on_hover_text(node_hint(tr, n)).changed()
+        }
+    }
+}
+
+/// Fills the box of a checkbox, over egui's dash for "indeterminate".
+fn fill_box(ui: &Ui, resp: &egui::Response) {
+    let s = ui.spacing();
+    let center = egui::pos2(resp.rect.left() + s.icon_width * 0.5, resp.rect.center().y);
+    let rect = egui::Rect::from_center_size(center, egui::Vec2::splat(s.icon_width_inner));
+    ui.painter().rect_filled(rect, 2.0, ui.style().interact(resp).fg_stroke.color);
 }
 
 /// A deleted node says so in words and with an icon, and is greyed.
@@ -521,20 +605,42 @@ fn node_hint(tr: &Tr, n: &Node) -> String {
     })
 }
 
-/// Name, folder and ✕ of a card; true when ✕ was clicked.
-fn card_header(ui: &mut Ui, tr: &Tr, key: &str, node: Option<&Node>) -> bool {
+/// What a click in a card header asks for.
+enum HeaderClick {
+    None,
+    Remove,
+    Focus,
+}
+
+/// Name, folder and ✕ of a card. With several cards (`focused` is `Some`)
+/// the name is selectable: clicking it highlights the card.
+fn card_header(ui: &mut Ui, tr: &Tr, key: &str, node: Option<&Node>, focused: Option<bool>) -> HeaderClick {
     let dir = node.is_some_and(Node::is_dir);
     let name = key.rsplit('/').next().unwrap_or(key);
     let path = keys::path_for(key);
-    let mut remove = false;
+    let mut click = HeaderClick::None;
     ui.horizontal(|ui| {
         let icon = if dir { "📁" } else { "📄" };
-        ui.strong(format!("{icon} {name}")).on_hover_text(path.display().to_string());
+        let title = RichText::new(format!("{icon} {name}")).strong();
+        let hover = path.display().to_string();
+        match focused {
+            Some(on) => {
+                let hover = format!("{hover}\n{}", tr.t("card-show-options"));
+                if ui.selectable_label(on, title).on_hover_text(hover).clicked() {
+                    click = HeaderClick::Focus;
+                }
+            }
+            None => {
+                ui.label(title).on_hover_text(hover);
+            }
+        }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let label = tr.t("remove-from-selection");
             let resp = ui.small_button("✕").on_hover_text(&label);
             resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
-            remove = resp.clicked();
+            if resp.clicked() {
+                click = HeaderClick::Remove;
+            }
         });
     });
     if let Some(parent) = path.parent() {
@@ -543,7 +649,64 @@ fn card_header(ui: &mut Ui, tr: &Tr, key: &str, node: Option<&Node>) -> bool {
     if node.is_some_and(|n| n.deleted) {
         ui.weak(format!("🗑 {}", tr.t("deleted-since")));
     }
-    remove
+    click
+}
+
+/// The options of the highlighted card: versions or date, and destination.
+#[expect(clippy::too_many_arguments, reason = "one card: its parts are drawn together")]
+fn card_body(
+    ui: &mut Ui,
+    tr: &Tr,
+    default: &DefaultDest,
+    plan: &Plan,
+    card: usize,
+    pick: &mut Pick,
+    versions: &HashMap<String, Load<Vec<FileVersion>>>,
+    folder_sizes: &HashMap<(String, String), Load<u64>>,
+    dates: &[&archeion_engine::CatalogArchive],
+    edits: &mut Vec<CardEdit>,
+) {
+    match pick {
+        Pick::File { key, versions: ticked, .. } => {
+            file_card(ui, tr, default, plan, card, versions.get(key.as_str()), ticked, edits);
+        }
+        Pick::Folder { key, archive, dest, .. } => {
+            let size = folder_sizes.get(&(key.clone(), archive.clone()));
+            folder_card(ui, tr, default, card, archive, dest, dates, size, edits);
+        }
+    }
+}
+
+/// One line for a card that is not highlighted: what it restores and where.
+fn card_summary(
+    tr: &Tr,
+    default: &DefaultDest,
+    pick: &Pick,
+    dates: &[&archeion_engine::CatalogArchive],
+) -> String {
+    let dest_of = |dest: Option<&Dest>| match dest {
+        None => default_text(tr, default),
+        Some(d) => format!("✎ {}", dest_text(tr, d)),
+    };
+    match pick {
+        Pick::File { versions, .. } => {
+            let dest = match versions.split_first() {
+                None => default_text(tr, default),
+                Some((first, rest)) if rest.iter().all(|v| v.dest == first.dest) => {
+                    dest_of(first.dest.as_ref())
+                }
+                Some(_) => format!("✎ {}", tr.t("dest-several")),
+            };
+            tr.t_args("card-summary-file", &[("versions", arg(versions.len())), ("dest", arg(dest))])
+        }
+        Pick::Folder { archive, dest, .. } => {
+            let date = dates
+                .iter()
+                .find(|a| a.name == *archive)
+                .map_or_else(|| archive.clone(), |a| a.label.clone());
+            tr.t_args("card-summary-folder", &[("date", arg(date)), ("dest", arg(dest_of(dest.as_ref())))])
+        }
+    }
 }
 
 /// The versions of a ticked file, each tickable; under a ticked one, its

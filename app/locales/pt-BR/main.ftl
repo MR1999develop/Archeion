@@ -179,6 +179,16 @@ deleted-since = Não está no backup mais recente: excluído na origem.
 tree-deleted-file = Não está no backup mais recente: excluído na origem. Marque-o para restaurar uma de suas versões.
 tree-deleted-folder = Não está no backup mais recente: excluída na origem. Marque-a para restaurá-la como estava em uma data.
 remove-from-selection = Remover da seleção
+tick-in-folder = Restaurado com a pasta marcada { $folder }. Desmarque essa pasta para escolher os arquivos um a um.
+tick-not-in-folder-date = Não está no backup com que volta a pasta marcada { $folder }: não é restaurado. Desmarque essa pasta para escolhê-lo sozinho.
+tick-partial = Há algo marcado dentro desta pasta. Marque a pasta para restaurá-la inteira.
+card-show-options = Clique para ver e mudar as versões, a data e o destino.
+card-summary-file = { $versions ->
+    [one] 1 versão → { $dest }
+   *[other] { $versions } versões → { $dest }
+}
+card-summary-folder = Como estava em { $date } → { $dest }
+dest-several = vários destinos
 selection-empty = Ainda não há nada para restaurar. Marque arquivos ou pastas na árvore: cada um aparece aqui com suas versões ou sua data, e com o destino.
 folder-as-of = Como estava em:
 folder-as-of-hint = A pasta volta inteira, com tudo o que continha naquela data.

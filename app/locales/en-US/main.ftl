@@ -179,6 +179,16 @@ deleted-since = Not in the newest backup: deleted at the source.
 tree-deleted-file = Not in the newest backup: deleted at the source. Tick it to restore one of its versions.
 tree-deleted-folder = Not in the newest backup: deleted at the source. Tick it to restore it as it was on a date.
 remove-from-selection = Remove from the selection
+tick-in-folder = Restored with the ticked folder { $folder }. Untick that folder to choose files one by one.
+tick-not-in-folder-date = Not in the backup that the ticked folder { $folder } comes back as: it is not restored. Untick that folder to choose this item on its own.
+tick-partial = Something inside this folder is ticked. Tick the folder to restore it whole.
+card-show-options = Click to see and change its versions, date and destination.
+card-summary-file = { $versions ->
+    [one] 1 version → { $dest }
+   *[other] { $versions } versions → { $dest }
+}
+card-summary-folder = As it was on { $date } → { $dest }
+dest-several = several destinations
 selection-empty = Nothing to restore yet. Tick files or folders in the tree: each one appears here with its versions or its date, and where it will go.
 folder-as-of = As it was on:
 folder-as-of-hint = The folder comes back whole, with everything it held on that date.
