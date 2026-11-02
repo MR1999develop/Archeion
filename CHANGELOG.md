@@ -6,6 +6,15 @@ All notable changes to Archeion are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `ARCHEION_DATA_DIR` names another data folder (settings and logs); the
+  commands without a window read the password of an encrypted profile from
+  `ARCHEION_PASSWORD` when none is saved. Both serve the end-to-end tests,
+  which run the executable on temporary folders, and the tests that drive
+  the Restore files view and check that every character of the interface
+  can be drawn.
+
 ### Changed
 
 - Encrypted destinations use new key derivation contexts (key format 3):

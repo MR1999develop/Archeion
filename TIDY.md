@@ -19,16 +19,16 @@ trigger it. Remove an item when it is done or no longer applies.
   `feature/automatic-backup`, `tools\github_publish.bat` (pushes `main`
   and the feature branch), `tools\git_push.bat -PullRequest`; read the
   four `.log` files.
-- **Try the restore tree by hand** (added 2 November): tick a folder
-  (its content ticked, files missing at its date unticked and greyed),
-  untick a file and a subfolder inside it (filled box on the folder and
-  the folders between, aligned with the box at every zoom; the card
-  counts the items left out and the size drops), tick again a file inside
-  an unticked subfolder (only that path comes back), click the filled box
-  (whole folder again), tick a file deep inside an unticked folder
-  (filled box on every folder above), several items (only the
-  highlighted card shows its options; clicking another card's name or
-  line moves the highlight), then restore and compare.
+- **Look at the restore tree** (added 2 November): ticking, unticking,
+  the filled boxes and the request are tested (`ui/restore_tests.rs`,
+  `tests/cli.rs`); what tests cannot see is whether the filled box sits
+  exactly in the tick box at every zoom, and whether the highlighted card
+  reads well. Snapshot tests (egui_kittest `snapshot` feature, needs a
+  GPU renderer) would cover it if it ever drifts.
+- **Accessibility of the filled box**: egui exposes a partial tick box as
+  neither ticked nor unticked (no "mixed" state in `WidgetInfo`), so a
+  screen reader does not say "partly ticked". Add it to the hover text or
+  label if a screen-reader user needs it.
 - **Try the window by hand**: the tests cover the engine, not the egui
   screens. Create a profile, back up, browse versions, merge, restore.
   Check also the Activity tab during a long backup, the exclusion list

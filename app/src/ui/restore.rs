@@ -958,3 +958,7 @@ fn go_ui(ui: &mut Ui, tr: &Tr, plan: &Plan) -> Option<RestoreRequest> {
     }
     request
 }
+
+#[cfg(test)]
+#[path = "restore_tests.rs"]
+mod tests;

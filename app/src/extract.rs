@@ -25,8 +25,9 @@ use std::{
 
 /// Environment variable holding the recovery key.
 const RECOVERY_KEY_VAR: &str = "ARCHEION_RECOVERY_KEY";
-/// Environment variable holding the password.
-const PASSWORD_VAR: &str = "ARCHEION_PASSWORD";
+/// Environment variable holding the password (also read by the other
+/// commands when no password is saved).
+pub(crate) const PASSWORD_VAR: &str = "ARCHEION_PASSWORD";
 /// Name of the log written in the target folder.
 const LOG_NAME: &str = "archeion-extract.log";
 

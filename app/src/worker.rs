@@ -5,13 +5,14 @@
 //! profile), 4 password missing or wrong (encrypted destination).
 //!
 //! The password of an encrypted profile comes from Windows Credential
-//! Manager. Every run writes its log (see [`crate::history`]). A scheduled
+//! Manager or, when none is saved, from the `ARCHEION_PASSWORD`
+//! environment variable (the end-to-end tests). Every run writes its log (see [`crate::history`]). A scheduled
 //! run that fails shows a Windows notification when the profile asks for
 //! it (see [`crate::notify`]).
 
 use crate::{activity::Op, credentials, history, i18n::Tr, notify, storage::Storage};
 use archeion_core::{BackupMode, ProfileId, RunEvent};
-use archeion_engine::{EngineError, EventSink, RestoreRequest};
+use archeion_engine::{EngineError, EventSink, Password, RestoreRequest};
 use std::{io::Write as _, path::PathBuf, process::ExitCode, sync::Mutex};
 
 /// What the worker does.
@@ -193,7 +194,9 @@ pub fn run(storage: &Storage, id: ProfileId, work: Work, scheduled: bool, log: O
         }
     };
     // Read even for profiles not set to encrypt: the destination decides.
-    let password = credentials::get_or_none(id);
+    let password = credentials::get_or_none(id).or_else(|| {
+        std::env::var(crate::extract::PASSWORD_VAR).ok().filter(|p| !p.is_empty()).and_then(Password::new)
+    });
     let pw = password.as_ref();
     // The engine reports progress and the final summary itself.
     let result = match work {

@@ -14,6 +14,13 @@
 - Alla fine di ogni blocco di lavoro aggiornare `TIDY.md` (cose rimandate) e
   il documento di stato del progetto `claude/stato.md` (ultimo commit
   controllato, lavoro in corso, punti aperti, decisioni).
+- Prove senza l'utente: `tools\check.bat` comprende i test end-to-end
+  dell'eseguibile (`app/tests/cli.rs`: backup, ripristino con esclusioni,
+  cifratura, verify, merge, delete, extract su cartelle temporanee, con
+  `ARCHEION_DATA_DIR` e `ARCHEION_PASSWORD`, mai le impostazioni vere) e i
+  test della finestra con egui_kittest (`app/src/ui/restore_tests.rs`).
+  Ogni nuova funzione di backup o ripristino aggiunge un caso lì; un test
+  nuovo si vede fallire iniettando un guasto prima di fidarsene.
 - Licenza `GPL-3.0-only` (testo in `LICENSE`), copyright e autori **MR**;
   nessun dato personale (nome, email, percorsi locali) nei file né negli
   eseguibili: `tools\release.bat` riscrive i percorsi e controlla l'exe.

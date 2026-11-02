@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo build *)",
+      "Bash(cargo check *)",
+      "Bash(cargo test *)",
+      "Bash(cargo clippy *)",
+      "Bash(cargo fmt *)",
+      "Bash(cargo run *)",
+      "Bash(cargo tree *)",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File tools/check.ps1 *)",
+      "Bash(powershell -NoProfile -ExecutionPolicy Bypass -File tools/release.ps1 *)",
+      "Bash(tools/check.bat *)",
+      "Bash(tools/release.bat *)",
+      "Bash(target/debug/archeion.exe *)",
+      "Bash(target/release/archeion.exe *)",
+      "Bash(git status *)",
+      "Bash(git diff *)",
+      "Bash(git log *)",
+      "Bash(git show *)",
+      "Bash(git branch *)",
+      "Bash(git switch *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git merge *)",
+      "PowerShell(cargo build *)",
+      "PowerShell(cargo check *)",
+      "PowerShell(cargo test *)",
+      "PowerShell(cargo clippy *)",
+      "PowerShell(cargo fmt *)",
+      "PowerShell(tools\\check.bat *)",
+      "PowerShell(tools\\release.bat *)"
+    ],
+    "deny": [
+      "Bash(git push *)",
+      "PowerShell(git push *)",
+      "Bash(cargo publish *)",
+      "PowerShell(cargo publish *)"
+    ]
+  }
+}

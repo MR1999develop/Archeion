@@ -4,14 +4,15 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` senza il primo nome del programma (ramo
-`feature/drop-old-name` unito; `tools\check.bat` verde: fmt, clippy,
-299 test). La build di rilascio è stata controllata al commit GPLv3
+`main` con i test end-to-end e della finestra (ramo
+`feature/e2e-tests` unito; `tools\check.bat` verde: fmt, clippy,
+310 test). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
 ## Lavoro in corso
 
-- Nessuno. Da provare a mano: albero di ripristino (vedi `TIDY.md`).
+- Nessuno. Da guardare a mano solo l'aspetto dell'albero di ripristino
+  (vedi `TIDY.md`).
 
 ## Punti aperti
 
@@ -44,3 +45,9 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
   testato senza egui.
   Lo stato parziale è la casella "indeterminate" di egui riempita
   (`fill_box`). Con più schede, solo quella evidenziata mostra le opzioni.
+- Prove autonome: `app/tests/cli.rs` esegue `archeion.exe` su cartelle
+  temporanee (`ARCHEION_DATA_DIR`, `ARCHEION_PASSWORD`), i test egui_kittest
+  guidano la vista di ripristino con i font di sistema come eframe
+  (`egui_system_font_provider`), un test controlla che ogni carattere
+  dell'interfaccia e delle 9 lingue si possa disegnare. Permessi dei
+  comandi ripetitivi in `.claude/settings.json` (push e publish negati).

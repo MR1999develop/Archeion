@@ -2,7 +2,9 @@
 //!
 //! Installed copy: `%APPDATA%\Archeion\config\settings.toml`. Portable
 //! copy: a `portable.txt` file next to the executable moves everything to a
-//! `data` folder beside it.
+//! `data` folder beside it. The `ARCHEION_DATA_DIR` environment variable
+//! names another folder: the end-to-end tests run the executable that way,
+//! away from the user's settings.
 
 use anyhow::Context as _;
 use archeion_core::Settings;
@@ -16,6 +18,8 @@ const SETTINGS_FILE: &str = "settings.toml";
 const LOG_FILE: &str = "archeion.log";
 /// Above this size the log is restarted at the next launch.
 const LOG_LIMIT_BYTES: u64 = 5 * 1024 * 1024;
+/// Data folder chosen from outside, before the portable and installed ones.
+pub const DATA_DIR_VAR: &str = "ARCHEION_DATA_DIR";
 
 #[derive(Debug, Clone)]
 pub struct Storage {
@@ -23,8 +27,12 @@ pub struct Storage {
 }
 
 impl Storage {
-    /// Chooses the portable or installed data folder and creates it.
+    /// Chooses the data folder (from [`DATA_DIR_VAR`], portable or
+    /// installed) and creates it.
     pub fn locate() -> anyhow::Result<Self> {
+        if let Some(dir) = std::env::var_os(DATA_DIR_VAR).filter(|d| !d.is_empty()) {
+            return Self::at(PathBuf::from(dir));
+        }
         let exe = std::env::current_exe().context("finding the executable")?;
         let exe_dir = exe.parent().context("executable has no folder")?;
         let dir = if exe_dir.join("portable.txt").exists() {
