@@ -3,10 +3,7 @@
 
 use crate::{
     EngineError, Result,
-    crypto::{
-        KEY_FILE, KEY_FORMAT, Keys, LEGACY_KEY_FILE, LEGACY_LIST_MAC_FILE, LIST_MAC_FILE, Password,
-        decrypt_single, encrypt_single,
-    },
+    crypto::{KEY_FILE, KEY_FORMAT, Keys, LIST_MAC_FILE, Password, decrypt_single, encrypt_single},
 };
 use archeion_core::{ArchiveInfo, ArchiveName, EntryKind, Manifest, Profile, ProfileId};
 use serde::{Deserialize, Serialize};
@@ -18,12 +15,6 @@ use std::{
 
 const DESCRIPTOR: &str = "archeion.json";
 const LOCK: &str = "archeion.lock";
-/// Names written by Archeion, the program's first name, and their new
-/// names; renamed the first time the destination is opened for writing.
-const LEGACY_DESCRIPTOR: &str = "archeion.json";
-const LEGACY_LOCK: &str = "archeion.lock";
-const LEGACY_NAMES: [(&str, &str); 3] =
-    [(LEGACY_DESCRIPTOR, DESCRIPTOR), (LEGACY_KEY_FILE, KEY_FILE), (LEGACY_LIST_MAC_FILE, LIST_MAC_FILE)];
 const JOURNAL: &str = "merge.journal";
 pub(crate) const MANIFEST: &str = "manifest.jsonl";
 /// Encrypted manifest of an archive of an encrypted destination.
@@ -176,7 +167,6 @@ impl Repo {
             }
             fs::create_dir_all(&root).map_err(EngineError::io(format!("creating {}", root.display())))?;
         }
-        migrate_legacy_names(&root)?;
         let descriptor = read_descriptor(&root)?;
         if descriptor.as_ref().is_some_and(|d| d.profile != profile.id) {
             return Err(EngineError::ForeignDestination);
@@ -255,9 +245,7 @@ impl Repo {
             let keys = Keys::create(&self.root, password)?;
             (Some(EncryptionInfo { version: KEY_FORMAT }), Some(keys))
         } else {
-            for name in
-                [KEY_FILE, LIST_MAC_FILE, LEGACY_KEY_FILE, LEGACY_LIST_MAC_FILE, "archeion.check.zip"]
-            {
+            for name in [KEY_FILE, LIST_MAC_FILE] {
                 let path = self.root.join(name);
                 if path.exists() {
                     fs::remove_file(&path)
@@ -516,28 +504,8 @@ pub(crate) enum Purpose {
     Merge,
 }
 
-/// Renames the files of a destination written by Archeion to their
-/// Archeion names; the old lock file is removed when no one holds it.
-fn migrate_legacy_names(root: &Path) -> Result<()> {
-    for (old, new) in LEGACY_NAMES {
-        let (old, new) = (root.join(old), root.join(new));
-        if old.exists() && !new.exists() {
-            tracing::info!(file = %old.display(), "renaming a file written by Archeion");
-            fs::rename(&old, &new).map_err(EngineError::io(format!("renaming {}", old.display())))?;
-        }
-    }
-    let lock = root.join(LEGACY_LOCK);
-    if lock.exists() {
-        let _ = fs::remove_file(lock);
-    }
-    Ok(())
-}
-
 fn read_descriptor(root: &Path) -> Result<Option<Descriptor>> {
-    // Read-only queries may meet a destination not yet migrated.
-    let legacy = root.join(LEGACY_DESCRIPTOR);
-    let path =
-        if !root.join(DESCRIPTOR).exists() && legacy.exists() { legacy } else { root.join(DESCRIPTOR) };
+    let path = root.join(DESCRIPTOR);
     match fs::read_to_string(&path) {
         Ok(text) => serde_json::from_str(&text)
             .map(Some)

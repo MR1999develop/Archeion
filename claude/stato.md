@@ -4,9 +4,9 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con le esclusioni nell'albero di ripristino (ramo
-`feature/restore-exclusions` unito; `tools\check.bat` verde: fmt, clippy,
-302 test). La build di rilascio è stata controllata al commit GPLv3
+`main` senza il primo nome del programma (ramo
+`feature/drop-old-name` unito; `tools\check.bat` verde: fmt, clippy,
+299 test). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
 ## Lavoro in corso
@@ -15,9 +15,7 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Punti aperti
 
-- `Archeion`, il primo nome del programma, resta nel codice di migrazione
-  (cartella dati, Credential Manager, task pianificati) e nei documenti che
-  lo spiegano: serve a ritrovare i dati delle installazioni precedenti.
+- Nessuno.
 
 ## Decisioni
 
@@ -30,6 +28,11 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
   da riscrivere sono locali e non devono finire in un file versionato.
   Lo script poi cerca la cartella del progetto, la cartella utente e
   quella di cargo nell'exe e fallisce se le trova.
+- Il primo nome del programma è tolto ovunque, cronologia compresa: niente
+  migrazione da installazioni precedenti; chiavi derivate con contesti
+  "Archeion 2026-11-02 … v3" e `KEY_FORMAT` 3, quindi le destinazioni
+  cifrate create prima non si aprono più (messaggio "test version no
+  longer supported") e vanno ricreate.
 - Gli script git non impostano più un autore predefinito: senza
   `user.name`/`user.email` si fermano.
 - Albero di ripristino: una cartella spuntata spunta tutto ciò che

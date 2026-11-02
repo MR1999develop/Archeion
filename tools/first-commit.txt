@@ -1,6 +1,6 @@
 Initial version of Archeion: archive-based incremental backups
 
-Archeion (ancient Greek for "archive"; first called Archeion) is a
+Archeion (ancient Greek for "archive") is a
 Windows backup program in Rust and egui with Deja Dup's convenience and
 Areca's archive model.
 

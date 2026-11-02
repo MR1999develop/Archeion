@@ -193,8 +193,7 @@ impl ArcheionApp {
     /// Checks in the background that every automatic profile has its
     /// scheduled tasks and that they start this executable, registering
     /// them again otherwise: the program was moved, a portable copy runs
-    /// from another folder, or the tasks were deleted by hand. The first
-    /// time, also removes the tasks of Archeion (the program's first name).
+    /// from another folder, or the tasks were deleted by hand.
     fn start_task_sync(&mut self) {
         let exe = match std::env::current_exe() {
             Ok(exe) => exe,
@@ -203,7 +202,6 @@ impl ArcheionApp {
                 return;
             }
         };
-        let remove_legacy = self.storage.first_time("tasks-renamed");
         let user = windows_user();
         let specs: Vec<TaskSpec> =
             self.settings.profiles.iter().flat_map(|p| task_specs(p, &exe, &user)).collect();
@@ -211,7 +209,7 @@ impl ArcheionApp {
         let start_with_windows = self.settings.window.start_with_windows;
         let (tx, rx) = mpsc::channel();
         let spawned = std::thread::Builder::new().name("task-sync".into()).spawn(move || {
-            let mut problems = sync_tasks(&specs, remove_legacy);
+            let mut problems = sync_tasks(&specs);
             problems.extend(sync_watch(watch, &exe, &user));
             if let Err(e) = autostart::sync(start_with_windows, &exe) {
                 tracing::error!(error = %e, "updating the start with Windows");
@@ -1220,14 +1218,11 @@ fn sync_watch(wanted: bool, exe: &std::path::Path, user: &str) -> Vec<String> {
 }
 
 /// Registers again the tasks of `specs` that are missing, start another
-/// executable, or should not exist (manual schedule); with `remove_legacy`,
-/// first deletes the tasks Archeion registered. Returns the problems met.
-fn sync_tasks(specs: &[TaskSpec], remove_legacy: bool) -> Vec<String> {
+/// executable, or should not exist (manual schedule). Returns the problems
+/// met.
+fn sync_tasks(specs: &[TaskSpec]) -> Vec<String> {
     let mut problems = Vec::new();
     for spec in specs {
-        if remove_legacy && let Err(e) = WindowsTaskScheduler.remove_legacy(spec.profile_id, spec.kind) {
-            tracing::warn!(error = %e, kind = ?spec.kind, "removing a Archeion task");
-        }
         let registered = match WindowsTaskScheduler.registered_executable(spec.profile_id, spec.kind) {
             Ok(r) => r,
             Err(SchedulerError::Unsupported) => return problems,

@@ -140,10 +140,6 @@ if ($found) {
     Stop-Script 1
 }
 Write-Log 'No local path in the executable.' 'Green'
-$old = Join-Path $root 'target\release\archeion.exe'
-if (Test-Path $old) {
-    Write-Log 'Note: target\release\archeion.exe (the old name) is still there; delete it.' 'Yellow'
-}
 $total = [math]::Round(((Get-Date) - $started).TotalSeconds, 1)
 Write-Log ''
 Write-Log "Total time: $total s" 

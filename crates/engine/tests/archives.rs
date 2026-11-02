@@ -985,35 +985,6 @@ fn a_damaged_copy_in_the_unfinished_backup_is_copied_again() {
     assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
 }
 
-#[test]
-fn a_destination_written_by_archeion_is_renamed_and_still_opens() {
-    let mut f = fixture(Container::ZipPerFile);
-    f.profile.encrypted = true;
-    let secret = pw("correct horse battery");
-    backup(&f.profile, Some(&secret), BackupMode::Auto, &Recorder::default()).unwrap();
-    let dest = f.profile.destination.path().to_path_buf();
-    for (new, old) in [
-        ("archeion.json", "archeion.json"),
-        ("archeion.key.json", "archeion.key.json"),
-        ("archeion.archives.mac", "archeion.archives.mac"),
-        ("archeion.lock", "archeion.lock"),
-    ] {
-        fs::rename(dest.join(new), dest.join(old)).unwrap();
-    }
-
-    // Read-only queries work before the first write…
-    assert_eq!(list_archives(&f.profile, Some(&secret)).unwrap().len(), 1);
-    check_password(&f.profile, &secret).unwrap();
-    // …and the next backup renames everything.
-    sleep(Duration::from_millis(1100));
-    backup(&f.profile, Some(&secret), BackupMode::Auto, &Recorder::default()).unwrap();
-    let names = all_paths(&dest);
-    assert!(!names.iter().any(|n| n.starts_with("archeion")), "{names:?}");
-    assert!(names.iter().any(|n| n == "archeion.key.json"));
-    let v = verify(&f.profile, Some(&secret), None, &Recorder::default()).unwrap();
-    assert!(v.problems.is_empty(), "{:?}", v.problems);
-}
-
 impl Recorder {
     /// Every file of the [`RunEvent::Files`] events, in order.
     fn listed(&self) -> Vec<FileDone> {

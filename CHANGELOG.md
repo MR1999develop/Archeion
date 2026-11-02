@@ -8,6 +8,10 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Changed
 
+- Encrypted destinations use new key derivation contexts (key format 3):
+  those created before cannot be opened any more and must be created
+  again. Settings, saved passwords and scheduled tasks of earlier test
+  builds under another name are no longer taken over.
 - Restore files: ticking a folder ticks everything it held at the date it
   comes back as (files missing from that backup stay unticked and greyed)
   and replaces what was ticked inside it. Unticking a file or folder

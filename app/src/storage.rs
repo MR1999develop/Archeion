@@ -1,10 +1,8 @@
 //! Where settings and logs live, and how they are written.
 //!
-//! Installed copy: `%APPDATA%\Archeion\config\settings.toml` (moved there
-//! from `%APPDATA%\Archeion\config`, the program's first name, at the first
-//! launch). Portable copy:
-//! a `portable.txt` file next to the executable moves everything to a `data`
-//! folder beside it.
+//! Installed copy: `%APPDATA%\Archeion\config\settings.toml`. Portable
+//! copy: a `portable.txt` file next to the executable moves everything to a
+//! `data` folder beside it.
 
 use anyhow::Context as _;
 use archeion_core::Settings;
@@ -32,29 +30,11 @@ impl Storage {
         let dir = if exe_dir.join("portable.txt").exists() {
             exe_dir.join("data")
         } else {
-            let dirs = |name| {
-                directories::ProjectDirs::from("", "", name)
-                    .map(|d| d.config_dir().to_path_buf())
-                    .context("no user profile folder")
-            };
-            let dir = dirs("Archeion")?;
-            move_legacy_folder(&dirs("Archeion")?, &dir);
-            dir
+            directories::ProjectDirs::from("", "", "Archeion")
+                .map(|d| d.config_dir().to_path_buf())
+                .context("no user profile folder")?
         };
         Self::at(dir)
-    }
-
-    /// True once, the first time it is asked: for one-off migrations that
-    /// leave a marker file named `name` in the data folder.
-    pub fn first_time(&self, name: &str) -> bool {
-        let marker = self.dir.join(name);
-        if marker.exists() {
-            return false;
-        }
-        if let Err(e) = fs::write(&marker, b"") {
-            tracing::warn!(error = %e, "writing {}", marker.display());
-        }
-        true
     }
 
     /// Storage in an explicit folder (tests).
@@ -139,25 +119,6 @@ fn remove_requests_older_than(dir: &Path, age: std::time::Duration) {
     }
 }
 
-/// Moves the data folder of Archeion to `new` when `new` does not exist
-/// yet; on failure the old folder stays and is simply no longer used.
-fn move_legacy_folder(old: &Path, new: &Path) {
-    if new.exists() || !old.exists() {
-        return;
-    }
-    let moved = new.parent().map_or(Ok(()), fs::create_dir_all).and_then(|()| fs::rename(old, new));
-    match moved {
-        Ok(()) => {
-            tracing::info!(from = %old.display(), to = %new.display(), "data folder moved");
-            // `%APPDATA%\Archeion` is left empty: remove it if so.
-            if let Some(parent) = old.parent() {
-                let _ = fs::remove_dir(parent);
-            }
-        }
-        Err(e) => tracing::warn!(error = %e, from = %old.display(), "moving the old data folder"),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -182,23 +143,6 @@ mod tests {
     }
 
     #[test]
-    fn the_old_data_folder_moves_once_and_never_over_a_new_one() {
-        let dir = tempfile::tempdir().unwrap();
-        let old = dir.path().join("Archeion").join("config");
-        let new = dir.path().join("Archeion").join("config");
-        fs::create_dir_all(&old).unwrap();
-        fs::write(old.join(SETTINGS_FILE), "x").unwrap();
-        move_legacy_folder(&old, &new);
-        assert_eq!(fs::read_to_string(new.join(SETTINGS_FILE)).unwrap(), "x");
-        assert!(!dir.path().join("Archeion").exists());
-
-        fs::create_dir_all(&old).unwrap();
-        fs::write(old.join(SETTINGS_FILE), "older").unwrap();
-        move_legacy_folder(&old, &new);
-        assert_eq!(fs::read_to_string(new.join(SETTINGS_FILE)).unwrap(), "x");
-    }
-
-    #[test]
     fn only_old_restore_requests_are_removed() {
         let dir = tempfile::tempdir().unwrap();
         for name in ["restore-1.json", "settings.toml", "restore-notes.txt"] {
@@ -210,14 +154,6 @@ mod tests {
         assert!(!dir.path().join("restore-1.json").exists());
         assert!(dir.path().join("settings.toml").exists());
         assert!(dir.path().join("restore-notes.txt").exists());
-    }
-
-    #[test]
-    fn a_marker_answers_true_only_the_first_time() {
-        let dir = tempfile::tempdir().unwrap();
-        let s = Storage::at(dir.path().to_path_buf()).unwrap();
-        assert!(s.first_time("done"));
-        assert!(!s.first_time("done"));
     }
 
     #[test]

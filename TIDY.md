@@ -36,8 +36,6 @@ trigger it. Remove an item when it is done or no longer applies.
   first backup.
 - **Rebuild the release executable** (`tools\release.bat`) once the
   `archeion.exe` window is closed: Windows locks a running executable.
-- **Old `target\release\archeion.exe`** stays after the rename to
-  Archeion; delete it by hand (or with `cargo clean`) so nobody starts it.
 
 ## Encryption, backup kinds and deletion (added 30/10)
 
@@ -204,13 +202,7 @@ trigger it. Remove an item when it is done or no longer applies.
 - **`tools\probe.bat`** is a leftover of the restic experiments; delete it
   together with its log when convenient.
 
-## Rename to Archeion
-
-- **Migration code** for Archeion names (destination files, data folder,
-  Credential Manager entries, scheduled tasks) can go once no copy of the
-  old name is in use; keep the key derivation contexts, which still say
-  "Archeion" on purpose: changing them would make encrypted backups
-  unreadable.
+## Name
 - **Trademark check** was only a web search (no software or backup product
   called Archeion found; Archeion is also the Archives Association of
   Ontario's archival portal). Search TMview before a public release.

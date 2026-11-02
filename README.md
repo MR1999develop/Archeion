@@ -13,9 +13,7 @@ content-defined chunks, so an incremental stores only the parts that
 changed; complete backups keep every file whole
 ([docs/large-files.md](docs/large-files.md)).
 
-The name is the ancient Greek ἀρχεῖον, "archive". The program was first
-called Archeion; destinations, settings, saved passwords and scheduled tasks
-of that name are renamed automatically.
+The name is the ancient Greek ἀρχεῖον, "archive".
 
 ## Layout
 

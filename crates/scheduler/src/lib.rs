@@ -114,12 +114,6 @@ pub fn task_name(id: ProfileId, kind: TaskKind) -> String {
     format!(r"\Archeion\{id}-{}", kind.suffix())
 }
 
-/// Task path used by Archeion, the program's first name.
-#[must_use]
-pub fn legacy_task_name(id: ProfileId, kind: TaskKind) -> String {
-    format!(r"\Archeion\{id}-{}", kind.suffix())
-}
-
 /// Task path of the daily check that warns about profiles not backed up
 /// for too long (one for all profiles).
 pub const WATCH_TASK: &str = r"\Archeion\watch";
@@ -388,15 +382,6 @@ impl WindowsTaskScheduler {
             delete_task(WATCH_TASK).map(|_| ())
         }
     }
-
-    /// Removes the task Archeion registered for `id`, which starts an
-    /// executable that no longer exists. Returns true when there was one.
-    ///
-    /// # Errors
-    /// See [`SchedulerError`].
-    pub fn remove_legacy(&self, id: ProfileId, kind: TaskKind) -> Result<bool, SchedulerError> {
-        delete_task(&legacy_task_name(id, kind))
-    }
 }
 
 /// True when the task of `spec` must be registered again: a wanted task
@@ -626,7 +611,6 @@ mod tests {
         assert_eq!(task_name(id, TaskKind::Backup), format!(r"\Archeion\{id}-backup"));
         assert_eq!(task_name(id, TaskKind::Merge), format!(r"\Archeion\{id}-merge"));
         assert_eq!(task_name(id, TaskKind::Events), format!(r"\Archeion\{id}-events"));
-        assert_eq!(legacy_task_name(id, TaskKind::Merge), format!(r"\Archeion\{id}-merge"));
     }
 
     #[test]

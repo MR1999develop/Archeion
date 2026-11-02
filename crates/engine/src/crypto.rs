@@ -36,19 +36,16 @@ pub(crate) type Options<'k> = FileOptions<'k, 'static, ()>;
 
 /// The wrapped master key and how to unwrap it.
 pub(crate) const KEY_FILE: &str = "archeion.key.json";
-/// [`KEY_FILE`] as named by Archeion, the program's first name.
-pub(crate) const LEGACY_KEY_FILE: &str = "archeion.key.json";
 /// Signature of the list of archives.
 pub(crate) const LIST_MAC_FILE: &str = "archeion.archives.mac";
-/// [`LIST_MAC_FILE`] as named by Archeion.
-pub(crate) const LEGACY_LIST_MAC_FILE: &str = "archeion.archives.mac";
 /// Format of [`KEY_FILE`].
-pub(crate) const KEY_FORMAT: u32 = 2;
-// Key derivation contexts: fixed forever, whatever the program is called
-// (changing them would make existing backups unreadable).
-const NAME_KEY_CONTEXT: &str = "Archeion 2026-10-30 file name key v2";
-const LIST_KEY_CONTEXT: &str = "Archeion 2026-10-30 archive list key v2";
-const NOTE_KEY_CONTEXT: &str = "Archeion 2026-10-31 resume note key v1";
+/// 3 since the key derivation contexts below changed.
+pub(crate) const KEY_FORMAT: u32 = 3;
+// Key derivation contexts: fixed forever from now on, whatever the program
+// is called (changing them makes existing backups unreadable).
+const NAME_KEY_CONTEXT: &str = "Archeion 2026-11-02 file name key v3";
+const LIST_KEY_CONTEXT: &str = "Archeion 2026-11-02 archive list key v3";
+const NOTE_KEY_CONTEXT: &str = "Archeion 2026-11-02 resume note key v3";
 const CHUNK_KEY_CONTEXT: &str = "Archeion 2026-11-01 chunk name key v1";
 /// Bytes of the authentication tag of a sealed note.
 const NOTE_TAG: usize = 16;
@@ -245,10 +242,7 @@ impl Keys {
     /// # Errors
     /// [`EngineError::WrongPassword`] when it does not open the key file.
     pub(crate) fn unlock(root: &Path, password: &Password) -> Result<Self> {
-        // A destination not yet opened for writing may still use the old name.
-        let legacy = root.join(LEGACY_KEY_FILE);
-        let path =
-            if !root.join(KEY_FILE).exists() && legacy.exists() { legacy } else { root.join(KEY_FILE) };
+        let path = root.join(KEY_FILE);
         let text =
             std::fs::read_to_string(&path).map_err(EngineError::io(format!("reading {}", path.display())))?;
         let damaged =
