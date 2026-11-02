@@ -23,17 +23,30 @@ no-folders = Nessuna cartella: aggiungine almeno una.
 add-folder = Aggiungi cartella…
 remove-folder = Togli questa cartella dal backup
 exclusions = Esclusioni
-exclusions-hint = I modelli valgono sul percorso completo, per esempio **/node_modules o **/*.tmp.
+exclusions-hint = Un modello vale sul percorso completo, senza distinguere maiuscole e minuscole: * qualsiasi testo in un nome, ** qualsiasi cartella, ? un carattere. Per esempio **/node_modules, **/cache/**, **/~$*.
 destination = Destinazione
 dest-local = Cartella o disco esterno
 dest-network = Cartella di rete
-dest-hint = Usa una cartella riservata a questo profilo. I backup non sono cifrati: chi può aprirla può leggerli.
+dest-hint = Usa una cartella riservata a questo profilo. Se la cifratura (qui sotto) non è attiva, chi può aprirla può leggere i backup.
+dest-free = Spazio libero sulla destinazione: { $free }
+dest-foreign-profile = Questa cartella contiene i backup del profilo "{ $name }": scegli un'altra cartella per questo profilo.
+dest-foreign-deleted = Questa cartella contiene i backup di un profilo che non esiste più.
+dest-adopt = Usa questi backup per questo profilo
+dest-adopt-hint = I backup esistenti diventano di questo profilo: il prossimo backup li continua, e da qui si possono ripristinare e unire.
+dest-adopt-failed = Impossibile prendere in carico i backup: { $detail }
+dest-foreign-hint = La destinazione contiene i backup di un altro profilo: vedi la sezione Destinazione.
+run-foreign-destination = La destinazione contiene i backup di un altro profilo. Apri le impostazioni del profilo: se quel profilo è stato eliminato, "Usa questi backup per questo profilo" li prende in carico.
 browse = Sfoglia…
 container = Formato
 container-zip-per-file = Uno zip per file
 container-folder = Copie semplici
 container-zip-per-file-hint = Ogni file è compresso da solo (relazione.docx diventa relazione.docx.zip) nelle stesse cartelle; si apre con Esplora file o 7-Zip.
 container-folder-hint = I file sono copiati così come sono, con gli stessi nomi, senza compressione.
+large-files = Salva i file grandi solo come modifiche, da
+large-files-unit = MB
+large-files-hint = I file di almeno questa dimensione sono salvati a pezzi: dopo una modifica, un backup memorizza solo i pezzi cambiati. I backup completi li conservano anche interi, così si aprono ancora con 7-Zip. I file più piccoli sono salvati come sopra.
+large-files-change-hint = Puoi cambiarla quando vuoi: i backup successivi seguono la nuova soglia, quelli già fatti restano come sono.
+large-files-encrypted = Ogni file è salvato a pezzi, così di un file modificato si memorizza solo ciò che è cambiato; i backup completi conservano anche le copie intere.
 schedule = Backup automatico
 schedule-manual = Solo quando lo avvio io
 schedule-daily = Ogni giorno
@@ -42,7 +55,9 @@ at = alle
 schedule-hint = Se a quell'ora il computer è spento, parte appena si riaccende.
 merge = Unione dei backup vecchi
 merge-hint = I backup vecchi non vengono cancellati ma uniti al successivo che resta: ogni data conservata rimane completa e lo spazio si libera. Il primo backup completo non viene mai unito in automatico.
-retention-hint = Un backup resta se almeno una regola lo sceglie.
+merge-automatic-hint = L'unione è automatica: mentre Archeion è in esecuzione unisce i backup vecchi secondo le regole qui sotto, mai mentre un backup o un'altra operazione li sta usando.
+retention-hint = Un backup resta se almeno una regola lo sceglie. I backup degli ultimi giorni indicati in "Tutti, per giorni" non vengono mai uniti.
+keep-within = Tutti, per giorni
 keep-last = Più recenti
 keep-daily = Uno al giorno, per giorni
 keep-weekly = Uno a settimana, per settimane
@@ -55,7 +70,11 @@ merge-now-hint = Applica subito le regole di unione; il primo backup completo re
 busy-hint = Un backup o un'unione è già in corso.
 fix-profile-hint = Completa prima il profilo.
 delete-profile = Elimina profilo
-delete-profile-hint = Toglie il profilo e le sue attività pianificate; i backup restano nella destinazione.
+delete-profile-hint = Chiede conferma, poi toglie il profilo e le sue attività pianificate; i backup restano nella destinazione.
+delete-profile-title = Eliminare il profilo "{ $name }"?
+delete-profile-body = Il profilo e le sue attività pianificate vengono tolti. Finché non chiudi il messaggio nella barra di stato, "Annulla eliminazione" li ripristina.
+delete-profile-password = La password salvata viene tolta da Gestione credenziali di Windows quando l'eliminazione non si può più annullare: chiudendo quel messaggio, eliminando un altro profilo o uscendo da Archeion.
+delete-profile-backups = I backup in { $path } non vengono cancellati: un nuovo profilo che usa quella cartella può prenderli in carico con "Usa questi backup per questo profilo".
 
 day-monday = lunedì
 day-tuesday = martedì
@@ -102,9 +121,14 @@ run-destination-missing = Destinazione non trovata: { $location }. Collega il di
 run-busy = È in corso un altro backup o un'unione di questo profilo; riprova quando finisce.
 run-failed = L'operazione non è riuscita: { $detail }
 run-no-space = Spazio libero insufficiente sulla destinazione: servono { $needed }, liberi { $available }. Libera spazio, oppure unisci o elimina i backup vecchi, poi riavvialo: i file già copiati vengono tenuti e non ricopiati.
+restore-no-space = Spazio libero insufficiente dove vengono ripristinati i file: servono { $needed }, liberi { $available }. Non è stato scritto nulla: libera spazio, oppure ripristina meno file o su un altro disco.
 backup-resumed = { $count ->
     [one] 1 file ripreso dal backup interrotto
    *[other] { $count } file ripresi dal backup interrotto
+}
+backup-as-changes = { $count ->
+    [one] 1 file salvato solo come modifiche
+   *[other] { $count } file salvati solo come modifiche
 }
 run-cancelled = Annullato. I backup non sono stati modificati; un backup fermato riprende da dove si era interrotto la volta successiva.
 
@@ -119,24 +143,15 @@ unexpected-stop = L'operazione si è interrotta in modo inatteso.
 dates = Date dei backup
 archive-tooltip = { $files } file, { $stored } salvati in questo backup ({ $size })
 search-hint = Cerca un file per nome in tutti i backup…
-pick-date = Scegli una data a sinistra.
-tree-hint = Spunta file o cartelle per ripristinarli; fai clic su un file per vederne le versioni.
-searching = Ricerca in corso…
 no-results = Nessun file con questo nome.
 results = { $count ->
     [one] 1 file trovato
    *[other] { $count } file trovati
 }
-version-count = { $count ->
-    [one] 1 versione
-   *[other] { $count } versioni
-}
-deleted-now = eliminato in seguito
 close = Chiudi
 versions-hint = Ogni versione è un contenuto diverso del file, dalla più recente.
 version-modified = Modificato il { $date }
 version-detail = Salvato dal backup del { $backup } · { $size }
-restore-version = Ripristina questa versione
 restore-to = Ripristina in:
 target-beside = Accanto all'originale, con la data
 target-beside-hint = relazione.docx viene ripristinato come "relazione (2026-11-02 21.30).docx": il file attuale non viene toccato.
@@ -146,15 +161,48 @@ replace-existing = Sostituisci i file già presenti
 replace-warning = I file attuali verranno sostituiti dalla copia del backup.
 tick-files-hint = Spunta almeno un file o una cartella.
 choose-folder-hint = Scegli la cartella in cui ripristinare.
-restore-selected = Ripristina selezionati
-selected-count = { $count ->
-    [one] 1 elemento dal backup del { $date }
-   *[other] { $count } elementi dal backup del { $date }
-}
+restore-selected = Ripristina
 clear-selection = Togli selezione
 tick-folder = Ripristina questa cartella e tutto il suo contenuto
 tick-file = Ripristina questo file
-show-versions = Mostra le versioni di questo file
+backups-restore-files = Ripristina file
+backups-restore-files-hint = Ogni file mai salvato: spunta ciò che vuoi recuperare, scegli le versioni o la data e dove va.
+backups-manage = Gestisci i backup
+backups-manage-hint = L'elenco delle date dei backup: unisci più backup in uno o eliminane uno.
+restore-tree-count = { $files ->
+        [one] 1 file
+       *[other] { $files } file
+    } nei backup · eliminati dall'origine: { $deleted }
+restore-tree-hint = Spunta file o cartelle per ripristinarli; la ricerca trova un file per nome. I file segnati 🗑 eliminato non sono più nell'origine e si possono comunque ripristinare.
+deleted-label = eliminato
+deleted-since = Non è nel backup più recente: eliminato dall'origine.
+tree-deleted-file = Non è nel backup più recente: eliminato dall'origine. Spuntalo per ripristinarne una versione.
+tree-deleted-folder = Non è nel backup più recente: eliminata dall'origine. Spuntala per ripristinarla com'era in una data.
+remove-from-selection = Togli dalla selezione
+selection-empty = Ancora niente da ripristinare. Spunta file o cartelle nell'albero: ognuno compare qui con le sue versioni o la sua data, e con la destinazione.
+folder-as-of = Com'era il:
+folder-as-of-hint = La cartella torna per intero, con tutto quello che conteneva in quella data.
+folder-size = { $size } in quella data
+dest-default = Predefinita: { $dest }
+dest-follow-default = Usa la destinazione predefinita
+dest-overwrite = Sovrascrivi l'originale
+dest-folder = Un'altra cartella…
+dest-folder-missing = un'altra cartella, non ancora scelta
+dest-change-hint = Dove va. ✎ segna una destinazione diversa da quella predefinita.
+restore-to-hint = Per tutto ciò che è spuntato, salvo modifiche su una versione o cartella qui sotto.
+restore-conflict = Un'altra versione sovrascrive lo stesso originale: lascia "Sovrascrivi l'originale" a una sola versione.
+restore-conflict-hint = Due versioni sovrascriverebbero lo stesso file originale: cambia la destinazione di una delle due.
+restore-wait-versions = Lettura delle versioni dei file spuntati…
+restore-summary = { $files ->
+        [one] 1 file
+       *[other] { $files } file
+    }, { $versions ->
+        [one] 1 versione
+       *[other] { $versions } versioni
+    }, { $folders ->
+        [one] 1 cartella
+       *[other] { $folders } cartelle
+    } — { $size }
 
 # Manual merge
 merge-choose = Scegli i backup da unire…
@@ -175,9 +223,6 @@ cancel-hint = Ferma subito: i backup restano com'erano prima di questa esecuzion
 activity-backup-running = Backup di "{ $name }" in corso
 activity-merge-running = Unione dei backup di "{ $name }" in corso
 activity-restore-running = Ripristino da "{ $name }" in corso
-activity-backup-ended = Backup di "{ $name }"
-activity-merge-ended = Unione dei backup di "{ $name }"
-activity-restore-ended = Ripristino da "{ $name }"
 activity-preparing = Preparazione…
 activity-file = File
 activity-folder = Cartella
@@ -192,7 +237,6 @@ activity-took = Durata: { $time }.
 activity-backup-summary = Fatto: { $new } nuovi, { $changed } modificati, { $deleted } eliminati, { $unchanged } invariati; { $copied } copiati.
 activity-merge-summary = Fatto: da { $before } a { $after } backup, { $freed } liberati.
 activity-restore-summary = Fatto: { $restored } file ripristinati, { $kept } già presenti e lasciati.
-show-backups = Mostra i backup
 skipped-hint = Questi file non si sono potuti leggere, di solito perché un altro programma li tiene aperti. La loro versione precedente, se c'è, resta nei backup.
 skipped-more = …e altri { $count } (vedi il registro).
 
@@ -209,7 +253,8 @@ exclude-type-hint = .tmp
 exclude-type = Escludi tipo
 common-types = Comuni:
 advanced = Avanzate
-exclude-pattern = Escludi modello
+exclude-pattern = Escludi modelli
+exclude-pattern-add = Aggiungi
 container-locked = La destinazione contiene già backup in questo formato: non si può cambiare. Per usare l'altro, scegli una destinazione vuota.
 container-unreachable = La destinazione non è raggiungibile, quindi il formato non si può cambiare adesso.
 container-checking = Controllo della destinazione…
@@ -238,7 +283,6 @@ full-backup-hint = Vale per i backup automatici; un backup completo inizia una n
 run-finished-complete = "{ $name }" salvato per intero: { $new } nuovi, { $changed } modificati, { $deleted } eliminati, { $added } copiati.
 activity-complete-summary = Backup completo fatto: { $new } nuovi, { $changed } modificati, { $deleted } eliminati, { $unchanged } invariati; { $copied } copiati.
 activity-delete-running = Eliminazione di un backup di "{ $name }" in corso
-activity-delete-ended = Backup eliminato da "{ $name }"
 activity-delete-summary = Fatto: da { $before } a { $after } backup, { $freed } liberati.
 delete-finished = Un backup di "{ $name }" è stato eliminato.
 delete-backup = Elimina questo backup…
@@ -266,24 +310,34 @@ password-checking = Verifica della password…
 password-empty-hint = Scrivi la password.
 password-short-hint = Usa almeno { $count } caratteri.
 password-mismatch-hint = Le due password sono diverse.
-password-first-hint = Salva prima la password dei backup cifrati.
+password-rule-length = Almeno { $count } caratteri (ora { $typed })
+password-rule-match = Le due password coincidono
+password-rule-variety = Almeno { $kinds } tipi di caratteri tra minuscole, maiuscole, cifre e simboli (non serve da { $passphrase } caratteri in su)
+password-rule-common = Non è una password comune, come "Password2024" o "qwerty"
+password-rule-runs = Nessuna sequenza di { $count } caratteri uguali o consecutivi, come "aaaa", "1234" o "abcd"
+password-rule-name = Non contiene il nome del profilo
+password-rule-strength = Abbastanza difficile da indovinare: robustezza almeno { $level }
+password-rule-tip = Va bene qualunque carattere, spazi compresi: una frase di quattro o cinque parole si ricorda facilmente ed è difficile da indovinare, e da { $passphrase } caratteri in su non servono cifre, maiuscole o simboli.
+password-strength = Robustezza: { $level }
+password-strength-weak = Debole
+password-strength-fair = Discreta
+password-strength-strong = Buona
+password-strength-very-strong = Ottima
+password-variety-hint = Mescola minuscole, maiuscole, cifre e simboli, oppure scrivi una frase di almeno { $passphrase } caratteri.
+password-common-hint = È una delle password più usate: scegline un'altra.
+password-runs-hint = Evita sequenze come "aaaa" o "1234".
+password-name-hint = Non mettere il nome del profilo nella password.
+password-weak-hint = Troppo facile da indovinare: allungala, per esempio con qualche parola in più.
+password-first-hint = Scrivi qui sopra la password dei backup cifrati (due volte per backup nuovi, e spunta "Ho capito"): il pulsante la salva e avvia il backup.
 password-wrong = Questa password non apre i backup della destinazione.
 password-unreachable = Non è stato possibile verificare la password
 run-password-needed = I backup sono cifrati e su questo computer non c'è una password salvata: inseriscila nelle impostazioni del profilo.
 run-wrong-password = La password salvata non apre i backup: inseriscila di nuovo nelle impostazioni del profilo.
 
-# Backup contents
-tree-count = { $stored } di { $total } file salvati da questo backup
-tree-stored-hint = I file salvati da questo backup (nuovi o modificati) sono in evidenza; quelli in grigio sono stati salvati da backup precedenti e non sono cambiati, e si possono ripristinare lo stesso. Spunta per ripristinare; una cartella spuntata torna per intero, com'era a quella data. Fai clic su un file per vederne le versioni.
-tree-nothing-stored = Questo backup non ha salvato nulla: nessun file era cambiato.
-tree-not-saved-folder = In questa cartella non è cambiato nulla in questo backup.
-tree-not-saved-file = Non cambiato in questo backup: il contenuto è in uno precedente. Fai clic per vederne le versioni.
-
 # Operations log
 log-runs = Operazioni
 log-only-profile = Solo questo profilo
 log-running = In corso
-log-last = Ultima operazione
 log-empty = Ancora nessuna operazione.
 log-pick = Scegli un'operazione a sinistra.
 log-title = Registro
@@ -300,6 +354,42 @@ log-op-complete = Backup completo
 log-op-merge = Unione
 log-op-delete = Eliminazione di un backup
 log-op-restore = Ripristino
+log-open-full = Apri il registro completo
+log-open-full-hint = Scrive l'intero registro di questa operazione in un file di testo e lo apre nell'editor di testo: ogni passo, poi ogni file su cui ha lavorato e che cosa ne ha fatto, compresi i file saltati.
+log-copy = Copia il registro
+log-copy-hint = Copia l'intero registro di questa operazione come testo, da incollare in un'email o in una segnalazione.
+log-copied = Registro copiato.
+log-open-program = Registro del programma
+log-open-program-hint = Apre archeion.log, il registro tecnico del programma: utile per indagare su un problema o per segnalarlo.
+log-open-folder = Cartella dei registri
+log-open-folder-hint = Apre in Esplora file la cartella dei registri delle operazioni.
+log-program-missing = Il registro del programma non esiste ancora.
+log-unreadable = Il file di registro non è leggibile.
+log-report-failed = Impossibile mostrare il registro completo: { $detail }
+log-level-info = Info
+log-level-done = OK
+log-level-warning = Avviso
+log-level-error = Errore
+log-preparing = Preparazione del registro completo…
+log-files-title = File
+log-files-missing = L'elenco dei file non è stato registrato per questa operazione: è stata eseguita da una versione precedente di Archeion.
+log-files-none = Nessun file elaborato.
+log-file-new-chunks = salvato come modifiche: scritti { $size } di blocchi nuovi
+log-file-resumed = già copiato dal backup interrotto, mantenuto
+log-count-new = Nuovi: { $count }
+log-count-changed = Modificati: { $count }
+log-count-as-changes = Salvati come modifiche: { $count }
+log-count-copied-again = Copiati di nuovo: { $count }
+log-count-unchanged = Invariati, non elencati: { $count }
+log-count-deleted = Eliminati: { $count }
+log-count-moved = Spostati: { $count }
+log-count-dropped = Versioni rimosse: { $count }
+log-count-restored = Ripristinati: { $count }
+log-count-kept = Mantenuti: { $count }
+log-count-checked = Riletti integri: { $count }
+log-count-checked-unlisted = Riletti integri, non elencati: { $count }
+log-count-damaged = Problemi: { $count }
+log-count-skipped = Saltati: { $count }
 
 # Password change and recovery key
 password-change = Cambia la password
@@ -313,6 +403,10 @@ recovery-warning = Chi ha questa chiave può leggere tutti i backup. Stampala o 
 recovery-copy = Copia
 recovery-copy-hint = Copia la chiave senza spazi, come la vuole 7-Zip.
 recovery-hide = Nascondi
+password-current = Password attuale
+password-current-hint = Scrivi la password attuale.
+recovery-ask = Per mostrare la chiave di recupero, scrivi la password attuale di questi backup.
+recovery-show-button = Mostra
 
 # Integrity check
 verify-section = Controlli
@@ -329,6 +423,185 @@ verify-no-backups = Non ci sono ancora backup da controllare.
 verify-problems = Problemi trovati
 verify-problems-hint = I backup indicati potrebbero non ripristinarsi correttamente. Esegui subito un backup completo e controlla il disco di destinazione.
 activity-verify-running = Controllo dei backup di "{ $name }" in corso
-activity-verify-ended = Controllo dei backup di "{ $name }"
 log-op-verify = Controllo di integrità
 log-op-restore-test = Prova di ripristino
+
+# Automatic backup: schedules, events, notifications
+schedule-days = Nei giorni scelti
+schedule-hours = Ogni tot ore
+schedule-monthly = Una volta al mese
+schedule-all-days = Tutti i giorni
+schedule-add-time = + Aggiungi un orario
+schedule-remove-time = Togli questo orario
+schedule-every = Ogni
+hours-unit = ore
+schedule-from = dalle
+schedule-until = alle
+schedule-hours-hint = L'ultima esecuzione parte prima dell'ora di fine; stessa ora di inizio e di fine = tutto il giorno.
+schedule-month-day = Il giorno
+schedule-month-hint = Solo dal giorno 1 al 28, così ogni mese ce l'ha.
+events-title = Esegui il backup anche:
+event-logon = Qualche minuto dopo l'accesso a Windows
+event-idle = Quando il computer è inattivo da 10 minuti
+event-drive = Quando si collega un disco
+event-drive-hint = Utile con un disco esterno come destinazione: il backup parte quando lo colleghi, e non succede nulla se colleghi un altro disco.
+event-min-hours = Non più spesso di ogni
+event-hint = Un backup avviato da questi eventi viene saltato se l'ultimo backup è più recente, o se la destinazione non è collegata.
+alerts = Notifiche
+alert-on-failure = Avvisami quando un backup automatico non riesce
+alert-stale = Avvisami quando non c'è un backup da
+alert-hint = Notifiche di Windows; 0 giorni = nessun avviso. Il controllo avviene ogni giorno e dopo l'accesso.
+alert-manual-hint = Solo per i backup automatici: scegli una pianificazione in "Backup automatico".
+alert-failed-title = Archeion: il backup di "{ $name }" non è riuscito
+alert-stale-title = Archeion: "{ $name }" senza backup
+alert-stale-body = Nessun backup da { $days } giorni (l'ultimo il { $when }). Controlla che la destinazione sia collegata, oppure avvia un backup da Archeion.
+closing-after-run = Un'operazione è in corso: Archeion si chiuderà da solo quando sarà finita.
+closing-cancel = Non chiudere
+
+# Area di notifica e finestra Preferenze
+menu-preferences = Preferenze…
+preferences-title = Preferenze
+preferences-window = Finestra
+language = Lingua
+language-system = Lingua di sistema
+language-tray-restart = Il menu dell'icona nell'area di notifica cambia lingua al prossimo avvio di Archeion.
+quit-hint = Chiude Archeion; i backup pianificati continuano a partire dall'Utilità di pianificazione di Windows.
+tray-open = Apri Archeion
+tray-quit = Esci
+tray-running = operazione in corso
+option-tray = Resta attivo nell'area di notifica quando chiudi la finestra
+option-tray-hint = Chiudendo la finestra, Archeion si nasconde accanto all'orologio: continua a unire i backup vecchi e a finire l'operazione in corso. Fai clic sulla sua icona per riaprirlo, oppure scegli Esci.
+option-tray-unavailable = Windows non ha fornito un'icona nell'area di notifica.
+option-autostart = Avvia Archeion con Windows
+option-autostart-hint = Quando accedi a Windows, Archeion parte nascosto nell'area di notifica. Puoi disattivarlo anche da Gestione attività, in App di avvio.
+autostart-failed = Non è stato possibile cambiare l'avvio con Windows: { $detail }
+
+# Help menu: user guide and About
+menu-documentation = Documentazione
+menu-about = Informazioni su Archeion
+about-version = Versione { $version }
+about-name = Il nome viene dal greco antico ἀρχεῖον, "archivio".
+about-author = Autore: MR
+about-license = Licenza: MIT o Apache-2.0
+about-repository = Codice sorgente su GitHub
+about-logs-folder = Cartella dei log
+about-open-folder = Apri cartella
+about-folder-missing = La cartella non esiste ancora.
+doc-title = Documentazione di Archeion
+doc-intro = Archeion conserva copie delle tue cartelle su un altro disco, una cartella di rete o qualsiasi altra cartella, e ti restituisce ogni file com'era in una data passata. Apri una sezione per leggerla.
+doc-what-title = Che cosa fa Archeion
+doc-what-backups = Il primo backup di un profilo è completo: copia tutti i file. I successivi sono incrementali: copiano solo i file nuovi e modificati, quindi sono veloci e occupano poco, ma ogni data si può ripristinare per intero. In "Backup completo", nelle impostazioni del profilo, puoi anche chiedere un nuovo backup completo ogni tot backup, o quando l'ultimo è più vecchio di un certo numero di giorni; un backup completo inizia una nuova catena che non dipende più dai backup precedenti.
+doc-what-storage = Ogni file è salvato da solo, nelle stesse cartelle dell'originale: come zip di quel file ("Uno zip per file": relazione.docx diventa relazione.docx.zip), come copia semplice o come zip cifrato AES-256. I backup si leggono anche senza Archeion: Esplora file e 7-Zip aprono gli zip, e 7-Zip apre quelli cifrati con la chiave di recupero.
+doc-what-safe = Un backup interrotto (computer spento, disco scollegato, Annulla) lascia i backup esistenti com'erano; il backup successivo riprende da dove si era fermato e non ricopia i file già copiati.
+doc-profiles-title = Profili
+doc-profiles-body = Un profilo dice che cosa salvare, dove e quando. Creane uno con File > Nuovo profilo (Ctrl+N) e compila la scheda Impostazioni: un nome, le cartelle da salvare e la destinazione, cioè una cartella o un disco esterno oppure una cartella di rete. Usa ogni cartella di destinazione per un solo profilo.
+doc-profiles-exclusions = Le esclusioni lasciano fuori ciò che non serve: una cartella con tutto il suo contenuto, un file, o tutti i file di un tipo come .tmp. Con "Escludi modelli" puoi aggiungere dei modelli, confrontati con il percorso completo senza distinguere maiuscole e minuscole: * è qualsiasi testo in un nome, ** qualsiasi cartella, ? un carattere. Per esempio **/node_modules o **/cache/**.
+doc-profiles-format = Il formato di salvataggio (uno zip per file o copie semplici) e la cifratura vanno scelti prima del primo backup: quando la destinazione contiene dei backup non si possono più cambiare. Per passare all'altro, scegli una destinazione vuota.
+doc-profiles-delete = Elimina profilo chiede conferma, poi toglie il profilo e le sue attività pianificate; i backup restano nella destinazione. Subito dopo, "Annulla eliminazione" nella barra di stato ripristina il profilo. Un profilo che in seguito usa quella cartella può prenderli in carico con "Usa questi backup per questo profilo".
+doc-auto-title = Backup automatici
+doc-auto-schedule = In "Backup automatico" scegli quando i backup partono da soli: nei giorni scelti a uno o più orari, ogni tot ore tra due orari, oppure una volta al mese in un giorno dall'1 al 28. Archeion registra la pianificazione nell'Utilità di pianificazione di Windows, così i backup partono anche quando Archeion non è aperto.
+doc-auto-missed = Se all'ora prevista il computer è spento, il backup parte appena si riaccende.
+doc-auto-alerts = In "Notifiche" Archeion può mostrare una notifica di Windows quando un backup automatico non riesce, e un avviso quando un profilo non ha backup da un certo numero di giorni (il controllo avviene ogni giorno e dopo l'accesso).
+doc-auto-now = Puoi sempre avviare un backup tu: Esegui backup nelle impostazioni del profilo, oppure Backup > Backup incrementale ora (Ctrl+B) e Backup completo ora.
+doc-merge-title = Unione dei backup vecchi
+doc-merge-body = I backup vecchi non vengono cancellati ma uniti al successivo che resta: ogni data conservata rimane completa e si libera lo spazio delle versioni che non servono più. L'unione è automatica: avviene mentre Archeion è in esecuzione, mai mentre un backup o un'altra operazione sta usando la destinazione.
+doc-merge-rules = Le regole in "Unione dei backup vecchi" dicono quali backup tenere, e un backup resta se almeno una regola lo sceglie: tutti i backup degli ultimi giorni, i più recenti, uno al giorno, uno a settimana, uno al mese e uno all'anno, ciascuno per il numero che imposti. Con tutte le regole a 0 ogni backup resta e non si unisce nulla.
+doc-merge-first = Il primo backup completo non viene mai unito in automatico.
+doc-merge-manual = In Backup > Gestisci i backup, "Scegli i backup da unire…" unisce a mano: spunta il backup più vecchio e quello più recente, e tutto quello che c'è in mezzo diventa un solo backup. Se l'intervallo comprende il primo backup completo, Archeion avvisa prima, perché le date precedenti non saranno più ripristinabili.
+doc-merge-delete = "Elimina questo backup…" in Backup > Gestisci i backup toglie una data; i backup successivi restano completi. Un backup completo da cui dipendono i successivi non si può eliminare (uniscilo invece ai successivi). L'eliminazione non si può annullare.
+doc-encrypt-title = Cifratura
+doc-encrypt-body = Con "Cifra i backup" ogni file diventa uno zip AES-256 con un nome nascosto: senza la password nessuno può leggerne il contenuto né vedere quali file sono salvati. La cifratura richiede il formato "Uno zip per file" e va attivata prima del primo backup; dopo non si può più cambiare.
+doc-encrypt-password = La password è salvata in Gestione credenziali di Windows, così i backup automatici non chiedono nulla. Puoi cambiarla in seguito nelle impostazioni del profilo, scrivendo quella attuale. Su un altro computer basta scriverla una volta nelle impostazioni del profilo.
+doc-encrypt-recovery = Dopo il primo backup, "Mostra la chiave di recupero…" mostra una chiave con cui 7-Zip apre ogni file cifrato, anche senza Archeion e senza la password. Stampala o scrivila e conservala lontano dal computer: senza la password e senza la chiave nessuno può aprire i backup. La chiave non cambia quando cambi la password. Archeion chiede la password attuale prima di mostrarla.
+doc-large-title = File grandi
+doc-large-body = Un file grande che cambia di poco (una casella di posta, il disco di una macchina virtuale, un database) non viene ricopiato per intero: è salvato in pezzi di circa 1 MB e ogni backup memorizza solo i pezzi nuovi. I pezzi identici sono memorizzati una volta sola. Vale per i file di almeno la dimensione scelta nella sezione Formato del profilo (500 MB se non la cambi; si può disattivare) e per tutti i file di una destinazione cifrata.
+doc-large-complete = I backup completi conservano comunque ogni file intero, come zip, copia semplice o zip cifrato, così si possono ripristinare con il solo 7-Zip; solo i backup incrementali che li seguono contengono pezzi. Il ripristino rimette insieme i pezzi e controlla ognuno; il controllo di integrità legge ogni pezzo.
+doc-large-upgrade = I backup fatti dalle versioni precedenti restano come sono e si leggono ancora. I pezzi iniziano con il backup completo successivo: in una destinazione così il prossimo backup automatico è completo.
+doc-restore-title = Ripristino dei file
+doc-restore-body = Apri la scheda Backup del profilo (o Backup > Ripristina file…): "Ripristina file" mostra un unico albero di tutti i file e le cartelle mai salvati dai backup; i file che non sono più nell'origine sono segnati 🗑 eliminato e si possono comunque ripristinare. Spunta file o cartelle nell'albero o nei risultati della ricerca (la casella di ricerca trova un file per nome). Ogni elemento spuntato compare a destra; ✕ lo toglie.
+doc-restore-versions = Un file spuntato elenca le sue versioni, dalla più recente, ognuna con un contenuto diverso: la più recente è spuntata e puoi spuntarne altre. Una cartella spuntata torna per intero, com'era nella data scelta in "Com'era il" (la più recente, se non la cambi).
+doc-restore-where = In cima al pannello di destra scegli dove va tutto: accanto all'originale con la data nel nome (relazione.docx torna come "relazione (2026-11-02 21.30).docx" e il file attuale non viene toccato), nella posizione originale o in un'altra cartella; i file già presenti vengono sostituiti solo se spunti "Sostituisci i file già presenti". Una versione o una cartella può andare altrove con il suo menu, segnato ✎. Più versioni di un file mandate nella stessa cartella prendono ciascuna la propria data nel nome; solo una versione di un file può sovrascrivere l'originale. Ripristina poi riporta tutto in un'unica operazione.
+doc-verify-title = Controllo di integrità e prova di ripristino
+doc-verify-body = Il controllo completo rilegge ogni file salvato di ogni backup e lo confronta con la sua impronta; la prova di ripristino rilegge a caso alcuni file del backup più recente, come farebbe un ripristino, senza scriverli da nessuna parte. Avviali dalla sezione Controlli delle impostazioni del profilo (o da Backup > Controlla i backup ora), oppure falli eseguire ogni tot giorni dopo un backup pianificato. Se emergono problemi, fai un backup completo e controlla il disco di destinazione.
+doc-activity-title = Scheda Attività
+doc-activity-body = La scheda Attività mostra l'avanzamento del backup, dell'unione, del ripristino o del controllo in corso, con il pulsante Annulla, e il registro di ogni operazione passata, automatica o avviata a mano: che cosa ha fatto e quali file ha saltato perché un altro programma li teneva aperti. Sopra i passi di un'operazione, Apri il registro completo mostra il suo registro intero come file di testo nell'editor: i passi, poi ogni file su cui ha lavorato con l'ora, che cosa gli è successo (nuovo, modificato, salvato come modifiche, copiato di nuovo, eliminato, spostato, versione rimossa, ripristinato, mantenuto, saltato, problema), la dimensione e il percorso completo; i file invariati di un backup incrementale e i file integri di un controllo completo sono solo contati. Copia il registro copia lo stesso testo; Registro del programma apre il registro tecnico di Archeion, per i problemi più profondi.
+doc-window-title = Chiusura della finestra
+doc-window-body = Chiudere la finestra non ferma Archeion: si sposta nell'area di notifica, accanto all'orologio, e continua a lavorare, quindi i backup vecchi vengono ancora uniti; riapri la finestra dalla sua icona. Archeion inoltre parte con Windows, nascosto lì. File > Esci o Esci dal menu dell'icona lo chiudono davvero. Entrambe le cose si possono disattivare in File > Preferenze, dove scegli anche la lingua. I backup pianificati partono comunque, anche quando Archeion non è in esecuzione.
+doc-cli-title = Riga di comando
+doc-cli-body = archeion.exe senza argomenti apre la finestra. I comandi qui sotto eseguono un'operazione senza finestra, come fanno le attività pianificate. L'id del profilo è il campo id del profilo in settings.toml.
+doc-cli-run = Esegue il backup del profilo (--kind complete per un backup completo).
+doc-cli-merge = Unisce i backup vecchi secondo le regole del profilo.
+doc-cli-verify = Controlla i backup (--sample N: prova di ripristino su N file).
+doc-cli-delete = Elimina un backup.
+doc-cli-restore = Ripristina i file elencati in un file di richiesta scritto dalla finestra.
+doc-cli-watch = Avvisa dei profili senza un backup recente; l'Utilità di pianificazione lo esegue ogni giorno.
+doc-cli-extract = Ripristina da una cartella di backup da sola, senza impostazioni né profilo: per esempio con Archeion portatile su un altro computer. I file vanno sotto la cartella di arrivo con il loro percorso completo.
+doc-cli-extract-options = Opzioni di extract: --archive <nome> sceglie il backup (il più recente se manca); --path <file o cartella> ripristina solo quello, indicato con il suo percorso originale; --overwrite sostituisce i file esistenti. Per i backup cifrati indica la password o la chiave di recupero con --stdin (prima riga dello standard input), con la variabile ARCHEION_PASSWORD o ARCHEION_RECOVERY_KEY, oppure con --password o --recovery-key. L'avanzamento è scritto anche in archeion-extract.log nella cartella di arrivo. Nel Prompt dei comandi avvialo come start /wait archeion extract … perché il prompt lo aspetti.
+doc-cli-exit = Codici di uscita: 0 riuscito, 1 non riuscito, 2 destinazione non trovata, 3 occupato (un'altra operazione sta usando la destinazione), 4 password mancante o errata, 5 spazio libero insufficiente.
+doc-data-title = Dove sono i dati e i log
+doc-data-body = Le impostazioni sono nella cartella %APPDATA%\Archeion\config (settings.toml) e il log di ogni operazione è nella sua sottocartella logs. Una copia portatile (con un file portable.txt accanto ad archeion.exe) tiene invece tutto in una cartella data accanto all'eseguibile. Aiuto > Informazioni su Archeion apre queste cartelle.
+doc-data-backups = I backup veri e propri sono solo nella destinazione: una cartella per backup, con la data e l'ora nel nome, che contiene i file salvati e l'elenco di tutti i file in quel momento.
+
+# Activity tab: steps and recent files of the running operation
+step-found = { $count ->
+    [one] 1 file trovato
+   *[other] { $count } file trovati
+}
+step-folders = { $count ->
+    [one] 1 cartella letta
+   *[other] { $count } cartelle lette
+}
+step-new = { $count ->
+    [one] 1 nuovo
+   *[other] { $count } nuovi
+}
+step-changed = { $count ->
+    [one] 1 modificato
+   *[other] { $count } modificati
+}
+step-unchanged = { $count ->
+    [one] 1 invariato
+   *[other] { $count } invariati
+}
+step-copied-again = { $count ->
+    [one] 1 invariato ricopiato
+   *[other] { $count } invariati ricopiati
+}
+step-moved = { $count ->
+    [one] 1 file spostato
+   *[other] { $count } file spostati
+}
+step-restored = { $count ->
+    [one] 1 ripristinato
+   *[other] { $count } ripristinati
+}
+step-kept = { $count ->
+    [one] 1 già presente, mantenuto
+   *[other] { $count } già presenti, mantenuti
+}
+step-checked = { $count ->
+    [one] 1 controllato
+   *[other] { $count } controllati
+}
+step-damaged = { $count ->
+    [one] 1 problema
+   *[other] { $count } problemi
+}
+step-skipped = { $count ->
+    [one] 1 saltato
+   *[other] { $count } saltati
+}
+merge-group = { $count } backup, dal { $first } al { $last }, in uno
+merge-group-of = Gruppo { $index } di { $of }: { $count } backup, dal { $first } al { $last }, in uno
+recent-title = Ultimi file
+recent-new = Nuovo
+recent-changed = Modificato
+recent-copied-again = Ricopiato
+recent-moved = Spostato
+recent-restored = Ripristinato
+recent-kept = Mantenuto
+recent-checked = OK
+recent-damaged = Problema
+recent-skipped = Saltato
+recent-deleted = Eliminato
+recent-dropped = Versione rimossa

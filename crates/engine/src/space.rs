@@ -25,6 +25,12 @@ pub(crate) fn available(dir: &Path) -> Option<u64> {
     }
 }
 
+/// `path` itself or its nearest parent that exists: where free space can be
+/// asked for a file or folder not created yet.
+pub(crate) fn existing_ancestor(path: &Path) -> Option<&Path> {
+    path.ancestors().find(|p| !p.as_os_str().is_empty() && p.exists())
+}
+
 /// Fails with [`EngineError::NotEnoughSpace`] when `dir` has less than
 /// `needed` plus [`MARGIN`] free. Unknown free space lets the run try.
 pub(crate) fn ensure(dir: &Path, needed: u64) -> Result<()> {
@@ -85,6 +91,14 @@ mod tests {
         let denied =
             EngineError::Io { context: "x".into(), source: io::Error::from(io::ErrorKind::PermissionDenied) };
         assert!(!is_disk_full(&denied));
+    }
+
+    #[test]
+    fn the_nearest_existing_parent_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let deep = dir.path().join("a").join("b").join("c.txt");
+        assert_eq!(existing_ancestor(&deep), Some(dir.path()));
+        assert_eq!(existing_ancestor(dir.path()), Some(dir.path()));
     }
 
     #[test]

@@ -4,19 +4,37 @@
 //! initial complete archive; a manual merge fuses the archives the user
 //! chose, including the complete one if asked. Deleting an archive that
 //! later ones depend on is a merge with the next one.
+//!
+//! Chunks (see [`crate::chunks`]): the merged archive keeps a member's
+//! chunk file only when a manifest that remains lists the chunk and no
+//! archive outside the group, nor a whole copy in the merged archive, can
+//! provide it; a chunk needed that way and found only inside a member's
+//! whole copy is cut out of it into a chunk file. The rest is dropped with
+//! the members. A merged *complete* archive holds every file whole, so a
+//! file kept as chunks only is put back together into a whole copy.
+//!
+//! Every file carried into a merged archive is listed as moved, and every
+//! version the merge or deletion gets rid of as dropped
+//! ([`archeion_core::RunEvent::Files`]).
 
 use crate::{
     EngineError, EventSink, Result,
-    container::{Reader, Writer},
+    chunks::{self, CHUNKS_DIR, ChunkIndex, ChunkReader, Form},
+    container::{Reader, Writer, link_or_copy},
     crypto::Password,
     progress::Progress,
     repo::{Purpose, Repo, dir_size},
 };
 use archeion_core::{
-    ArchiveKind, ArchiveName, EntryKind, Manifest, MergeReport, Phase, Profile, RunEvent, Summary,
+    ArchiveKind, ArchiveName, ChunkId, ChunkRef, Chunks, EntryKind, FileAction, FileDone, Manifest,
+    MergeGroup, MergeReport, Phase, Profile, RunEvent, Summary, keys,
     merge_plan::{Deletion, automatic_keep_set, deletion, merge_groups, range_group},
 };
-use std::{collections::HashMap, ops::RangeInclusive};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::RangeInclusive,
+    path::PathBuf,
+};
 
 /// Applies the profile's merge rules to its archives.
 ///
@@ -24,13 +42,13 @@ use std::{collections::HashMap, ops::RangeInclusive};
 /// with the kept archive that follows it; the result carries that archive's
 /// date and holds the newest content of the group. Files deleted or
 /// replaced inside the group are dropped, which frees space. The initial
-/// complete archive is always kept.
+/// complete archive and the backups of the recent days are always kept.
 ///
 /// # Errors
 /// See [`EngineError`].
 pub fn merge(profile: &Profile, password: Option<&Password>, sink: &dyn EventSink) -> Result<MergeReport> {
     run(profile, password, sink, |archives| {
-        Ok(merge_groups(&automatic_keep_set(archives, &profile.merge.rules))
+        Ok(merge_groups(&automatic_keep_set(archives, &profile.merge.rules, local_now()))
             .into_iter()
             .map(Step::Merge)
             .collect())
@@ -83,6 +101,28 @@ pub fn delete_archive(
     })
 }
 
+/// True when the profile's merge rules would merge something now. Reads
+/// only the archive names: no lock, no password, cheap enough to ask
+/// often.
+///
+/// # Errors
+/// [`EngineError::DestinationUnavailable`] when the drive or share is not
+/// reachable.
+pub fn merge_pending(profile: &Profile) -> Result<bool> {
+    let root = profile.destination.path();
+    crate::repo::ensure_reachable(root)?;
+    if root.as_os_str().is_empty() || !root.exists() {
+        return Ok(false);
+    }
+    let archives = crate::repo::archives_in(root)?;
+    Ok(!merge_groups(&automatic_keep_set(&archives, &profile.merge.rules, local_now())).is_empty())
+}
+
+/// Local wall-clock time, the clock archive names are written in.
+fn local_now() -> jiff::civil::DateTime {
+    jiff::Zoned::now().datetime()
+}
+
 fn parse_name(s: &str) -> Result<ArchiveName> {
     s.parse::<ArchiveName>().map_err(|_| EngineError::InvalidProfile(format!("{s} is not a backup name")))
 }
@@ -127,11 +167,21 @@ fn run(
     let total = plans.iter().map(|p| p.bytes).sum();
     let files = plans.iter().map(|p| p.holder.len() as u64).sum();
     let mut progress = Progress::new(sink, total, files);
-    for plan in &plans {
+    let groups = plans.len() as u64;
+    for (i, plan) in plans.iter().enumerate() {
+        progress.group(plan.describe(i as u64 + 1, groups));
         plan.execute(&repo, profile, &mut progress)?;
     }
     for name in &removals {
+        // Listing what goes is worth a manifest read, not a failed deletion.
+        let gone = repo.manifest(name);
+        if let Err(e) = &gone {
+            tracing::warn!(archive = %name, error = %e, "files of the deleted archive not listed");
+        }
         repo.remove_archive(name)?;
+        for e in gone.iter().flat_map(|m| &m.entries).filter(|e| e.kind == EntryKind::File && e.stored) {
+            progress.listed(dropped(&e.key, e.size));
+        }
         tracing::info!(archive = %name, "archive deleted");
     }
     progress.finish();
@@ -148,14 +198,26 @@ fn run(
     Ok(report)
 }
 
+/// The line of the file list for a version of `key`, of `size` bytes,
+/// that no backup keeps any more.
+fn dropped(key: &str, size: u64) -> FileDone {
+    FileDone::new(keys::path_for(key).display().to_string(), FileAction::Dropped, size)
+}
+
 /// What one group becomes.
 struct GroupPlan {
     members: Vec<ArchiveName>,
     target: ArchiveName,
+    /// The last member's manifest, each file marked stored when a member
+    /// holds its newest content, with that member's chunk list.
     manifest: Manifest,
     /// Key -> index in `members` of the archive holding its newest content.
     holder: HashMap<String, usize>,
+    /// Versions held by members and not by the merged archive: key, size.
+    dropped: Vec<(String, u64)>,
     bytes: u64,
+    /// Some member lists chunks.
+    lists_chunks: bool,
 }
 
 impl GroupPlan {
@@ -171,22 +233,32 @@ impl GroupPlan {
         };
 
         let mut holder = HashMap::new();
+        let mut lists: HashMap<String, Option<Chunks>> = HashMap::new();
         let mut manifest = None;
+        let mut format = 0;
+        let mut lists_chunks = false;
+        // Every stored version: key, member, size.
+        let mut versions: Vec<(String, usize, u64)> = Vec::new();
         for (j, name) in members.iter().enumerate() {
-            let m = repo.manifest(name)?;
-            for e in m.entries.iter().filter(|e| e.stored) {
+            let mut m = repo.manifest(name)?;
+            format = format.max(m.format);
+            for e in m.entries.iter_mut().filter(|e| e.stored) {
+                if e.kind == EntryKind::File {
+                    versions.push((e.key.clone(), j, e.size));
+                }
+                lists_chunks |= e.chunks.is_some();
                 holder.insert(e.key.clone(), j);
+                lists.insert(e.key.clone(), e.chunks.take());
             }
             manifest = Some(m);
         }
         let mut manifest = manifest.expect("group is not empty");
-        let mut bytes = 0u64;
+        manifest.format = format;
         let mut missing = None;
         for e in manifest.entries.iter_mut().filter(|e| e.kind == EntryKind::File) {
             e.stored = holder.contains_key(&e.key);
-            if e.stored {
-                bytes = bytes.saturating_add(e.size);
-            } else if missing.is_none() {
+            e.chunks = if e.stored { lists.remove(&e.key).flatten() } else { None };
+            if !e.stored && missing.is_none() {
                 missing = Some(e.key.clone());
             }
         }
@@ -204,7 +276,32 @@ impl GroupPlan {
         manifest.kind = kind;
         let target = ArchiveName { time: last.time, kind };
         holder.retain(|k, _| manifest.get(k).is_some_and(|e| e.stored));
-        Ok(Self { members: members.to_vec(), target, manifest, holder, bytes })
+        let dropped = versions
+            .into_iter()
+            .filter(|(key, j, _)| holder.get(key) != Some(j))
+            .map(|(key, _, size)| (key, size))
+            .collect();
+        // A file kept as chunks only costs nothing to carry, unless a
+        // complete archive needs it whole.
+        let complete = kind == ArchiveKind::Complete;
+        let bytes = manifest
+            .entries
+            .iter()
+            .filter(|e| e.stored && (complete || !e.chunks_only()))
+            .map(|e| e.size)
+            .fold(0u64, u64::saturating_add);
+        Ok(Self { members: members.to_vec(), target, manifest, holder, dropped, bytes, lists_chunks })
+    }
+
+    /// This group as shown in the window: number `index` of `of`.
+    fn describe(&self, index: u64, of: u64) -> MergeGroup {
+        MergeGroup {
+            index,
+            of,
+            archives: self.members.len() as u64,
+            first: self.members.first().map(ArchiveName::label).unwrap_or_default(),
+            last: self.members.last().map(ArchiveName::label).unwrap_or_default(),
+        }
     }
 
     fn execute(&self, repo: &Repo, profile: &Profile, progress: &mut Progress<'_>) -> Result<()> {
@@ -213,27 +310,147 @@ impl GroupPlan {
         let container =
             self.members.last().map_or(profile.container, |m| crate::container::detect(&repo.dir(m)));
         let mut writer = Writer::create(&staging, container, repo.keys(), &self.target)?;
+        let form = Form::of(container, repo.keys());
+        let with_chunks =
+            self.lists_chunks || self.members.iter().any(|m| repo.dir(m).join(CHUNKS_DIR).exists());
+        let chunk_places =
+            if with_chunks { Some(ChunkPlaces::read(repo, &self.members, &form)?) } else { None };
+        let complete = self.target.kind == ArchiveKind::Complete;
+
+        let mut manifest = self.manifest.clone();
         let mut readers: Vec<Option<Reader>> = self.members.iter().map(|_| None).collect();
-        for e in self.manifest.entries.iter().filter(|e| e.stored) {
+        for e in manifest.entries.iter_mut().filter(|e| e.stored) {
             let Some(&j) = self.holder.get(&e.key) else { continue };
+            progress.start_file(keys::path_for(&e.key).display().to_string());
+            if e.chunks_only() {
+                if complete {
+                    // A complete archive holds every file whole.
+                    let (Some(places), Some(chunks)) = (chunk_places.as_ref(), e.chunks.as_mut()) else {
+                        continue;
+                    };
+                    let reader = places.reader(&places.all, &form, repo);
+                    let (_, hash) = writer.add_with(&e.key, e.size, e.mtime_ns, &mut |out| {
+                        reader.write_all(&chunks.list, out, &mut |n| progress.add(n))
+                    })?;
+                    if e.hash.as_ref().is_some_and(|h| *h != hash) {
+                        return Err(EngineError::Damaged {
+                            archive: self.target.to_string(),
+                            message: format!("{} does not match its hash once put together", e.key),
+                        });
+                    }
+                    chunks.whole = true;
+                }
+                progress.file_done(FileAction::Moved, e.size);
+                continue;
+            }
             let (Some(slot), Some(name)) = (readers.get_mut(j), self.members.get(j)) else { continue };
             if slot.is_none() {
                 *slot = Some(Reader::open(&repo.dir(name), repo.keys())?);
             }
             let reader = slot.as_mut().expect("opened above");
-            progress.start_file(archeion_core::keys::path_for(&e.key).display().to_string());
             writer.add_from(reader, &e.key, e.mtime_ns)?;
             progress.add(e.size);
+            progress.file_done(FileAction::Moved, e.size);
         }
         drop(readers);
-        let mut manifest = self.manifest.clone();
+        if let Some(places) = &chunk_places {
+            places.keep_needed(&manifest, &staging, &form, repo)?;
+        }
         for e in &mut manifest.entries {
-            e.blob = if e.stored { writer.stored_as(&e.key) } else { None };
+            e.blob = if e.whole_copy() { writer.stored_as(&e.key) } else { None };
         }
         writer.finish()?;
         repo.write_manifest(&staging, &manifest)?;
         repo.commit_merge(&staging, &self.target, &self.members)?;
+        for (key, size) in &self.dropped {
+            progress.listed(dropped(key, *size));
+        }
         tracing::info!(target_archive = %self.target, members = self.members.len(), "group merged");
+        Ok(())
+    }
+}
+
+/// Where the chunks of the destination are, seen from one merge group.
+struct ChunkPlaces {
+    /// Every archive folder, oldest first.
+    dirs: Vec<PathBuf>,
+    /// Chunks readable anywhere.
+    all: ChunkIndex,
+    /// Chunks readable inside the group's members.
+    members: ChunkIndex,
+    /// Chunks readable outside the group, which stays as it is.
+    outside: HashSet<ChunkId>,
+    /// Chunks listed by the manifests outside the group.
+    needed: HashSet<ChunkRef>,
+}
+
+impl ChunkPlaces {
+    /// Reads every archive of the destination as it is now.
+    fn read(repo: &Repo, members: &[ArchiveName], form: &Form) -> Result<Self> {
+        let archives = repo.archives()?;
+        let dirs: Vec<PathBuf> = archives.iter().map(|a| repo.dir(a)).collect();
+        let mut places = Self {
+            dirs: Vec::new(),
+            all: ChunkIndex::default(),
+            members: ChunkIndex::default(),
+            outside: HashSet::new(),
+            needed: HashSet::new(),
+        };
+        for (i, (name, dir)) in archives.iter().zip(&dirs).enumerate() {
+            let files = form.list(dir)?;
+            let m = repo.manifest(name)?;
+            places.all.add_files(i, files.iter().copied());
+            places.all.add_whole_copies(i, &m);
+            if members.contains(name) {
+                places.members.add_files(i, files);
+                places.members.add_whole_copies(i, &m);
+            } else {
+                places.outside.extend(files);
+                places.outside.extend(chunks::in_whole_copies(&m));
+                places.needed.extend(chunks::referenced(&m).copied());
+            }
+        }
+        places.dirs = dirs;
+        Ok(places)
+    }
+
+    fn reader<'a>(&'a self, index: &'a ChunkIndex, form: &'a Form, repo: &'a Repo) -> ChunkReader<'a> {
+        ChunkReader { index, dirs: &self.dirs, form, keys: repo.keys() }
+    }
+
+    /// Puts into the merged archive in `staging` (whose manifest is
+    /// `merged`) a chunk file for every chunk that a remaining manifest
+    /// lists and that nothing else remaining provides: linked from a
+    /// member's chunk file, or cut out of a member's whole copy.
+    fn keep_needed(
+        &self,
+        merged: &Manifest,
+        staging: &std::path::Path,
+        form: &Form,
+        repo: &Repo,
+    ) -> Result<()> {
+        let in_target: HashSet<ChunkId> = chunks::in_whole_copies(merged).collect();
+        let mut wanted: HashSet<ChunkRef> = self.needed.clone();
+        wanted.extend(chunks::referenced(merged).copied());
+        let mut from_copies = Vec::new();
+        let mut linked = 0u64;
+        for chunk in wanted {
+            if self.outside.contains(&chunk.id) || in_target.contains(&chunk.id) {
+                continue;
+            }
+            match self.members.file_of(&chunk.id).and_then(|a| self.dirs.get(a)) {
+                Some(dir) => {
+                    let ctx = format!("merging chunk {}", form.relative(&chunk.id));
+                    link_or_copy(&form.path(dir, &chunk.id), &form.path(staging, &chunk.id), &ctx)?;
+                    linked += 1;
+                }
+                None => from_copies.push(chunk),
+            }
+        }
+        let cut = from_copies.len();
+        self.reader(&self.members, form, repo)
+            .for_each(&from_copies, &mut |chunk, data| form.write(staging, &chunk.id, data, true))?;
+        tracing::info!(linked, cut, "chunks kept in the merged archive");
         Ok(())
     }
 }

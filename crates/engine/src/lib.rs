@@ -13,7 +13,13 @@
 //!   zipped/C/Users/.../a.txt.zip content, one zip per file (default), or
 //!   data/C/Users/.../a.txt       plain copies
 //! 2026-10-30_213000_I/           incremental: only new or changed files
+//!   chunks/ab/<hash>[.zip]       new chunks of files saved as chunks
 //! ```
+//!
+//! Large files (every file, on an encrypted destination) are saved as
+//! content-defined chunks: a complete archive keeps them whole and lists
+//! their chunks, an incremental stores only the chunks the destination
+//! does not hold yet (see the `chunks` module and `docs/large-files.md`).
 //!
 //! Every change is made in a temporary folder (`*.partial`, `*.merging`)
 //! and committed by a rename, so an interrupted run (Cancel, power loss,
@@ -25,8 +31,11 @@
 
 mod backup;
 mod browse;
+mod chunker;
+mod chunks;
 mod container;
 mod crypto;
+mod extract;
 mod merge;
 mod progress;
 mod repo;
@@ -35,15 +44,18 @@ mod resume;
 mod space;
 mod verify;
 
-pub use backup::{backup, backup_stopping_after};
+pub use backup::{Tuning, backup, backup_stopping_after, backup_tuned};
 pub use browse::{
-    ExistingFormat, FileVersion, SearchHit, archive_manifest, change_password, check_password,
-    existing_format, file_versions, recovery_key, search,
+    Catalog, CatalogArchive, CatalogEntry, ExistingFormat, FileVersion, SearchHit, archive_manifest, catalog,
+    change_password, check_password, destination_reachable, existing_format, file_versions, free_space,
+    recovery_key, search,
 };
+pub use chunker::ChunkParams;
 pub use crypto::Password;
-pub use merge::{delete_archive, merge, merge_range};
-pub use repo::list_archives;
-pub use restore::{RestoreRequest, RestoreTarget, restore};
+pub use extract::{ExtractRequest, Secret, extract};
+pub use merge::{delete_archive, merge, merge_pending, merge_range};
+pub use repo::{adopt_destination, destination_busy, destination_owner, list_archives};
+pub use restore::{RestoreItem, RestoreRequest, RestoreTarget, restore};
 pub use verify::verify;
 
 use archeion_core::RunEvent;

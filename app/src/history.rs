@@ -6,9 +6,17 @@
 //! are appended as they happen, so a run that is stopped or crashes still
 //! leaves its log, just without the final line. File names start with the
 //! start time, so they sort in time order.
+//!
+//! Beside each run log, a companion file with the same name ending in
+//! `.files.jsonl` lists every file the run handled ([`RunEvent::Files`]
+//! batches, and the skipped files again so the list keeps the order of the
+//! run), in the same line format without the header. It can grow to many
+//! megabytes, so it is kept apart: the Activity list reads every run log,
+//! the file list is read only for a run's full log. It goes when its run
+//! log is pruned. Runs of versions before it have no companion file.
 
 use crate::activity::Op;
-use archeion_core::{ProfileId, RunEvent, profile::Verification};
+use archeion_core::{FileDone, ProfileId, RunEvent, Skipped, profile::Verification};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, OpenOptions},
@@ -64,9 +72,73 @@ impl Line {
     }
 }
 
-/// Progress is shown live, not logged.
+/// Progress is shown live, not logged; the files go to the companion file.
 pub fn is_logged(event: &RunEvent) -> bool {
-    !matches!(event, RunEvent::Progress { .. })
+    !matches!(event, RunEvent::Progress { .. } | RunEvent::Files { .. })
+}
+
+/// Events written to the companion file of the files handled.
+pub fn is_file_event(event: &RunEvent) -> bool {
+    matches!(event, RunEvent::Files { .. } | RunEvent::Skipped(_))
+}
+
+/// End of the name of a companion file, after the run log's stem.
+const FILES_SUFFIX: &str = ".files.jsonl";
+
+/// The companion file of the run log `log`: `<same stem>.files.jsonl`.
+pub fn files_path(log: &Path) -> PathBuf {
+    let stem = log.file_stem().map_or_else(|| "run".into(), |s| s.to_string_lossy().into_owned());
+    log.with_file_name(format!("{stem}{FILES_SUFFIX}"))
+}
+
+/// A run log, not its companion file nor anything else in the folder.
+fn is_run_log(path: &Path) -> bool {
+    let name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+    name.ends_with(".jsonl") && !name.ends_with(FILES_SUFFIX)
+}
+
+/// One file of a run's list, as written to the companion file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FileEntry {
+    Done(FileDone),
+    Skipped(Skipped),
+}
+
+/// A file of a run's list with the time it was written down (at most
+/// about a second after it was handled: files come in batches).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileRecord {
+    /// Milliseconds since the Unix epoch.
+    pub at_ms: i64,
+    pub entry: FileEntry,
+}
+
+/// Parses a companion file's text into the files in the order of the run;
+/// unreadable lines are skipped, as in [`RunLog::parse`].
+pub fn parse_files(text: &str) -> Vec<FileRecord> {
+    let mut out = Vec::new();
+    for line in text.lines().filter_map(|l| serde_json::from_str::<Line>(l).ok()) {
+        match line.event {
+            Some(RunEvent::Files { files }) => out.extend(
+                files.into_iter().map(|f| FileRecord { at_ms: line.at_ms, entry: FileEntry::Done(f) }),
+            ),
+            Some(RunEvent::Skipped(s)) => {
+                out.push(FileRecord { at_ms: line.at_ms, entry: FileEntry::Skipped(s) })
+            }
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Reads the companion file of the run log `log`; `None` when there is
+/// none (a run of an older version).
+pub fn read_files(log: &Path) -> std::io::Result<Option<Vec<FileRecord>>> {
+    match fs::read_to_string(files_path(log)) {
+        Ok(text) => Ok(Some(parse_files(&text))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e),
+    }
 }
 
 /// Now, in milliseconds since the Unix epoch.
@@ -100,6 +172,14 @@ pub struct Writer {
 impl Writer {
     /// Creates the log at `path` (and its folder) with `header`.
     pub fn create(path: &Path, header: &Header) -> Self {
+        let w = Self::create_plain(path);
+        w.write_json(header);
+        w
+    }
+
+    /// Creates a file at `path` (and its folder) for lines without a
+    /// header: the companion file of the files handled.
+    pub fn create_plain(path: &Path) -> Self {
         let file = path
             .parent()
             .map_or(Ok(()), fs::create_dir_all)
@@ -111,9 +191,7 @@ impl Writer {
                 None
             }
         };
-        let w = Self { file: Mutex::new(file) };
-        w.write_json(header);
-        w
+        Self { file: Mutex::new(file) }
     }
 
     /// Appends to an existing log (the window adding "cancelled").
@@ -195,6 +273,16 @@ pub fn last_finished(runs: &[RunLog], profile: ProfileId, op: Op, detail: &str) 
         .max()
 }
 
+/// End of the newest backup of `profile` that finished, whatever its kind:
+/// for event backups that come too soon and for "no backup for N days".
+pub fn last_backup(runs: &[RunLog], profile: ProfileId) -> Option<i64> {
+    runs.iter()
+        .filter(|r| r.header.profile == profile && r.header.op == Op::Backup)
+        .filter_map(|r| r.end().filter(|l| matches!(l.event, Some(RunEvent::Finished { .. }))))
+        .map(|l| l.at_ms)
+        .max()
+}
+
 /// Which check is due now: `Some(None)` the full check, `Some(Some(n))` a
 /// restore test of `n` files, `None` nothing. A full check also counts as
 /// a restore test. Every-0-days means never.
@@ -216,22 +304,25 @@ pub fn check_due(
     }
 }
 
-/// Deletes all but the newest `keep` logs.
+/// Deletes all but the newest `keep` logs, each with its companion file.
 pub fn prune(dir: &Path, keep: usize) {
     let paths = log_files(dir);
     let excess = paths.len().saturating_sub(keep);
     for p in paths.into_iter().take(excess) {
-        if let Err(e) = fs::remove_file(&p) {
-            tracing::warn!(error = %e, path = %p.display(), "removing an old run log");
+        for file in [files_path(&p), p] {
+            match fs::remove_file(&file) {
+                Ok(()) => {}
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => tracing::warn!(error = %e, path = %file.display(), "removing an old run log"),
+            }
         }
     }
 }
 
-/// Log files, oldest first.
+/// Run log files, oldest first.
 fn log_files(dir: &Path) -> Vec<PathBuf> {
     let Ok(entries) = fs::read_dir(dir.join(LOG_DIR)) else { return Vec::new() };
-    let mut paths: Vec<PathBuf> =
-        entries.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "jsonl")).collect();
+    let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).filter(|p| is_run_log(p)).collect();
     paths.sort();
     paths
 }
@@ -239,7 +330,7 @@ fn log_files(dir: &Path) -> Vec<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use archeion_core::{Phase, Skipped, Summary};
+    use archeion_core::{FileAction, Phase, Summary};
 
     fn header() -> Header {
         Header {
@@ -253,6 +344,26 @@ mod tests {
     }
 
     #[test]
+    fn the_last_finished_backup_of_any_kind_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut h = header();
+        let finished = Line::event(
+            h.started_ms + 60_000,
+            RunEvent::Finished { summary: Summary::Backup(archeion_core::BackupReport::default()) },
+        );
+        let path = new_log_path(dir.path(), h.op, h.profile);
+        Writer::create(&path, &h).write(&finished);
+        h.detail = None;
+        h.started_ms += 3_600_000;
+        let failed = Line::event(h.started_ms + 1, RunEvent::Busy);
+        let path = dir.path().join(LOG_DIR).join("later-backup.jsonl");
+        Writer::create(&path, &h).write(&failed);
+        let runs = list(dir.path(), KEEP_LOGS);
+        assert_eq!(last_backup(&runs, h.profile), Some(finished.at_ms));
+        assert_eq!(last_backup(&runs, ProfileId::new_random()), None);
+    }
+
+    #[test]
     fn a_log_is_written_and_read_back_without_progress() {
         let dir = tempfile::tempdir().unwrap();
         let h = header();
@@ -260,7 +371,14 @@ mod tests {
         let w = Writer::create(&path, &h);
         for ev in [
             RunEvent::Phase { phase: Phase::Copying },
-            RunEvent::Progress { done: 1, total: 2, files_done: 1, files_total: 2, current: String::new() },
+            RunEvent::Progress {
+                done: 1,
+                total: 2,
+                files_done: 1,
+                files_total: 2,
+                current: String::new(),
+                detail: archeion_core::PhaseDetail::default(),
+            },
             RunEvent::Skipped(Skipped { path: r"C:\a.pst".into(), reason: "in use".into() }),
             RunEvent::Finished { summary: Summary::Backup(archeion_core::BackupReport::default()) },
         ] {
@@ -307,6 +425,90 @@ mod tests {
         let names: Vec<_> =
             logs.iter().map(|l| l.path.file_name().unwrap().to_string_lossy().into_owned()).collect();
         assert_eq!(names, vec!["20261003-000000-000-run-a.jsonl", "20261002-000000-000-run-a.jsonl"]);
+    }
+
+    #[test]
+    fn other_files_in_the_logs_folder_are_neither_listed_nor_pruned() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path().join(LOG_DIR);
+        Writer::create(&logs.join("20261001-000000-000-run-a.jsonl"), &header());
+        fs::write(logs.join("20261001-000000-000-run-a.txt"), "text log").unwrap();
+        prune(dir.path(), 1);
+        assert_eq!(list(dir.path(), 10).len(), 1);
+        assert!(logs.join("20261001-000000-000-run-a.txt").exists());
+    }
+
+    #[test]
+    fn the_files_go_to_the_companion_and_are_read_back_in_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let h = header();
+        let log = new_log_path(dir.path(), h.op, h.profile);
+        let files = files_path(&log);
+        assert_eq!(
+            files.file_name().unwrap().to_string_lossy(),
+            format!("{}.files.jsonl", log.file_stem().unwrap().to_string_lossy())
+        );
+        let main = Writer::create(&log, &h);
+        assert_eq!(read_files(&log).unwrap(), None, "no companion: an older run");
+        let companion = Writer::create_plain(&files);
+        assert_eq!(read_files(&log).unwrap(), Some(Vec::new()), "a run that handled no file");
+        let events = [
+            RunEvent::Files { files: vec![FileDone::new(r"C:\a.txt", FileAction::New, 5)] },
+            RunEvent::Skipped(Skipped { path: r"C:\b.pst".into(), reason: "in use".into() }),
+            RunEvent::Files {
+                files: vec![
+                    FileDone::new(r"C:\c.txt", FileAction::Changed, 6),
+                    FileDone::new(r"C:\d.txt", FileAction::Deleted, 7),
+                ],
+            },
+        ];
+        for (i, ev) in events.into_iter().enumerate() {
+            let at = 10 + i64::try_from(i).unwrap();
+            if is_file_event(&ev) {
+                companion.write(&Line::event(at, ev.clone()));
+            }
+            if is_logged(&ev) {
+                main.write(&Line::event(at, ev));
+            }
+        }
+        let read = read_files(&log).unwrap().unwrap();
+        let paths: Vec<(i64, String)> = read
+            .iter()
+            .map(|r| match &r.entry {
+                FileEntry::Done(f) => (r.at_ms, f.path.clone()),
+                FileEntry::Skipped(s) => (r.at_ms, format!("skipped {}", s.path)),
+            })
+            .collect();
+        assert_eq!(
+            paths,
+            [
+                (10, r"C:\a.txt".to_owned()),
+                (11, r"skipped C:\b.pst".to_owned()),
+                (12, r"C:\c.txt".to_owned()),
+                (12, r"C:\d.txt".to_owned())
+            ]
+        );
+        let runs = list(dir.path(), 10);
+        assert_eq!(runs.len(), 1, "the companion is not a run");
+        assert_eq!(runs[0].lines.len(), 1, "only the skipped file is in the run log");
+        assert_eq!(runs[0].skipped(), 1);
+    }
+
+    #[test]
+    fn a_pruned_run_takes_its_companion_along() {
+        let dir = tempfile::tempdir().unwrap();
+        let logs = dir.path().join(LOG_DIR);
+        let old = logs.join("20261001-000000-000-run-a.jsonl");
+        let new = logs.join("20261002-000000-000-run-a.jsonl");
+        for log in [&old, &new] {
+            Writer::create(log, &header());
+            Writer::create_plain(&files_path(log));
+        }
+        prune(dir.path(), 1);
+        assert!(!old.exists() && !files_path(&old).exists());
+        assert!(new.exists() && files_path(&new).exists());
+        prune(dir.path(), 1);
+        assert!(files_path(&new).exists(), "a companion never counts as a run");
     }
 
     #[test]

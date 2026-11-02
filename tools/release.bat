@@ -1,6 +1,9 @@
 @echo off
-rem Optimised build of the executable. Output: tools\release.log
-cd /d "%~dp0.."
-set CARGO_TERM_COLOR=never
-cargo build --release -p archeion > tools\release.log 2>&1
-echo RELEASE DONE %errorlevel% >> tools\release.log
+rem Optimised build of archeion.exe, step by step on screen and in
+rem tools\release.log. The last line of the log is "RELEASE DONE <code>":
+rem 0 means the executable was built. Options are passed to tools\release.ps1:
+rem   -NoPause   never wait for Enter at the end (started by a double-click,
+rem              the window otherwise waits so the summary stays readable)
+rem   -Verbose   also run cargo with --verbose (every rustc command line)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0release.ps1" %*
+exit /b %errorlevel%

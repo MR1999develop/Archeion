@@ -3,20 +3,24 @@
 use super::{
     activity::phase_text,
     editor::{self, Drafts, FormatLock, PasswordStatus, RunChoice},
+    help::{self, Help},
     history::HistoryView,
     restore::{Action, RestoreView},
+    settings::{self, Preferences},
     theme,
+    tray::{Tray, TrayCommand},
 };
 use crate::{
     activity::{Activity, Op, Outcome},
-    credentials,
+    autostart, credentials,
     i18n::{Tr, arg},
+    instance::Primary,
     job::Job,
     storage::Storage,
 };
-use archeion_core::{Destination, Profile, ProfileId, Settings, Summary};
+use archeion_core::{Destination, Profile, ProfileId, Schedule, Settings, Summary};
 use archeion_engine::{EngineError, Password};
-use archeion_scheduler::{Scheduler as _, TaskKind, TaskSpec, WindowsTaskScheduler};
+use archeion_scheduler::{Scheduler as _, SchedulerError, TaskKind, TaskSpec, WindowsTaskScheduler};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, Ui};
 use std::{
     sync::mpsc,
@@ -30,12 +34,17 @@ const SPINNER_DELAY: Duration = Duration::from_secs(1);
 /// Scheduled tasks are updated this long after the last schedule edit, so
 /// dragging a time does not start `schtasks.exe` at every step.
 const SCHEDULE_DEBOUNCE: Duration = Duration::from_secs(1);
+/// The automatic merge looks for work this long after the window opens,
+/// then at this interval, and shortly after each backup.
+const AUTO_MERGE_FIRST: Duration = Duration::from_secs(30);
+const AUTO_MERGE_EVERY: Duration = Duration::from_secs(15 * 60);
+const AUTO_MERGE_AFTER_RUN: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Settings,
     Backups,
-    /// The running (or last) backup, merge or restore.
+    /// The running backup, merge or restore, and the log of past runs.
     Activity,
 }
 
@@ -67,10 +76,51 @@ pub struct ArcheionApp {
     removed: Option<Profile>,
     /// Profile whose scheduled tasks must be updated, and when it changed.
     schedule_pending: Option<(ProfileId, Instant)>,
+    /// Startup check of the scheduled tasks, running in the background:
+    /// the problems it met.
+    task_sync: Option<mpsc::Receiver<Vec<String>>>,
+    /// Run started by the Run button of an encrypted profile, waiting for
+    /// the typed password to be checked and saved.
+    run_after_password: Option<(ProfileId, RunChoice)>,
+    auto_merge: AutoMerge,
+    /// The user closed the window while a run was going: it closes when
+    /// the run ends.
+    close_after_run: bool,
+    /// Icon in the notification area, when Windows gave one.
+    tray: Option<Tray>,
+    /// Quit was chosen (menu or tray): the window really closes instead of
+    /// going to the notification area.
+    quitting: bool,
+    /// Started with Windows: hide the window after its first frame.
+    start_hidden: bool,
+    /// Another launch of Archeion asked for this window.
+    wake: Option<mpsc::Receiver<()>>,
+    /// The Help windows: user guide and About.
+    help: Help,
+    /// The Preferences window: language and window behaviour.
+    preferences: Preferences,
+}
+
+/// The automatic merge, which runs while the window is open (it has no
+/// scheduled task): the next look for work, and a look in progress.
+#[derive(Debug)]
+struct AutoMerge {
+    next_check: Instant,
+    /// The profile to merge, if the look found one.
+    rx: Option<mpsc::Receiver<Option<ProfileId>>>,
+}
+
+impl Default for AutoMerge {
+    fn default() -> Self {
+        Self { next_check: Instant::now() + AUTO_MERGE_FIRST, rx: None }
+    }
 }
 
 impl ArcheionApp {
-    pub fn new(storage: Storage) -> Self {
+    /// The window's state. `start_hidden`: wait in the notification area
+    /// (when there is one). `primary`: the single-instance claim, served
+    /// here so that a second launch brings this window forward.
+    pub fn new(storage: Storage, ctx: &egui::Context, start_hidden: bool, primary: Option<Primary>) -> Self {
         let (settings, read_only, banner) = match storage.load() {
             Ok(s) => (s, false, None),
             Err(e) => {
@@ -99,29 +149,79 @@ impl ArcheionApp {
             error: None,
             removed: None,
             schedule_pending: None,
+            task_sync: None,
+            run_after_password: None,
+            auto_merge: AutoMerge::default(),
+            close_after_run: false,
+            tray: None,
+            quitting: false,
+            start_hidden: false,
+            wake: None,
+            help: Help::default(),
+            preferences: Preferences::default(),
         };
-        app.move_legacy_tasks();
+        match Tray::new(ctx, &app.tr) {
+            Ok(tray) => {
+                tray.set_visible(app.settings.window.close_to_tray);
+                app.tray = Some(tray);
+            }
+            Err(e) => tracing::warn!(error = %e, "no notification-area icon"),
+        }
+        // Hidden only where the user can get the window back.
+        app.start_hidden = start_hidden && app.hides_to_tray();
+        if let Some(primary) = primary {
+            let (tx, rx) = mpsc::channel();
+            let ctx = ctx.clone();
+            primary.serve(move || {
+                let _ = tx.send(());
+                ctx.request_repaint();
+            });
+            app.wake = Some(rx);
+        }
+        if !app.read_only {
+            crate::storage::remove_stale_requests(app.storage.dir());
+            app.start_task_sync();
+        }
         app
     }
 
-    /// Once: replaces the scheduled tasks of Archeion (the program's first
-    /// name, whose executable no longer exists) with Archeion's.
-    fn move_legacy_tasks(&mut self) {
-        if self.read_only || !self.storage.first_time("tasks-renamed") {
-            return;
-        }
-        let ids: Vec<ProfileId> = self.settings.profiles.iter().map(|p| p.id).collect();
-        for id in ids {
-            let mut had = false;
-            for kind in TaskKind::ALL {
-                match WindowsTaskScheduler.remove_legacy(id, kind) {
-                    Ok(found) => had |= found,
-                    Err(e) => tracing::warn!(error = %e, ?kind, "removing a Archeion task"),
-                }
+    /// True when closing the window hides it in the notification area.
+    fn hides_to_tray(&self) -> bool {
+        self.tray.is_some() && self.settings.window.close_to_tray
+    }
+
+    /// Checks in the background that every automatic profile has its
+    /// scheduled tasks and that they start this executable, registering
+    /// them again otherwise: the program was moved, a portable copy runs
+    /// from another folder, or the tasks were deleted by hand. The first
+    /// time, also removes the tasks of Archeion (the program's first name).
+    fn start_task_sync(&mut self) {
+        let exe = match std::env::current_exe() {
+            Ok(exe) => exe,
+            Err(e) => {
+                tracing::warn!(error = %e, "executable path unknown: scheduled tasks not checked");
+                return;
             }
-            if had {
-                self.apply_schedule(id);
+        };
+        let remove_legacy = self.storage.first_time("tasks-renamed");
+        let user = windows_user();
+        let specs: Vec<TaskSpec> =
+            self.settings.profiles.iter().flat_map(|p| task_specs(p, &exe, &user)).collect();
+        let watch = watch_wanted(&self.settings.profiles);
+        let start_with_windows = self.settings.window.start_with_windows;
+        let (tx, rx) = mpsc::channel();
+        let spawned = std::thread::Builder::new().name("task-sync".into()).spawn(move || {
+            let mut problems = sync_tasks(&specs, remove_legacy);
+            problems.extend(sync_watch(watch, &exe, &user));
+            if let Err(e) = autostart::sync(start_with_windows, &exe) {
+                tracing::error!(error = %e, "updating the start with Windows");
+                problems.push(e.to_string());
             }
+            let _ = tx.send(problems);
+        });
+        match spawned {
+            Ok(_) => self.task_sync = Some(rx),
+            Err(e) => tracing::warn!(error = %e, "scheduled tasks not checked"),
         }
     }
 
@@ -156,19 +256,19 @@ impl ArcheionApp {
                 return;
             }
         };
-        for (kind, schedule) in [(TaskKind::Backup, p.schedule), (TaskKind::Merge, p.merge.schedule)] {
-            let spec = TaskSpec {
-                profile_id: id,
-                profile_name: p.name.clone(),
-                kind,
-                schedule,
-                executable: exe.clone(),
-            };
+        let user = windows_user();
+        for spec in task_specs(p, &exe, &user) {
             if let Err(e) = WindowsTaskScheduler.apply(&spec) {
-                tracing::error!(error = %e, ?kind, "updating scheduled task");
+                tracing::error!(error = %e, kind = ?spec.kind, "updating scheduled task");
                 self.error = Some(self.tr.t_args("schedule-failed", &[("detail", arg(e.to_string()))]));
                 return;
             }
+        }
+        // The daily "no recent backup" check exists while a profile wants it.
+        let watch = watch_wanted(&self.settings.profiles);
+        if let Err(e) = WindowsTaskScheduler.apply_watch(watch, &exe, &user) {
+            tracing::error!(error = %e, "updating the watch task");
+            self.error = Some(self.tr.t_args("schedule-failed", &[("detail", arg(e.to_string()))]));
         }
     }
 
@@ -185,7 +285,7 @@ impl ArcheionApp {
         if self.selected != Some(id) {
             self.flush_schedule(ctx, true);
             self.selected = Some(id);
-            self.restore.invalidate();
+            // The Backups tab keeps what it read per profile.
             self.drafts.clear_password();
             self.password.hide_recovery();
         }
@@ -215,6 +315,19 @@ impl ArcheionApp {
     }
 
     fn start_with(&mut self, ctx: &egui::Context, id: ProfileId, op: Op, extra: Vec<std::ffi::OsString>) {
+        self.start_job(ctx, id, op, extra, true);
+    }
+
+    /// Starts a worker. `show` switches to the Activity tab (a run the user
+    /// asked for); an automatic merge runs without moving the user away.
+    fn start_job(
+        &mut self,
+        ctx: &egui::Context,
+        id: ProfileId,
+        op: Op,
+        extra: Vec<std::ffi::OsString>,
+        show: bool,
+    ) {
         if self.job.is_some() {
             return;
         }
@@ -222,10 +335,84 @@ impl ArcheionApp {
         match Job::start(ctx, id, op, extra, log) {
             Ok(job) => {
                 self.job = Some(job);
-                self.tab = Tab::Activity;
-                self.history.show_current();
+                if show {
+                    self.tab = Tab::Activity;
+                    self.history.show_current();
+                }
             }
             Err(e) => self.error = Some(self.tr.t_args("start-failed", &[("detail", arg(e.to_string()))])),
+        }
+    }
+
+    /// Merges by the rules, while the window is open, the first profile
+    /// whose old backups are due for a merge. Nothing happens while this
+    /// window runs anything, nor on a destination another run holds (a
+    /// backup started by Task Scheduler, another window): the next look
+    /// tries again. Only archive names are read to decide, without a lock.
+    fn auto_merge(&mut self, ctx: &egui::Context) {
+        if let Some(rx) = &self.auto_merge.rx {
+            match rx.try_recv() {
+                Ok(found) => {
+                    self.auto_merge.rx = None;
+                    if let Some(id) = found
+                        && self.job.is_none()
+                        && !self.close_after_run
+                    {
+                        tracing::info!(profile = %id, "automatic merge");
+                        // Logged as automatic, like the scheduled runs.
+                        self.start_job(ctx, id, Op::Merge, vec!["--scheduled".into()], false);
+                    }
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.auto_merge.rx = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+            return;
+        }
+        if self.job.is_some() || self.read_only || self.close_after_run {
+            return;
+        }
+        let now = Instant::now();
+        if now < self.auto_merge.next_check {
+            ctx.request_repaint_after(self.auto_merge.next_check - now);
+            return;
+        }
+        self.auto_merge.next_check = now + AUTO_MERGE_EVERY;
+        let profiles: Vec<Profile> =
+            self.settings.profiles.iter().filter(|p| p.validate().is_ok()).cloned().collect();
+        if profiles.is_empty() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let ctx = ctx.clone();
+        let spawned = std::thread::Builder::new().name("auto-merge".into()).spawn(move || {
+            let found = profiles
+                .iter()
+                .find(|p| {
+                    archeion_engine::merge_pending(p).unwrap_or(false)
+                        && !archeion_engine::destination_busy(p)
+                })
+                .map(|p| p.id);
+            let _ = tx.send(found);
+            ctx.request_repaint();
+        });
+        if spawned.is_ok() {
+            self.auto_merge.rx = Some(rx);
+        }
+    }
+
+    /// Gives the backups of a deleted profile at the destination to `id`.
+    fn adopt_destination(&mut self, id: ProfileId) {
+        let Some(p) = self.settings.profile(id).cloned() else { return };
+        match archeion_engine::adopt_destination(&p) {
+            Ok(()) => {
+                self.format.invalidate();
+                self.restore.invalidate();
+                self.history.invalidate();
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "taking over the destination");
+                self.error = Some(self.tr.t_args("dest-adopt-failed", &[("detail", arg(e.to_string()))]));
+            }
         }
     }
 
@@ -241,7 +428,10 @@ impl ArcheionApp {
                 tracing::warn!(error = %e, ?kind, "removing scheduled task");
             }
         }
-        self.removed = Some(profile);
+        // Only the last deletion can be undone: an earlier one is final now.
+        if let Some(previous) = self.removed.replace(profile) {
+            forget_password(previous.id);
+        }
         self.selected = self.settings.profiles.first().map(|p| p.id);
         self.restore.invalidate();
         self.save();
@@ -258,12 +448,24 @@ impl ArcheionApp {
     }
 
     fn poll(&mut self) {
+        if let Some(rx) = &self.task_sync {
+            match rx.try_recv() {
+                Ok(problems) => {
+                    self.task_sync = None;
+                    if let Some(first) = problems.into_iter().next() {
+                        self.error = Some(self.tr.t_args("schedule-failed", &[("detail", arg(first))]));
+                    }
+                }
+                Err(mpsc::TryRecvError::Disconnected) => self.task_sync = None,
+                Err(mpsc::TryRecvError::Empty) => {}
+            }
+        }
         if let Some(job) = &mut self.job
             && job.poll()
         {
             let activity = job.activity.clone();
+            self.history.run_ended(job.log_path().to_path_buf());
             self.job = None;
-            self.history.invalidate();
             // A first backup locks the format, deleting the only one frees
             // it: look at the destination again.
             self.format.invalidate();
@@ -271,13 +473,23 @@ impl ArcheionApp {
             if matches!(activity.outcome, Some(Outcome::Finished(_))) && activity.op != Op::Restore {
                 self.restore.invalidate();
             }
+            // A new backup may leave old ones to merge.
+            if activity.op == Op::Backup {
+                self.auto_merge.next_check = Instant::now() + AUTO_MERGE_AFTER_RUN;
+            }
             self.last_run = Some(activity);
         }
     }
 
     fn shortcuts(&mut self, ctx: &egui::Context) {
+        if ctx.input_mut(|i| i.consume_shortcut(&help::DOCUMENTATION)) {
+            self.help.open_docs();
+        }
         if ctx.input_mut(|i| i.consume_shortcut(&NEW_PROFILE)) {
             self.new_profile();
+        }
+        if ctx.input_mut(|i| i.consume_shortcut(&settings::OPEN)) {
+            self.preferences.open(ctx);
         }
         if ctx.input_mut(|i| i.consume_shortcut(&BACK_UP_NOW))
             && let Some(id) = self.selected
@@ -294,8 +506,14 @@ impl ArcheionApp {
                     self.new_profile();
                 }
                 ui.separator();
-                if ui.button(self.tr.t("quit")).clicked() {
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                let preferences = egui::Button::new(self.tr.t("menu-preferences")).shortcut_text("Ctrl+,");
+                if ui.add(preferences).clicked() {
+                    self.preferences.open(ui.ctx());
+                }
+                ui.separator();
+                if ui.button(self.tr.t("quit")).on_hover_text(self.tr.t("quit-hint")).clicked() {
+                    let ctx = ui.ctx().clone();
+                    self.quit(&ctx);
                 }
             });
             ui.menu_button(self.tr.t("menu-backup"), |ui| {
@@ -341,12 +559,10 @@ impl ArcheionApp {
                     .clicked()
                 {
                     self.tab = Tab::Backups;
+                    self.restore.open_files();
                 }
             });
-            ui.menu_button(self.tr.t("menu-help"), |ui| {
-                ui.label(format!("Archeion {}", env!("CARGO_PKG_VERSION")));
-                ui.label(format!("{}: {}", self.tr.t("data-folder"), self.storage.dir().display()));
-            });
+            ui.menu_button(self.tr.t("menu-help"), |ui| self.help.menu(ui, &self.tr));
         });
     }
 
@@ -414,14 +630,25 @@ impl ArcheionApp {
             Some(p) => self.format.state(ui.ctx(), p),
             None => FormatLock::Checking,
         };
+        let dest = self.format.info(&self.settings.profiles);
         let password = self.password.status(id);
         if std::mem::take(&mut self.password.just_saved) {
             self.drafts.clear_password();
+            // The Run button saved the password first: run now.
+            if let Some((pid, choice)) = self.run_after_password.take()
+                && pid == id
+            {
+                let ctx = ui.ctx().clone();
+                self.run(&ctx, id, choice);
+            }
+        }
+        if password.error.is_some() {
+            self.run_after_password = None;
         }
         let out = egui::ScrollArea::vertical()
             .show(ui, |ui| {
                 let Some(p) = self.settings.profile_mut(id) else { return editor::Outcome::default() };
-                editor::show(ui, &self.tr, p, format, &password, &mut self.drafts, busy)
+                editor::show(ui, &self.tr, p, format, &dest, &password, &mut self.drafts, busy)
             })
             .inner;
         if out.changed {
@@ -440,14 +667,20 @@ impl ArcheionApp {
                     self.password.save(ui.ctx(), p, pw, &self.tr);
                 }
             }
-            Some(editor::Command::ChangePassword(pw)) => {
+            Some(editor::Command::SavePasswordAndRun(pw, choice)) => {
                 if let Some(p) = self.settings.profile(id).cloned() {
-                    self.password.change(ui.ctx(), p, pw, &self.tr);
+                    self.password.save(ui.ctx(), p, pw, &self.tr);
+                    self.run_after_password = Some((id, choice));
                 }
             }
-            Some(editor::Command::ShowRecoveryKey) => {
+            Some(editor::Command::ChangePassword { current, new }) => {
                 if let Some(p) = self.settings.profile(id).cloned() {
-                    self.password.show_recovery(ui.ctx(), p, &self.tr);
+                    self.password.change(ui.ctx(), p, current, new, &self.tr);
+                }
+            }
+            Some(editor::Command::ShowRecoveryKey(pw)) => {
+                if let Some(p) = self.settings.profile(id).cloned() {
+                    self.password.show_recovery(ui.ctx(), p, pw, &self.tr);
                 }
             }
             Some(editor::Command::HideRecoveryKey) => self.password.hide_recovery(),
@@ -456,6 +689,7 @@ impl ArcheionApp {
                 self.verify(&ctx, id, sample);
             }
             Some(editor::Command::Delete) => self.delete(id),
+            Some(editor::Command::AdoptDestination) => self.adopt_destination(id),
             None => {}
         }
     }
@@ -515,22 +749,12 @@ impl ArcheionApp {
     }
 
     fn activity_tab(&mut self, ui: &mut Ui) {
-        let current = self.job.as_ref().map(|j| &j.activity).or(self.last_run.as_ref());
+        let running = self.job.as_ref().map(|j| &j.activity);
         let settings = &self.settings;
         let name = |id: ProfileId| settings.profile(id).map(|p| p.name.clone()).unwrap_or_default();
-        let req = self.history.show(ui, &self.tr, self.storage.dir(), current, self.selected, &name);
-        let profile = current.map(|a| a.profile);
-        if req.cancel
-            && let Some(job) = &mut self.job
-        {
+        let cancel = self.history.show(ui, &self.tr, self.storage.dir(), running, self.selected, &name);
+        if cancel && let Some(job) = &mut self.job {
             job.cancel();
-        }
-        if req.show_backups
-            && let Some(id) = profile
-        {
-            let ctx = ui.ctx().clone();
-            self.select(&ctx, id);
-            self.tab = Tab::Backups;
         }
     }
 
@@ -570,9 +794,7 @@ impl ArcheionApp {
                     && let Some(p) = self.removed.take()
                 {
                     // No Undo any more: the saved password goes too.
-                    if let Err(e) = credentials::delete(p.id) {
-                        tracing::warn!(error = %e, "removing the saved password");
-                    }
+                    forget_password(p.id);
                 }
             } else if let Some(a) = &self.last_run
                 && let Some(outcome) = &a.outcome
@@ -594,13 +816,21 @@ impl ArcheionApp {
     }
 }
 
+/// What one look at the destination found: the format lock, the free
+/// space, and the owner when it is another profile.
+type DestinationLook = (FormatLock, Option<u64>, Option<ProfileId>);
+
 /// Background look at a profile's destination: does it already hold backups,
 /// and in which format? Never blocks the window (a share may be slow).
 #[derive(Debug, Default)]
 struct FormatCheck {
     key: Option<(ProfileId, Destination)>,
     state: Option<FormatLock>,
-    rx: Option<mpsc::Receiver<FormatLock>>,
+    /// Free bytes on the destination's drive, when known.
+    free: Option<u64>,
+    /// Owner of the destination when it is another profile.
+    foreign: Option<ProfileId>,
+    rx: Option<mpsc::Receiver<DestinationLook>>,
 }
 
 impl FormatCheck {
@@ -610,12 +840,16 @@ impl FormatCheck {
 
     fn state(&mut self, ctx: &egui::Context, profile: &Profile) -> FormatLock {
         if profile.destination.is_empty() {
+            self.free = None;
+            self.foreign = None;
             return FormatLock::Free;
         }
         let key = (profile.id, profile.destination.clone());
         if self.key.as_ref() != Some(&key) {
             self.key = Some(key);
             self.state = None;
+            self.free = None;
+            self.foreign = None;
             let (tx, rx) = mpsc::channel();
             let (p, ctx) = (profile.clone(), ctx.clone());
             let spawned = std::thread::Builder::new().name("format-check".into()).spawn(move || {
@@ -624,7 +858,9 @@ impl FormatCheck {
                     Ok(Some(f)) => FormatLock::Locked { container: f.container, encrypted: f.encrypted },
                     Err(_) => FormatLock::Unreachable,
                 };
-                let _ = tx.send(lock);
+                let free = archeion_engine::free_space(&p);
+                let foreign = archeion_engine::destination_owner(&p).ok().flatten().filter(|o| *o != p.id);
+                let _ = tx.send((lock, free, foreign));
                 ctx.request_repaint();
             });
             self.rx = spawned.ok().map(|_| rx);
@@ -633,12 +869,24 @@ impl FormatCheck {
             }
         }
         if let Some(rx) = &self.rx
-            && let Ok(lock) = rx.try_recv()
+            && let Ok((lock, free, foreign)) = rx.try_recv()
         {
             self.state = Some(lock);
+            self.free = free;
+            self.foreign = foreign;
             self.rx = None;
         }
         self.state.unwrap_or(FormatLock::Checking)
+    }
+
+    /// Free space and owner found by the last look at the destination;
+    /// `profiles` names the owner when it still exists.
+    fn info(&self, profiles: &[Profile]) -> editor::DestinationInfo {
+        let foreign = self.foreign.map(|owner| match profiles.iter().find(|p| p.id == owner) {
+            Some(p) => editor::Foreign::Profile(p.name.clone()),
+            None => editor::Foreign::Deleted,
+        });
+        editor::DestinationInfo { free: self.free, foreign }
     }
 }
 
@@ -650,6 +898,19 @@ enum PasswordDone {
     Recovery(String),
 }
 
+/// Which part of the form a password job answers, to show its error there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PasswordOp {
+    /// Check and save, or change.
+    Save,
+    /// Read the recovery key.
+    Recovery,
+}
+
+/// A password job in progress: its profile, which part of the form it
+/// answers, and where its result arrives.
+type PasswordJob = (ProfileId, PasswordOp, mpsc::Receiver<Result<PasswordDone, String>>);
+
 /// The saved password of the selected profile, and a background job on it
 /// (check and save, change, read the recovery key: each derives a key with
 /// Argon2id and may read a slow share).
@@ -657,18 +918,20 @@ enum PasswordDone {
 struct PasswordState {
     /// Profile and whether a password is saved for it.
     saved: Option<(ProfileId, bool)>,
-    job: Option<(ProfileId, mpsc::Receiver<Result<PasswordDone, String>>)>,
+    job: Option<PasswordJob>,
     error: Option<(ProfileId, String)>,
     /// Recovery key on show.
     recovery: Option<(ProfileId, String)>,
+    /// Why the recovery key could not be read.
+    recovery_error: Option<(ProfileId, String)>,
     /// A save has just succeeded: the typed password can be forgotten.
     just_saved: bool,
 }
 
 impl PasswordState {
     fn status(&mut self, id: ProfileId) -> PasswordStatus {
-        if let Some((pid, rx)) = &self.job {
-            let pid = *pid;
+        if let Some((pid, op, rx)) = &self.job {
+            let (pid, op) = (*pid, *op);
             let result = match rx.try_recv() {
                 Ok(r) => Some(r),
                 Err(mpsc::TryRecvError::Empty) => None,
@@ -684,9 +947,9 @@ impl PasswordState {
                     }
                     Ok(PasswordDone::Recovery(key)) => {
                         self.recovery = Some((pid, key));
-                        self.error = None;
+                        self.recovery_error = None;
                     }
-                    Err(e) => self.error = Some((pid, e)),
+                    Err(e) => self.fail(pid, op, e),
                 }
             }
         }
@@ -703,44 +966,59 @@ impl PasswordState {
         }
         PasswordStatus {
             saved: self.saved.filter(|(pid, _)| *pid == id).map(|(_, s)| s),
-            working: self.job.as_ref().is_some_and(|(pid, _)| *pid == id),
+            working: self.job.as_ref().is_some_and(|(pid, _, _)| *pid == id),
             error: self.error.as_ref().filter(|(pid, _)| *pid == id).map(|(_, e)| e.clone()),
             recovery: self.recovery.as_ref().filter(|(pid, _)| *pid == id).map(|(_, k)| k.clone()),
+            recovery_error: self
+                .recovery_error
+                .as_ref()
+                .filter(|(pid, _)| *pid == id)
+                .map(|(_, e)| e.clone()),
         }
     }
 
     fn hide_recovery(&mut self) {
         self.recovery = None;
+        self.recovery_error = None;
+    }
+
+    /// Keeps the error of a job for the part of the form that started it.
+    fn fail(&mut self, id: ProfileId, op: PasswordOp, e: String) {
+        match op {
+            PasswordOp::Save => self.error = Some((id, e)),
+            PasswordOp::Recovery => self.recovery_error = Some((id, e)),
+        }
     }
 
     /// Checks `pw` against the destination and saves it.
     fn save(&mut self, ctx: &egui::Context, profile: Profile, pw: Password, tr: &Tr) {
         let texts = Texts::new(tr);
         let id = profile.id;
-        self.spawn(ctx, id, move || match archeion_engine::check_password(&profile, &pw) {
+        self.spawn(ctx, id, PasswordOp::Save, move || match archeion_engine::check_password(&profile, &pw) {
             Ok(()) => credentials::set(id, &pw).map(|()| PasswordDone::Saved),
             Err(e) => Err(texts.explain(&e)),
         });
     }
 
-    /// Changes the destination's password from the saved one to `new`, then
-    /// saves `new`.
-    fn change(&mut self, ctx: &egui::Context, profile: Profile, new: Password, tr: &Tr) {
+    /// Changes the destination's password from `current`, typed by the user
+    /// (not the saved one: whoever sits at the open Windows session must
+    /// know it), to `new`, then saves `new`. A wrong `current` changes
+    /// nothing.
+    fn change(&mut self, ctx: &egui::Context, profile: Profile, current: Password, new: Password, tr: &Tr) {
         let texts = Texts::new(tr);
         let id = profile.id;
-        self.spawn(ctx, id, move || {
-            let old = credentials::get(id)?.ok_or_else(|| texts.missing.clone())?;
-            archeion_engine::change_password(&profile, &old, &new).map_err(|e| texts.explain(&e))?;
+        self.spawn(ctx, id, PasswordOp::Save, move || {
+            archeion_engine::change_password(&profile, &current, &new).map_err(|e| texts.explain(&e))?;
             credentials::set(id, &new).map(|()| PasswordDone::Saved)
         });
     }
 
-    /// Reads the recovery key with the saved password.
-    fn show_recovery(&mut self, ctx: &egui::Context, profile: Profile, tr: &Tr) {
+    /// Reads the recovery key with `pw`, the current password typed by the
+    /// user (never the saved one).
+    fn show_recovery(&mut self, ctx: &egui::Context, profile: Profile, pw: Password, tr: &Tr) {
         let texts = Texts::new(tr);
         let id = profile.id;
-        self.spawn(ctx, id, move || {
-            let pw = credentials::get(id)?.ok_or_else(|| texts.missing.clone())?;
+        self.spawn(ctx, id, PasswordOp::Recovery, move || {
             match archeion_engine::recovery_key(&profile, &pw) {
                 Ok(Some(key)) => Ok(PasswordDone::Recovery(key)),
                 Ok(None) => Err(texts.missing.clone()),
@@ -753,6 +1031,7 @@ impl PasswordState {
         &mut self,
         ctx: &egui::Context,
         id: ProfileId,
+        op: PasswordOp,
         work: impl FnOnce() -> Result<PasswordDone, String> + Send + 'static,
     ) {
         if self.job.is_some() {
@@ -766,10 +1045,11 @@ impl PasswordState {
         });
         match spawned {
             Ok(_) => {
-                self.job = Some((id, rx));
+                self.job = Some((id, op, rx));
                 self.error = None;
+                self.recovery_error = None;
             }
-            Err(e) => self.error = Some((id, e.to_string())),
+            Err(e) => self.fail(id, op, e.to_string()),
         }
     }
 }
@@ -803,22 +1083,54 @@ impl Texts {
 }
 
 impl Drop for ArcheionApp {
-    /// Closing the window right after a schedule edit still applies it.
+    /// Closing the window right after a schedule edit still applies it; a
+    /// deleted profile can no longer be restored, so its saved password goes.
     fn drop(&mut self) {
         if let Some((id, _)) = self.schedule_pending.take() {
             self.apply_schedule(id);
         }
+        if let Some(p) = self.removed.take() {
+            forget_password(p.id);
+        }
+    }
+}
+
+/// Removes the saved password of a profile deleted for good.
+fn forget_password(id: ProfileId) {
+    if let Err(e) = credentials::delete(id) {
+        tracing::warn!(error = %e, "removing the saved password");
     }
 }
 
 impl eframe::App for ArcheionApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        self.poll();
         let ctx = ui.ctx().clone();
+        self.window_events(&ctx);
+        self.poll();
+        self.update_tray();
+        if self.close_after_run && self.job.is_none() {
+            // The run has ended: close now, as asked.
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
         self.shortcuts(&ctx);
         self.flush_schedule(&ctx, false);
+        self.auto_merge(&ctx);
 
         egui::Panel::top("menu").show(ui, |ui| self.menu(ui));
+        if self.close_after_run {
+            egui::Panel::top("closing").show(ui, |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.colored_label(
+                        ui.visuals().warn_fg_color,
+                        format!("⏳ {}", self.tr.t("closing-after-run")),
+                    );
+                    if ui.button(self.tr.t("closing-cancel")).clicked() {
+                        self.close_after_run = false;
+                        self.quitting = false;
+                    }
+                });
+            });
+        }
         if let Some(text) = &self.banner {
             egui::Panel::top("banner").show(ui, |ui| {
                 ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {text}"));
@@ -840,7 +1152,196 @@ impl eframe::App for ArcheionApp {
             .default_size(theme::SIDE_PANEL_WIDTH)
             .show(ui, |ui| self.profile_list(ui));
         egui::CentralPanel::default().show(ui, |ui| self.central(ui));
+        self.help.show(&ctx, &self.tr, &self.storage);
+        let current = settings::Values { language: self.settings.language, window: self.settings.window };
+        let changed = self.preferences.show(&ctx, &self.tr, self.storage.dir(), self.tray.is_some(), current);
+        if let Some(values) = changed {
+            self.apply_preferences(values);
+        }
     }
+}
+
+/// The scheduled tasks of `p`: backups and merges by the clock, backups
+/// by events.
+fn task_specs(p: &Profile, exe: &std::path::Path, user: &str) -> [TaskSpec; 3] {
+    [
+        (TaskKind::Backup, p.schedule.clone()),
+        // Merges run from the window now: a merge task left by an older
+        // version is removed.
+        (TaskKind::Merge, Schedule::Manual),
+        (TaskKind::Events, Schedule::Manual),
+    ]
+    .map(|(kind, schedule)| TaskSpec {
+        profile_id: p.id,
+        profile_name: p.name.clone(),
+        kind,
+        schedule,
+        // Backups by events are not offered in the window: no such task.
+        events: archeion_core::EventTriggers::default(),
+        executable: exe.to_path_buf(),
+        user: user.to_owned(),
+    })
+}
+
+/// True when some profile wants to be warned after days without backups.
+fn watch_wanted(profiles: &[Profile]) -> bool {
+    profiles.iter().any(|p| p.alerts.stale_days > 0 && p.backs_up_automatically())
+}
+
+/// `DOMAIN\user` of the signed-in user, for logon triggers.
+fn windows_user() -> String {
+    let user = std::env::var("USERNAME").unwrap_or_default();
+    match std::env::var("USERDOMAIN") {
+        Ok(domain) if !domain.is_empty() => format!("{domain}\\{user}"),
+        _ => user,
+    }
+}
+
+/// [`sync_tasks`] for the watch task.
+fn sync_watch(wanted: bool, exe: &std::path::Path, user: &str) -> Vec<String> {
+    let registered = match WindowsTaskScheduler.watch_executable() {
+        Ok(r) => r,
+        Err(SchedulerError::Unsupported) => return Vec::new(),
+        Err(e) => {
+            tracing::warn!(error = %e, "reading the watch task");
+            return Vec::new();
+        }
+    };
+    if !archeion_scheduler::needs_update_for(registered.as_deref(), wanted, exe) {
+        return Vec::new();
+    }
+    match WindowsTaskScheduler.apply_watch(wanted, exe, user) {
+        Ok(()) => Vec::new(),
+        Err(e) => {
+            tracing::error!(error = %e, "updating the watch task");
+            vec![e.to_string()]
+        }
+    }
+}
+
+/// Registers again the tasks of `specs` that are missing, start another
+/// executable, or should not exist (manual schedule); with `remove_legacy`,
+/// first deletes the tasks Archeion registered. Returns the problems met.
+fn sync_tasks(specs: &[TaskSpec], remove_legacy: bool) -> Vec<String> {
+    let mut problems = Vec::new();
+    for spec in specs {
+        if remove_legacy && let Err(e) = WindowsTaskScheduler.remove_legacy(spec.profile_id, spec.kind) {
+            tracing::warn!(error = %e, kind = ?spec.kind, "removing a Archeion task");
+        }
+        let registered = match WindowsTaskScheduler.registered_executable(spec.profile_id, spec.kind) {
+            Ok(r) => r,
+            Err(SchedulerError::Unsupported) => return problems,
+            Err(e) => {
+                tracing::warn!(error = %e, kind = ?spec.kind, "reading a scheduled task");
+                continue;
+            }
+        };
+        if archeion_scheduler::needs_update(registered.as_deref(), spec) {
+            tracing::info!(profile = %spec.profile_id, kind = ?spec.kind, ?registered, "updating a scheduled task");
+            if let Err(e) = WindowsTaskScheduler.apply(spec) {
+                tracing::error!(error = %e, kind = ?spec.kind, "updating a scheduled task");
+                problems.push(e.to_string());
+            }
+        }
+    }
+    problems
+}
+
+impl ArcheionApp {
+    /// Requests from outside the window's widgets: the tray icon, another
+    /// launch of Archeion, the start in the notification area, and closing.
+    fn window_events(&mut self, ctx: &egui::Context) {
+        if std::mem::take(&mut self.start_hidden) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+        }
+        let commands = self.tray.as_ref().map(Tray::commands).unwrap_or_default();
+        for cmd in commands {
+            match cmd {
+                TrayCommand::Show => show_window(ctx),
+                TrayCommand::Quit => self.quit(ctx),
+            }
+        }
+        if self.wake.as_ref().is_some_and(|rx| rx.try_iter().count() > 0) {
+            show_window(ctx);
+        }
+        self.handle_close(ctx);
+    }
+
+    /// Quit from the menu or the tray: the window closes for good (after
+    /// the run in progress, if any, which it then shows).
+    fn quit(&mut self, ctx: &egui::Context) {
+        self.quitting = true;
+        if self.job.is_some() {
+            show_window(ctx);
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+    }
+
+    /// A close request (window ✕, Alt+F4, Quit). With the notification-area
+    /// icon, ✕ only hides the window: runs, scheduled tasks and the
+    /// automatic merge go on. When really closing during a run, the window
+    /// stays, says it will close at the end, and closes then.
+    fn handle_close(&mut self, ctx: &egui::Context) {
+        if !ctx.input(|i| i.viewport().close_requested()) {
+            return;
+        }
+        if !self.quitting && self.hides_to_tray() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.send_viewport_cmd(egui::ViewportCommand::Visible(false));
+            return;
+        }
+        if self.job.is_some() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            if !self.close_after_run {
+                tracing::info!("close requested during a run: closing when it ends");
+            }
+            self.close_after_run = true;
+        }
+    }
+
+    /// The tray tooltip follows the run in progress.
+    fn update_tray(&mut self) {
+        let running = self.job.is_some().then(|| self.tr.t("tray-running"));
+        if let Some(tray) = &mut self.tray {
+            tray.set_running(running.as_deref());
+        }
+    }
+
+    /// Saves and applies what the user changed in the Preferences window.
+    fn apply_preferences(&mut self, values: settings::Values) {
+        let before = self.settings.window;
+        let after = values.window;
+        let language_changed = values.language != self.settings.language;
+        self.settings.language = values.language;
+        self.settings.window = after;
+        self.save();
+        // Every text is translated while drawing, so the window switches
+        // at the next frame. Messages already shown (error, banner) keep
+        // their language; the tray menu changes at the next start.
+        if language_changed {
+            self.tr = Tr::new(values.language);
+        }
+        if after.close_to_tray != before.close_to_tray
+            && let Some(tray) = &self.tray
+        {
+            tray.set_visible(after.close_to_tray);
+        }
+        if after.start_with_windows != before.start_with_windows {
+            let result =
+                std::env::current_exe().and_then(|exe| autostart::sync(after.start_with_windows, &exe));
+            if let Err(e) = result {
+                tracing::error!(error = %e, "updating the start with Windows");
+                self.error = Some(self.tr.t_args("autostart-failed", &[("detail", arg(e.to_string()))]));
+            }
+        }
+    }
+}
+
+/// Brings the window back from the notification area (or the taskbar).
+fn show_window(ctx: &egui::Context) {
+    ctx.send_viewport_cmd(egui::ViewportCommand::Visible(true));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+    ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
 }
 
 /// Status line for a finished run and whether it needs attention.
@@ -894,7 +1395,7 @@ fn outcome_text(tr: &Tr, name: &str, op: Op, o: &Outcome) -> (String, bool) {
         Outcome::PasswordNeeded => (tr.t("run-password-needed"), true),
         Outcome::WrongPassword => (tr.t("run-wrong-password"), true),
         Outcome::NotEnoughSpace { needed, available } => {
-            (super::activity::no_space_text(tr, *needed, *available), true)
+            (super::activity::no_space_text(tr, op, *needed, *available), true)
         }
         Outcome::DestinationUnavailable(loc) => {
             (tr.t_args("run-destination-missing", &[("location", arg(loc.clone()))]), true)

@@ -84,6 +84,69 @@ pub(crate) struct Repo {
     keys: Option<Keys>,
 }
 
+/// The profile that owns the destination of `profile`, as its descriptor
+/// says; `None` for a folder Archeion has not used yet.
+///
+/// # Errors
+/// [`EngineError::DestinationUnavailable`], or [`EngineError::Damaged`] for
+/// an unreadable descriptor.
+pub fn destination_owner(profile: &Profile) -> Result<Option<ProfileId>> {
+    let root = profile.destination.path();
+    ensure_reachable(root)?;
+    Ok(read_descriptor(root)?.map(|d| d.profile))
+}
+
+/// Gives the backups of another profile to `profile`: for a profile
+/// re-created after the old one was deleted. The archives, the format and
+/// the encryption stay as they are; only the owner changes.
+///
+/// # Errors
+/// [`EngineError::Busy`] while a run uses the destination; otherwise see
+/// [`EngineError`].
+pub fn adopt_destination(profile: &Profile) -> Result<()> {
+    let root = profile.destination.path();
+    ensure_reachable(root)?;
+    let Some(mut descriptor) = read_descriptor(root)? else { return Ok(()) };
+    let lock_path = root.join(LOCK);
+    let lock = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(EngineError::io(format!("opening {}", lock_path.display())))?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => return Err(EngineError::Busy),
+        Err(TryLockError::Error(e)) => return Err(EngineError::io("locking the destination")(e)),
+    }
+    tracing::info!(from = %descriptor.profile, to = %profile.id, "destination taken over");
+    descriptor.profile = profile.id;
+    let tmp = root.join(format!("{DESCRIPTOR}.tmp"));
+    write_durably(
+        &tmp,
+        serde_json::to_string_pretty(&descriptor).expect("descriptor serializes").as_bytes(),
+    )?;
+    let path = root.join(DESCRIPTOR);
+    retry(|| fs::rename(&tmp, &path)).map_err(EngineError::io(format!("replacing {}", path.display())))
+}
+
+/// True while a backup, merge or other run holds the destination of
+/// `profile` (its lock file is locked). A snapshot: the run may start or
+/// end right after; runs still check the lock themselves.
+#[must_use]
+pub fn destination_busy(profile: &Profile) -> bool {
+    let path = profile.destination.path().join(LOCK);
+    let Ok(file) = File::options().write(true).open(&path) else { return false };
+    match file.try_lock() {
+        Ok(()) => {
+            let _ = file.unlock();
+            false
+        }
+        Err(TryLockError::WouldBlock) => true,
+        Err(TryLockError::Error(_)) => false,
+    }
+}
+
 /// Fails when the drive or share holding `root` is not reachable.
 pub(crate) fn ensure_reachable(root: &Path) -> Result<()> {
     let volume = root.ancestors().last().unwrap_or(root);
@@ -245,9 +308,13 @@ impl Repo {
     pub(crate) fn remove_archive(&self, name: &ArchiveName) -> Result<()> {
         let dir = self.dir(name);
         let doomed = self.root.join(format!("{name}.{DELETING}"));
-        fs::rename(&dir, &doomed).map_err(EngineError::io(format!("deleting {}", dir.display())))?;
+        retry(|| fs::rename(&dir, &doomed))
+            .map_err(EngineError::io(format!("deleting {}", dir.display())))?;
         self.refresh_list_mac()?;
-        fs::remove_dir_all(&doomed).map_err(EngineError::io(format!("removing {}", doomed.display())))
+        // The archive is gone already; a folder still in use is removed
+        // by the next run.
+        remove_dir_best_effort(&doomed);
+        Ok(())
     }
 
     /// Unfinished backups (`<archive>.partial`), oldest first.
@@ -293,7 +360,7 @@ impl Repo {
     pub(crate) fn discard_partial(&self, name: &ArchiveName) -> Result<()> {
         let dir = self.partial_dir(name);
         tracing::info!(folder = %dir.display(), "discarding an unfinished backup");
-        fs::remove_dir_all(&dir).map_err(EngineError::io(format!("removing {}", dir.display())))
+        retry(|| fs::remove_dir_all(&dir)).map_err(EngineError::io(format!("removing {}", dir.display())))
     }
 
     /// Empty staging folder for a new archive.
@@ -304,7 +371,8 @@ impl Repo {
         };
         let dir = self.root.join(format!("{name}.{suffix}"));
         if dir.exists() {
-            fs::remove_dir_all(&dir).map_err(EngineError::io(format!("removing {}", dir.display())))?;
+            retry(|| fs::remove_dir_all(&dir))
+                .map_err(EngineError::io(format!("removing {}", dir.display())))?;
         }
         fs::create_dir(&dir).map_err(EngineError::io(format!("creating {}", dir.display())))?;
         Ok(dir)
@@ -313,7 +381,8 @@ impl Repo {
     /// Makes a finished backup archive visible.
     pub(crate) fn commit(&self, staging: &Path, name: &ArchiveName) -> Result<()> {
         let dir = self.dir(name);
-        fs::rename(staging, &dir).map_err(EngineError::io(format!("committing {}", dir.display())))?;
+        retry(|| fs::rename(staging, &dir))
+            .map_err(EngineError::io(format!("committing {}", dir.display())))?;
         self.refresh_list_mac()
     }
 
@@ -339,27 +408,36 @@ impl Repo {
         self.refresh_list_mac()
     }
 
+    /// Swaps the members for the merged archive, then removes them. Each
+    /// rename is retried while Windows reports a file in use. When an old
+    /// member cannot be removed yet, the merge is done all the same: the
+    /// journal stays, and the next run removes what is left.
     fn finish_merge(&self, staging: &Path, journal: &Journal) -> Result<()> {
         for m in &journal.members {
             let dir = self.root.join(m);
             if dir.exists() {
                 let old = self.root.join(format!("{m}.{OLD}"));
-                fs::rename(&dir, &old).map_err(EngineError::io(format!("moving {}", dir.display())))?;
+                retry(|| fs::rename(&dir, &old))
+                    .map_err(EngineError::io(format!("moving {}", dir.display())))?;
             }
         }
         let target = self.root.join(&journal.target);
         if staging.exists() {
-            fs::rename(staging, &target)
+            retry(|| fs::rename(staging, &target))
                 .map_err(EngineError::io(format!("committing {}", target.display())))?;
         }
+        let mut left = false;
         for m in &journal.members {
             let old = self.root.join(format!("{m}.{OLD}"));
             if old.exists() {
-                fs::remove_dir_all(&old).map_err(EngineError::io(format!("removing {}", old.display())))?;
+                left |= !remove_dir_best_effort(&old);
             }
         }
+        if left {
+            return Ok(());
+        }
         let jpath = self.root.join(JOURNAL);
-        fs::remove_file(&jpath).map_err(EngineError::io("removing the merge journal"))
+        retry(|| fs::remove_file(&jpath)).map_err(EngineError::io("removing the merge journal"))
     }
 
     /// Completes an interrupted merge and removes abandoned merge and
@@ -380,15 +458,55 @@ impl Repo {
         let entries = fs::read_dir(&self.root).map_err(EngineError::io("listing the destination"))?;
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let abandoned = [MERGING, DELETING].iter().any(|s| name.ends_with(&format!(".{s}")));
+            // With the journal handled above, an `.old` folder is a leftover.
+            let abandoned = [MERGING, DELETING, OLD].iter().any(|s| name.ends_with(&format!(".{s}")));
             if abandoned && entry.path().is_dir() {
                 tracing::info!(folder = %name, "removing an interrupted run");
-                fs::remove_dir_all(entry.path()).map_err(EngineError::io(format!("removing {name}")))?;
+                // Still in use: tried again next time; the run goes on.
+                remove_dir_best_effort(&entry.path());
                 // An interrupted deletion had already removed an archive.
                 changed |= name.ends_with(&format!(".{DELETING}"));
             }
         }
         Ok(changed)
+    }
+}
+
+/// Runs a file operation again for a few seconds while Windows reports
+/// access denied or a sharing violation: antivirus, the search indexer and
+/// thumbnail makers open new files for a moment, and a folder holding an
+/// open file can be neither renamed nor removed.
+pub(crate) fn retry<T>(mut op: impl FnMut() -> std::io::Result<T>) -> std::io::Result<T> {
+    const WAITS_MS: [u64; 8] = [50, 100, 200, 400, 600, 800, 1000, 1500];
+    let mut result = op();
+    for wait in WAITS_MS {
+        match &result {
+            Err(e) if is_transient(e) => {
+                tracing::debug!(error = %e, wait_ms = wait, "file in use: trying again");
+                std::thread::sleep(std::time::Duration::from_millis(wait));
+                result = op();
+            }
+            _ => break,
+        }
+    }
+    result
+}
+
+/// Access denied (5), sharing violation (32) or lock violation (33) on
+/// Windows; elsewhere permission errors are permanent.
+fn is_transient(e: &std::io::Error) -> bool {
+    cfg!(windows)
+        && (e.kind() == std::io::ErrorKind::PermissionDenied || matches!(e.raw_os_error(), Some(5 | 32 | 33)))
+}
+
+/// Removes `dir` with [`retry`]; false (and a warning) when it stays.
+fn remove_dir_best_effort(dir: &Path) -> bool {
+    match retry(|| fs::remove_dir_all(dir)) {
+        Ok(()) => true,
+        Err(e) => {
+            tracing::warn!(folder = %dir.display(), error = %e, "folder still in use: removed by a later run");
+            false
+        }
     }
 }
 

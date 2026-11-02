@@ -49,6 +49,7 @@ pub(crate) const KEY_FORMAT: u32 = 2;
 const NAME_KEY_CONTEXT: &str = "Archeion 2026-10-30 file name key v2";
 const LIST_KEY_CONTEXT: &str = "Archeion 2026-10-30 archive list key v2";
 const NOTE_KEY_CONTEXT: &str = "Archeion 2026-10-31 resume note key v1";
+const CHUNK_KEY_CONTEXT: &str = "Archeion 2026-11-01 chunk name key v1";
 /// Bytes of the authentication tag of a sealed note.
 const NOTE_TAG: usize = 16;
 const WRAP_ENTRY: &str = "master-key";
@@ -129,6 +130,27 @@ impl Keys {
             list: blake3::derive_key(LIST_KEY_CONTEXT, &master),
             notes: blake3::derive_key(NOTE_KEY_CONTEXT, &master),
         }
+    }
+
+    /// The keys behind a recovery key (64 hex digits; spaces, dashes and
+    /// case do not matter): for opening a destination without the
+    /// password. `None` when the text is not a recovery key; whether it is
+    /// the right one shows when a manifest is opened.
+    pub(crate) fn from_recovery_key(text: &str) -> Option<Self> {
+        let hex: String = text.chars().filter(|c| !c.is_whitespace() && *c != '-').collect();
+        let master: [u8; 32] = from_hex(&hex)?.try_into().ok()?;
+        Some(Self::from_master(master))
+    }
+
+    /// Name of a chunk with content `data`: BLAKE3 keyed with a secret of
+    /// the destination, so the name cannot be matched against the hash of
+    /// a known file. The same content has the same name in every archive
+    /// of the destination, which is what lets a chunk be stored once.
+    pub(crate) fn chunk_id(&self, data: &[u8]) -> [u8; 32] {
+        // Derived at each call rather than kept: a few hundred nanoseconds
+        // per chunk, and `Keys` stays small inside the readers and writers.
+        let key = blake3::derive_key(CHUNK_KEY_CONTEXT, &self.master);
+        *blake3::keyed_hash(&key, data).as_bytes()
     }
 
     /// Password of the zips (the recovery key).
@@ -418,6 +440,26 @@ mod tests {
         let k = Keys::from_master([0xab; 32]);
         assert_eq!(k.recovery_key().replace(' ', ""), k.password());
         assert_eq!(k.recovery_key().split(' ').count(), 16);
+    }
+
+    #[test]
+    fn a_recovery_key_gives_back_the_same_keys() {
+        let k = Keys::from_master([0x5c; 32]);
+        let typed = k.recovery_key().to_uppercase();
+        let back = Keys::from_recovery_key(&typed).unwrap();
+        assert_eq!(back.password(), k.password());
+        assert_eq!(back.chunk_id(b"x"), k.chunk_id(b"x"));
+        assert!(Keys::from_recovery_key("not a key").is_none());
+        assert!(Keys::from_recovery_key(&"ab".repeat(31)).is_none());
+    }
+
+    #[test]
+    fn chunk_names_are_keyed() {
+        let a = Keys::from_master([1; 32]);
+        let b = Keys::from_master([2; 32]);
+        assert_ne!(a.chunk_id(b"same"), b.chunk_id(b"same"));
+        assert_ne!(a.chunk_id(b"same"), *blake3::hash(b"same").as_bytes());
+        assert_eq!(a.chunk_id(b"same"), a.chunk_id(b"same"));
     }
 
     #[test]

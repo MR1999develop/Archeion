@@ -1,10 +1,11 @@
 //! End-to-end tests of the archive engine in temporary folders.
 
 use archeion_core::{
-    ArchiveKind, BackupMode, Container, Destination, FullBackupRule, Profile, Retention, RunEvent,
+    ArchiveKind, BackupMode, Container, Destination, FileAction, FileDone, FullBackupRule, Profile,
+    Retention, RunEvent, run::RECENT_FILES,
 };
 use archeion_engine::{
-    EngineError, EventSink, ExistingFormat, Password, RestoreRequest, RestoreTarget, backup,
+    EngineError, EventSink, ExistingFormat, Password, RestoreItem, RestoreRequest, RestoreTarget, backup,
     backup_stopping_after, check_password, delete_archive, file_versions, list_archives, merge, merge_range,
     restore, search, verify,
 };
@@ -51,12 +52,12 @@ fn run_backup(p: &Profile) -> archeion_core::BackupReport {
 }
 
 fn restore_all(f: &Fixture, archive: &str) {
-    let req = RestoreRequest {
-        archive: archive.to_owned(),
-        keys: Vec::new(),
-        target: RestoreTarget::Folder { path: f.restore_to.clone() },
-        overwrite: true,
-    };
+    let req = RestoreRequest::single(
+        archive,
+        Vec::new(),
+        &RestoreTarget::Folder { path: f.restore_to.clone() },
+        true,
+    );
     let r = restore(&f.profile, None, &req, &Recorder::default()).unwrap();
     assert!(r.skipped.is_empty(), "{:?}", r.skipped);
 }
@@ -276,18 +277,14 @@ fn restore_does_not_overwrite_unless_asked() {
     run_backup(&f.profile);
     let name = list_archives(&f.profile, None).unwrap().remove(0).name;
     fs::write(f.source.join("a.txt"), "edited").unwrap();
-    let req = RestoreRequest {
-        archive: name,
-        keys: vec![archeion_core::keys::key_for(&f.source.join("a.txt")).unwrap()],
-        target: RestoreTarget::Original,
-        overwrite: false,
-    };
-    let r = restore(&f.profile, None, &req, &Recorder::default()).unwrap();
+    let key = archeion_core::keys::key_for(&f.source.join("a.txt")).unwrap();
+    let req =
+        |overwrite| RestoreRequest::single(&name, vec![key.clone()], &RestoreTarget::Original, overwrite);
+    let r = restore(&f.profile, None, &req(false), &Recorder::default()).unwrap();
     assert_eq!((r.files_restored, r.files_kept), (0, 1));
     assert_eq!(fs::read_to_string(f.source.join("a.txt")).unwrap(), "edited");
 
-    let r =
-        restore(&f.profile, None, &RestoreRequest { overwrite: true, ..req }, &Recorder::default()).unwrap();
+    let r = restore(&f.profile, None, &req(true), &Recorder::default()).unwrap();
     assert_eq!(r.files_restored, 1);
     assert_eq!(fs::read_to_string(f.source.join("a.txt")).unwrap(), "alpha");
 }
@@ -309,11 +306,32 @@ fn destination_in_use_is_busy() {
     run_backup(&f.profile);
     let lock =
         fs::File::options().write(true).open(f.profile.destination.path().join("archeion.lock")).unwrap();
+    assert!(!backup_engine_busy(&f.profile), "a lock file alone is not a run");
     lock.lock().unwrap();
+    assert!(backup_engine_busy(&f.profile));
     assert!(matches!(
         backup(&f.profile, None, BackupMode::Auto, &Recorder::default()),
         Err(EngineError::Busy)
     ));
+    drop(lock);
+    assert!(!backup_engine_busy(&f.profile));
+}
+
+fn backup_engine_busy(p: &Profile) -> bool {
+    archeion_engine::destination_busy(p)
+}
+
+#[test]
+fn a_pending_merge_is_seen_from_the_archive_names_alone() {
+    let mut f = four_backups();
+    assert!(!archeion_engine::merge_pending(&f.profile).unwrap(), "keep everything: nothing to merge");
+    f.profile.merge.rules = Retention { keep_last: 2, ..Retention::KEEP_ALL };
+    assert!(archeion_engine::merge_pending(&f.profile).unwrap());
+    merge(&f.profile, None, &Recorder::default()).unwrap();
+    assert!(!archeion_engine::merge_pending(&f.profile).unwrap(), "merged: nothing left");
+    let mut empty = fixture(Container::Folder);
+    empty.profile.merge.rules = Retention { keep_last: 1, ..Retention::KEEP_ALL };
+    assert!(!archeion_engine::merge_pending(&empty.profile).unwrap(), "no destination yet");
 }
 
 #[test]
@@ -324,6 +342,18 @@ fn destination_of_another_profile_is_refused() {
     other.id = archeion_core::ProfileId::new_random();
     assert!(matches!(
         backup(&other, None, BackupMode::Auto, &Recorder::default()),
+        Err(EngineError::ForeignDestination)
+    ));
+
+    // A profile re-created after the old one was deleted takes the backups over.
+    assert_eq!(archeion_engine::destination_owner(&other).unwrap(), Some(f.profile.id));
+    archeion_engine::adopt_destination(&other).unwrap();
+    assert_eq!(archeion_engine::destination_owner(&other).unwrap(), Some(other.id));
+    let report = backup_as(&other, BackupMode::Incremental);
+    assert!(!report.complete, "the old chain goes on");
+    assert_eq!(list_archives(&other, None).unwrap().len(), 2);
+    assert!(matches!(
+        backup(&f.profile, None, BackupMode::Auto, &Recorder::default()),
         Err(EngineError::ForeignDestination)
     ));
 }
@@ -392,18 +422,134 @@ fn versions_list_only_real_changes_and_each_restores_beside_the_original() {
     assert_eq!(versions[0].size, 6);
     assert_eq!(versions[1].size, 5);
 
-    let req = RestoreRequest {
-        archive: versions[1].archive.clone(),
-        keys: vec![key],
-        target: RestoreTarget::BesideOriginal,
-        overwrite: false,
-    };
+    let req = RestoreRequest::single(&versions[1].archive, vec![key], &RestoreTarget::BesideOriginal, false);
     let r = restore(&f.profile, None, &req, &Recorder::default()).unwrap();
     assert_eq!(r.files_restored, 1);
     assert_eq!(fs::read_to_string(f.source.join("a.txt")).unwrap(), "second", "current file untouched");
     let tag = versions[1].backup_label.replace(':', ".");
     let beside = f.source.join(format!("a ({tag}).txt"));
     assert_eq!(fs::read_to_string(beside).unwrap(), "alpha");
+}
+
+fn item(archive: &str, key: &str, target: &RestoreTarget, overwrite: bool) -> RestoreItem {
+    RestoreItem { archive: archive.to_owned(), key: Some(key.to_owned()), target: target.clone(), overwrite }
+}
+
+fn key_of(f: &Fixture, relative: &str) -> String {
+    archeion_core::keys::key_for(&f.source.join(relative)).unwrap()
+}
+
+#[test]
+fn several_versions_to_one_folder_each_get_their_date_in_the_name() {
+    let f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile); // "alpha"
+    fs::write(f.source.join("a.txt"), "second").unwrap();
+    run_backup(&f.profile);
+    let key = key_of(&f, "a.txt");
+    let versions = file_versions(&f.profile, None, &key).unwrap();
+    assert_eq!(versions.len(), 2);
+
+    let to = RestoreTarget::Folder { path: f.restore_to.clone() };
+    let req = RestoreRequest { items: versions.iter().map(|v| item(&v.archive, &key, &to, false)).collect() };
+    let rec = Recorder::default();
+    let r = restore(&f.profile, None, &req, &rec).unwrap();
+    assert_eq!(r.files_restored, 2, "{:?}", r.skipped);
+    let plain = restored(&f, "a.txt");
+    assert!(!plain.exists(), "neither version takes the plain name");
+    // Each version takes its date in the name (with the seconds when both
+    // backups fall in the same minute, as in this test).
+    for (v, text) in versions.iter().zip(["second", "alpha"]) {
+        let minute =
+            archeion_core::restore::with_date_tag(&plain, &archeion_core::restore::date_tag(&v.archive));
+        let second = archeion_core::restore::with_date_tag(
+            &plain,
+            &archeion_core::restore::precise_date_tag(&v.archive),
+        );
+        let found = [&minute, &second].into_iter().any(|p| fs::read_to_string(p).is_ok_and(|t| t == text));
+        assert!(found, "{text}: neither {} nor {}", minute.display(), second.display());
+    }
+    let events = rec.0.lock().unwrap();
+    let finished = events.iter().filter(|e| matches!(e, RunEvent::Finished { .. })).count();
+    assert_eq!(finished, 1, "one run, one report");
+}
+
+#[test]
+fn a_folder_comes_back_as_it_was_at_an_old_date_beside_a_newer_file() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    fs::write(f.source.join("sub").join("ünicode è.txt"), "beta v2").unwrap();
+    fs::write(f.source.join("sub").join("later.txt"), "later").unwrap();
+    run_backup(&f.profile);
+    let list = list_archives(&f.profile, None).unwrap(); // newest first
+
+    let to = RestoreTarget::Folder { path: f.restore_to.clone() };
+    let req = RestoreRequest {
+        items: vec![
+            item(&list[1].name, &key_of(&f, "sub"), &to, false),
+            // Unchanged since the first backup: read from there.
+            item(&list[0].name, &key_of(&f, "a.txt"), &to, false),
+        ],
+    };
+    let r = restore(&f.profile, None, &req, &Recorder::default()).unwrap();
+    assert!(r.skipped.is_empty(), "{:?}", r.skipped);
+    assert_eq!(r.files_restored, 2);
+    assert_eq!(fs::read_to_string(restored(&f, "sub/ünicode è.txt")).unwrap(), "beta");
+    assert!(!restored(&f, "sub/later.txt").exists(), "not there at that date");
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
+}
+
+#[test]
+fn one_version_overwrites_the_original_and_another_goes_beside_it() {
+    let f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile); // "alpha"
+    fs::write(f.source.join("a.txt"), "second").unwrap();
+    run_backup(&f.profile);
+    fs::write(f.source.join("a.txt"), "edited").unwrap();
+    let key = key_of(&f, "a.txt");
+    let versions = file_versions(&f.profile, None, &key).unwrap(); // newest first
+
+    let req = RestoreRequest {
+        items: vec![
+            item(&versions[1].archive, &key, &RestoreTarget::Original, true),
+            item(&versions[0].archive, &key, &RestoreTarget::BesideOriginal, false),
+        ],
+    };
+    let r = restore(&f.profile, None, &req, &Recorder::default()).unwrap();
+    assert_eq!((r.files_restored, r.files_kept), (2, 0), "{:?}", r.skipped);
+    assert_eq!(fs::read_to_string(f.source.join("a.txt")).unwrap(), "alpha");
+    let tag = archeion_core::restore::date_tag(&versions[0].archive);
+    let beside = archeion_core::restore::with_date_tag(&f.source.join("a.txt"), &tag);
+    assert_eq!(fs::read_to_string(beside).unwrap(), "second");
+}
+
+#[test]
+fn catalog_lists_every_file_ever_saved_and_marks_the_deleted_ones() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    fs::remove_file(f.source.join("a.txt")).unwrap();
+    fs::write(f.source.join("new.txt"), "gamma").unwrap();
+    run_backup(&f.profile);
+    fs::write(f.source.join("a.txt"), "back").unwrap();
+    run_backup(&f.profile);
+    fs::remove_file(f.source.join("new.txt")).unwrap();
+    run_backup(&f.profile);
+
+    let c = archeion_engine::catalog(&f.profile, None).unwrap();
+    assert_eq!(c.archives.len(), 4);
+    let entry = |rel: &str| c.entries.iter().find(|e| e.key == key_of(&f, rel)).unwrap().clone();
+    let a = entry("a.txt");
+    assert_eq!(a.present, vec![(0, 0), (2, 3)]);
+    assert!(!a.deleted(c.archives.len()));
+    assert_eq!(a.archives_newest_first().collect::<Vec<_>>(), vec![3, 2, 0]);
+    let new = entry("new.txt");
+    assert_eq!(new.present, vec![(1, 2)]);
+    assert!(new.deleted(c.archives.len()), "gone at the newest backup");
+    let sub = entry("sub");
+    assert_eq!(sub.present, vec![(0, 3)]);
+    let mut keys: Vec<&str> = c.entries.iter().map(|e| e.key.as_str()).collect();
+    let sorted = keys.clone();
+    keys.sort_unstable();
+    assert_eq!(keys, sorted, "sorted by key");
 }
 
 #[test]
@@ -587,12 +733,12 @@ fn encrypted_backups_hide_names_and_content_and_need_the_password() {
 
     let list = list_archives(&f.profile, Some(&secret)).unwrap();
     assert_eq!(list.len(), 2);
-    let req = RestoreRequest {
-        archive: list[1].name.clone(),
-        keys: Vec::new(),
-        target: RestoreTarget::Folder { path: f.restore_to.clone() },
-        overwrite: true,
-    };
+    let req = RestoreRequest::single(
+        &list[1].name,
+        Vec::new(),
+        &RestoreTarget::Folder { path: f.restore_to.clone() },
+        true,
+    );
     let r = restore(&f.profile, Some(&secret), &req, &rec).unwrap();
     assert!(r.skipped.is_empty(), "{:?}", r.skipped);
     assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
@@ -839,4 +985,77 @@ fn a_destination_written_by_archeion_is_renamed_and_still_opens() {
     assert!(names.iter().any(|n| n == "archeion.key.json"));
     let v = verify(&f.profile, Some(&secret), None, &Recorder::default()).unwrap();
     assert!(v.problems.is_empty(), "{:?}", v.problems);
+}
+
+impl Recorder {
+    /// Every file of the [`RunEvent::Files`] events, in order.
+    fn listed(&self) -> Vec<FileDone> {
+        let events = self.0.lock().unwrap();
+        let batches = events.iter().filter_map(|e| match e {
+            RunEvent::Files { files } => Some(files.clone()),
+            _ => None,
+        });
+        batches.flatten().collect()
+    }
+}
+
+fn named(files: &[FileDone], action: FileAction) -> Vec<String> {
+    let names = files.iter().filter(|f| f.action == action);
+    names.map(|f| f.path.rsplit(['/', '\\']).next().unwrap_or_default().to_owned()).collect()
+}
+
+#[test]
+fn a_backup_lists_every_file_it_handled_beyond_the_latest_ones() {
+    let f = fixture(Container::Folder);
+    let many = RECENT_FILES + 15;
+    let name = |i: usize| format!("many {i:02}.txt");
+    for i in 0..many {
+        fs::write(f.source.join(name(i)), "x").unwrap();
+    }
+    sleep(Duration::from_millis(1100));
+    let first = Recorder::default();
+    backup(&f.profile, None, BackupMode::Auto, &first).unwrap();
+    assert_eq!(named(&first.listed(), FileAction::New).len(), many + 2, "every file of the first backup");
+
+    for i in 0..many {
+        fs::write(f.source.join(name(i)), format!("changed {i}")).unwrap();
+    }
+    fs::remove_file(f.source.join("sub").join("ünicode è.txt")).unwrap();
+    sleep(Duration::from_millis(1100));
+    let second = Recorder::default();
+    let report = backup(&f.profile, None, BackupMode::Auto, &second).unwrap();
+    let files = second.listed();
+    let changed = named(&files, FileAction::Changed);
+    assert_eq!(changed, (0..many).map(name).collect::<Vec<_>>(), "all of them, in order, once each");
+    assert_eq!(named(&files, FileAction::Deleted), ["ünicode è.txt"]);
+    assert!(named(&files, FileAction::Unchanged).is_empty(), "a.txt is only counted");
+    assert_eq!(report.files_unchanged, 1);
+    assert_eq!(files.len(), many + 1);
+    let deleted = files.iter().find(|f| f.action == FileAction::Deleted).unwrap();
+    assert_eq!(deleted.bytes, 4, "size of the version in the previous backup");
+    assert!(deleted.path.contains("source folder"), "full path: {}", deleted.path);
+
+    // Every file is listed before the end of the run.
+    let events = second.0.lock().unwrap();
+    let last_files = events.iter().rposition(|e| matches!(e, RunEvent::Files { .. })).unwrap();
+    let finished = events.iter().position(|e| matches!(e, RunEvent::Finished { .. })).unwrap();
+    assert!(last_files < finished);
+}
+
+#[test]
+fn a_merge_lists_the_files_it_carries_and_the_versions_it_drops() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    fs::write(f.source.join("a.txt"), "alpha v2").unwrap();
+    run_backup(&f.profile);
+    let list = list_archives(&f.profile, None).unwrap(); // newest first
+    let r = Recorder::default();
+    merge_range(&f.profile, None, &list[1].name, &list[0].name, &r).unwrap();
+    let files = r.listed();
+    let mut moved = named(&files, FileAction::Moved);
+    moved.sort();
+    assert_eq!(moved, ["a.txt", "ünicode è.txt"]);
+    let dropped: Vec<&FileDone> = files.iter().filter(|f| f.action == FileAction::Dropped).collect();
+    assert_eq!(dropped.len(), 1, "{files:?}");
+    assert!(dropped[0].path.ends_with("a.txt") && dropped[0].bytes == 5, "the first a.txt: {:?}", dropped[0]);
 }

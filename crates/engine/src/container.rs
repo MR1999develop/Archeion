@@ -160,26 +160,45 @@ impl Writer {
         on_bytes: &mut dyn FnMut(u64),
     ) -> Result<(u64, String)> {
         let ctx = format!("copying {key}");
+        self.add_with(key, expected_size, mtime_ns, &mut |dst| {
+            copy_into(src, dst, on_bytes).map(|_| ()).map_err(EngineError::io(ctx.clone()))
+        })
+    }
+
+    /// Stores as `key` the bytes that `fill` writes, hashing them on the
+    /// way; a failed `fill` leaves nothing behind. `expected_size` only
+    /// chooses the zip format for very large files. Returns the bytes
+    /// written and their BLAKE3 hash in hex.
+    pub(crate) fn add_with(
+        &mut self,
+        key: &str,
+        expected_size: u64,
+        mtime_ns: i64,
+        fill: &mut dyn FnMut(&mut dyn Write) -> Result<()>,
+    ) -> Result<(u64, String)> {
+        let ctx = format!("copying {key}");
         match self {
             Self::Folder { data } => {
                 let dest = keys::path_under(data, key);
                 create_parent(&dest, &ctx)?;
-                let mut out = File::create(&dest).map_err(EngineError::io(ctx.clone()))?;
-                let result = copy_hashing(src, &mut out, on_bytes).map_err(EngineError::io(ctx));
-                finish_file(out, &dest, result, mtime_ns)
+                let result = write_plain(&dest, mtime_ns, fill, &ctx);
+                if result.is_err() {
+                    let _ = fs::remove_file(&dest);
+                }
+                result
             }
             Self::ZipPerFile { root } => {
                 let dest = zipped_path(root, key);
                 let name = key.rsplit('/').next().unwrap_or(key);
                 let options = options_for(key, expected_size, None);
-                write_zip_cleanly(&dest, name, options, src, Some(mtime_ns), on_bytes, &ctx)
+                write_zip_cleanly(&dest, name, options, fill, Some(mtime_ns), &ctx)
             }
             Self::Vault { root, keys, archive } => {
                 // No date on an encrypted file, inside or on disk.
                 let dest = vault_path(root, keys, archive, key);
                 let options = options_for(key, expected_size, Some(keys.password()))
                     .last_modified_time(zip::DateTime::default());
-                write_zip_cleanly(&dest, VAULT_ENTRY, options, src, None, on_bytes, &ctx)
+                write_zip_cleanly(&dest, VAULT_ENTRY, options, fill, None, &ctx)
             }
         }
     }
@@ -298,34 +317,34 @@ fn write_zip_cleanly(
     dest: &Path,
     entry: &str,
     options: crate::crypto::Options<'_>,
-    src: &mut dyn Read,
+    fill: &mut dyn FnMut(&mut dyn Write) -> Result<()>,
     mtime_ns: Option<i64>,
-    on_bytes: &mut dyn FnMut(u64),
     ctx: &str,
 ) -> Result<(u64, String)> {
     create_parent(dest, ctx)?;
-    let result = write_single_zip(dest, entry, options, src, mtime_ns, on_bytes, ctx);
+    let result = write_single_zip(dest, entry, options, fill, mtime_ns, ctx);
     if result.is_err() {
         let _ = fs::remove_file(dest);
     }
     result
 }
 
-/// One zip holding one entry, `entry`; the zip file gets `mtime_ns` as its
-/// modification time when given.
+/// One zip holding one entry, `entry`, with what `fill` writes; the zip
+/// file gets `mtime_ns` as its modification time when given.
 fn write_single_zip(
     dest: &Path,
     entry: &str,
     options: crate::crypto::Options<'_>,
-    src: &mut dyn Read,
+    fill: &mut dyn FnMut(&mut dyn Write) -> Result<()>,
     mtime_ns: Option<i64>,
-    on_bytes: &mut dyn FnMut(u64),
     ctx: &str,
 ) -> Result<(u64, String)> {
     let file = File::create(dest).map_err(EngineError::io(ctx.to_owned()))?;
     let mut zip = ZipWriter::new(BufWriter::with_capacity(BUFFER, file));
     zip.start_file(entry, options).map_err(zip_err(ctx))?;
-    let copied = copy_hashing(src, &mut zip, on_bytes).map_err(EngineError::io(ctx.to_owned()))?;
+    let mut hashing = HashingWriter::new(&mut zip);
+    fill(&mut hashing)?;
+    let (n, hash, _) = hashing.finish();
     let file = zip
         .finish()
         .map_err(zip_err(ctx))?
@@ -334,25 +353,66 @@ fn write_single_zip(
     if let Some(t) = mtime_ns {
         let _ = file.set_modified(system_time(t));
     }
-    Ok(copied)
+    Ok((n, hash))
 }
 
-fn finish_file(
-    out: File,
+/// A plain copy of what `fill` writes, dated `mtime_ns`.
+fn write_plain(
     dest: &Path,
-    result: Result<(u64, String)>,
     mtime_ns: i64,
+    fill: &mut dyn FnMut(&mut dyn Write) -> Result<()>,
+    ctx: &str,
 ) -> Result<(u64, String)> {
-    if result.is_ok() {
-        let _ = out.set_modified(system_time(mtime_ns));
-    } else {
-        drop(out);
-        let _ = fs::remove_file(dest);
-    }
-    result
+    let file = File::create(dest).map_err(EngineError::io(ctx.to_owned()))?;
+    let mut hashing = HashingWriter::new(BufWriter::with_capacity(BUFFER, file));
+    fill(&mut hashing)?;
+    let (n, hash, buffered) = hashing.finish();
+    let file = buffered.into_inner().map_err(|e| EngineError::io(ctx.to_owned())(e.into_error()))?;
+    let _ = file.set_modified(system_time(mtime_ns));
+    Ok((n, hash))
 }
 
-fn link_or_copy(src: &Path, dest: &Path, ctx: &str) -> Result<()> {
+/// Passes writes on to `inner`, counting and hashing (BLAKE3) them.
+pub(crate) struct HashingWriter<W> {
+    inner: W,
+    hasher: blake3::Hasher,
+    written: u64,
+}
+
+impl<W> std::fmt::Debug for HashingWriter<W> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HashingWriter").field("written", &self.written).finish_non_exhaustive()
+    }
+}
+
+impl<W: Write> HashingWriter<W> {
+    pub(crate) fn new(inner: W) -> Self {
+        Self { inner, hasher: blake3::Hasher::new(), written: 0 }
+    }
+
+    /// Bytes written, their hash in hex, and the inner writer (flushed).
+    pub(crate) fn finish(mut self) -> (u64, String, W) {
+        let _ = self.inner.flush();
+        (self.written, self.hasher.finalize().to_hex().to_string(), self.inner)
+    }
+}
+
+impl<W: Write> Write for HashingWriter<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        let n = self.inner.write(buf)?;
+        let done = buf.get(..n).unwrap_or(buf);
+        self.hasher.update(done);
+        self.written = self.written.saturating_add(done.len() as u64);
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+/// Hard link `src` as `dest` (a copy where links are not supported).
+pub(crate) fn link_or_copy(src: &Path, dest: &Path, ctx: &str) -> Result<()> {
     create_parent(dest, ctx)?;
     if fs::hard_link(src, dest).is_err() {
         fs::copy(src, dest).map_err(EngineError::io(ctx.to_owned()))?;
@@ -410,6 +470,30 @@ impl Reader {
             }
         }
     }
+}
+
+/// Copies `src` to `dst`, calling `on_bytes` as data flows; returns the
+/// bytes copied. `dst` is flushed.
+pub(crate) fn copy_into(
+    src: &mut dyn Read,
+    dst: &mut dyn Write,
+    on_bytes: &mut dyn FnMut(u64),
+) -> std::io::Result<u64> {
+    let mut buf = vec![0u8; BUFFER];
+    let mut total = 0u64;
+    loop {
+        let n = match src.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(e),
+        };
+        dst.write_all(buf.get(..n).unwrap_or_default())?;
+        total = total.saturating_add(n as u64);
+        on_bytes(n as u64);
+    }
+    dst.flush()?;
+    Ok(total)
 }
 
 /// Copies `src` to `dst` and returns (bytes, BLAKE3 hex).

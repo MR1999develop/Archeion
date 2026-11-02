@@ -1,9 +1,10 @@
 //! Which archives to keep, and which to merge into the next kept one.
 //!
-//! The rules follow restic's `forget`: for each rule the newest archive of
-//! each period (day, ISO week, month, year) is kept, for that many periods;
-//! an archive is kept when any rule selects it; the newest archive is always
-//! kept. An incremental archive cannot simply be deleted because later ones
+//! The rules follow restic's `forget`: every archive of the last
+//! `keep_within_days` days is kept (backups just made are never merged);
+//! for each other rule the newest archive of each period (day, ISO week,
+//! month, year) is kept, for that many periods; an archive is kept when any
+//! rule selects it; the newest archive is always kept. An incremental archive cannot simply be deleted because later ones
 //! may need its content, so every run of archives that are not kept is
 //! merged with the kept archive that follows it.
 //!
@@ -15,9 +16,10 @@ use crate::{ArchiveKind, ArchiveName, Retention};
 use jiff::civil::DateTime;
 use std::ops::RangeInclusive;
 
-/// Which archives the rules keep. `archives` must be sorted oldest first.
+/// Which archives the rules keep at local time `now`. `archives` must be
+/// sorted oldest first.
 #[must_use]
-pub fn keep_set(archives: &[ArchiveName], rules: &Retention) -> Vec<bool> {
+pub fn keep_set(archives: &[ArchiveName], rules: &Retention, now: DateTime) -> Vec<bool> {
     let n = archives.len();
     if rules.keeps_everything() {
         return vec![true; n];
@@ -29,6 +31,15 @@ pub fn keep_set(archives: &[ArchiveName], rules: &Retention) -> Vec<bool> {
     let times: Vec<DateTime> = archives.iter().map(|a| a.time).collect();
     for k in keep.iter_mut().rev().take(rules.keep_last as usize) {
         *k = true;
+    }
+    if rules.keep_within_days > 0 {
+        let hours = i64::from(rules.keep_within_days).saturating_mul(24);
+        // An unrepresentable date (far past) keeps nothing more.
+        if let Ok(since) = now.checked_sub(jiff::SignedDuration::from_hours(hours)) {
+            for (k, t) in keep.iter_mut().zip(&times) {
+                *k |= *t > since;
+            }
+        }
     }
     keep_per_period(&mut keep, &times, rules.keep_daily, |t| {
         (i32::from(t.year()), i32::from(t.month()), i32::from(t.day()))
@@ -44,11 +55,11 @@ pub fn keep_set(archives: &[ArchiveName], rules: &Retention) -> Vec<bool> {
     keep
 }
 
-/// [`keep_set`] for the scheduled merge: the initial complete archive is
+/// [`keep_set`] for the automatic merge: the initial complete archive is
 /// always kept, so it is never merged automatically.
 #[must_use]
-pub fn automatic_keep_set(archives: &[ArchiveName], rules: &Retention) -> Vec<bool> {
-    let mut keep = keep_set(archives, rules);
+pub fn automatic_keep_set(archives: &[ArchiveName], rules: &Retention, now: DateTime) -> Vec<bool> {
+    let mut keep = keep_set(archives, rules, now);
     if let (Some(first), Some(k)) = (archives.first(), keep.first_mut())
         && first.kind == ArchiveKind::Complete
     {
@@ -179,8 +190,14 @@ mod tests {
             .collect()
     }
 
+    /// Long after every test archive: the recent-days rule keeps nothing.
+    fn later() -> DateTime {
+        date(2030, 1, 1).at(0, 0, 0, 0)
+    }
+
     fn rules(last: u32, daily: u32, weekly: u32, monthly: u32, yearly: u32) -> Retention {
         Retention {
+            keep_within_days: 0,
             keep_last: last,
             keep_daily: daily,
             keep_weekly: weekly,
@@ -191,21 +208,21 @@ mod tests {
 
     #[test]
     fn keep_everything_merges_nothing() {
-        let keep = keep_set(&daily(5), &Retention::KEEP_ALL);
+        let keep = keep_set(&daily(5), &Retention::KEEP_ALL, later());
         assert!(keep.iter().all(|&k| k));
         assert!(merge_groups(&keep).is_empty());
     }
 
     #[test]
     fn newest_is_always_kept() {
-        let keep = keep_set(&daily(3), &rules(0, 0, 0, 0, 1));
+        let keep = keep_set(&daily(3), &rules(0, 0, 0, 0, 1), later());
         assert_eq!(keep, vec![false, false, true]);
         assert_eq!(merge_groups(&keep), vec![0..=2]);
     }
 
     #[test]
     fn three_daily_keeps_the_last_three_days() {
-        let keep = keep_set(&daily(6), &rules(0, 3, 0, 0, 0));
+        let keep = keep_set(&daily(6), &rules(0, 3, 0, 0, 0), later());
         assert_eq!(keep, vec![false, false, false, true, true, true]);
         assert_eq!(merge_groups(&keep), vec![0..=3]);
     }
@@ -215,14 +232,14 @@ mod tests {
         let mut a = daily(2);
         a.insert(1, ArchiveName { time: date(2026, 3, 1).at(18, 0, 0, 0), kind: ArchiveKind::Incremental });
         // 1 Mar 12:00, 1 Mar 18:00, 2 Mar 12:00
-        let keep = keep_set(&a, &rules(0, 2, 0, 0, 0));
+        let keep = keep_set(&a, &rules(0, 2, 0, 0, 0), later());
         assert_eq!(keep, vec![false, true, true]);
     }
 
     #[test]
     fn weekly_rule_keeps_one_per_iso_week() {
         // 1–14 March 2026: Sunday 1, Sunday 8, Saturday 14 end ISO weeks 9, 10, 11.
-        let keep = keep_set(&daily(14), &rules(0, 0, 3, 0, 0));
+        let keep = keep_set(&daily(14), &rules(0, 0, 3, 0, 0), later());
         let kept: Vec<usize> = keep.iter().enumerate().filter(|(_, k)| **k).map(|(i, _)| i + 1).collect();
         assert_eq!(kept, vec![1, 8, 14]);
         assert_eq!(merge_groups(&keep), vec![1..=7, 8..=13]);
@@ -230,7 +247,7 @@ mod tests {
 
     #[test]
     fn rules_combine() {
-        let keep = keep_set(&daily(10), &rules(1, 2, 0, 1, 0));
+        let keep = keep_set(&daily(10), &rules(1, 2, 0, 1, 0), later());
         // last + days 9,10 + month of March -> newest (10); so 9 and 10.
         assert_eq!(keep.iter().filter(|k| **k).count(), 2);
     }
@@ -239,10 +256,38 @@ mod tests {
     fn automatic_merge_never_touches_the_initial_complete() {
         let a = daily(6);
         let r = rules(1, 0, 0, 0, 0);
-        assert!(!keep_set(&a, &r)[0]);
-        let keep = automatic_keep_set(&a, &r);
+        assert!(!keep_set(&a, &r, later())[0]);
+        let keep = automatic_keep_set(&a, &r, later());
         assert_eq!(keep, vec![true, false, false, false, false, true]);
         assert_eq!(merge_groups(&keep), vec![1..=5]);
+    }
+
+    #[test]
+    fn backups_of_the_last_day_are_never_merged() {
+        // The user's case: initial complete, two incrementals and a new
+        // complete made minutes apart, then the automatic merge runs.
+        let at = |d: i8, h: i8, m: i8, kind| ArchiveName { time: date(2026, 11, d).at(h, m, 0, 0), kind };
+        let a = vec![
+            at(1, 12, 26, ArchiveKind::Complete),
+            at(1, 17, 15, ArchiveKind::Incremental),
+            at(1, 17, 22, ArchiveKind::Incremental),
+            at(1, 17, 22, ArchiveKind::Complete),
+        ];
+        // Only the newest by count, so that the daily rule decides.
+        let r = Retention { keep_last: 1, ..Retention::default() };
+        let now = date(2026, 11, 1).at(17, 25, 0, 0);
+        assert!(merge_groups(&automatic_keep_set(&a, &r, now)).is_empty());
+        // A day later the daily rule keeps only the newest of 1 November.
+        let tomorrow = date(2026, 11, 2).at(17, 30, 0, 0);
+        assert_eq!(merge_groups(&automatic_keep_set(&a, &r, tomorrow)), vec![1..=3]);
+    }
+
+    #[test]
+    fn the_recent_days_rule_counts_whole_days_back_from_now() {
+        let a = daily(5); // 1–5 March at 12:00
+        let r = Retention { keep_within_days: 2, ..rules(0, 0, 0, 0, 1) };
+        let keep = keep_set(&a, &r, date(2026, 3, 5).at(13, 0, 0, 0));
+        assert_eq!(keep, vec![false, false, false, true, true]);
     }
 
     #[test]
@@ -283,7 +328,7 @@ mod tests {
         for n in 1..20 {
             for r in [rules(0, 3, 1, 0, 0), rules(2, 0, 0, 1, 1), rules(0, 0, 0, 0, 1)] {
                 let a = daily(n);
-                let keep = keep_set(&a, &r);
+                let keep = keep_set(&a, &r, later());
                 assert!(keep.last().copied().unwrap_or(true));
                 for g in merge_groups(&keep) {
                     assert!(keep[*g.end()]);

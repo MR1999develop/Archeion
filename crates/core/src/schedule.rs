@@ -4,7 +4,11 @@ use serde::{Deserialize, Serialize};
 use std::fmt;
 
 /// Automatic run schedule of a profile.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+///
+/// `Daily` and `Weekly` are the forms written before November 2026; they
+/// still load and run, and the editor turns them into `Days` on the first
+/// change ([`Schedule::normalized`]).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(tag = "every", rename_all = "snake_case")]
 pub enum Schedule {
     /// Only when the user presses "Back up now".
@@ -17,17 +21,78 @@ pub enum Schedule {
         day: Weekday,
         at: TimeOfDay,
     },
+    /// On each of `days`, at each of `times`.
+    Days {
+        days: Vec<Weekday>,
+        times: Vec<TimeOfDay>,
+    },
+    /// Every day, every `hours` hours from `from`; the last run starts
+    /// before `until` (`until` equal to `from`: around the clock).
+    Hours {
+        hours: u8,
+        from: TimeOfDay,
+        until: TimeOfDay,
+    },
+    /// Once a month, on `day` (1–28, so every month has it) at `at`.
+    Monthly {
+        day: u8,
+        at: TimeOfDay,
+    },
 }
+
+/// At most this many times a day in [`Schedule::Days`].
+pub const MAX_TIMES_A_DAY: usize = 6;
+/// Interval of [`Schedule::Hours`].
+pub const HOURS_RANGE: std::ops::RangeInclusive<u8> = 1..=12;
+/// Day of the month of [`Schedule::Monthly`].
+pub const MONTH_DAY_RANGE: std::ops::RangeInclusive<u8> = 1..=28;
 
 impl Schedule {
     #[must_use]
     pub fn is_automatic(&self) -> bool {
         !matches!(self, Self::Manual)
     }
+
+    /// The same schedule in its current form: `Daily` and `Weekly` become
+    /// `Days`; days and times sorted without repeats (an empty list becomes
+    /// every day, or the default time); at most [`MAX_TIMES_A_DAY`] times;
+    /// numbers brought within their ranges.
+    #[must_use]
+    pub fn normalized(&self) -> Self {
+        match self {
+            Self::Manual => Self::Manual,
+            Self::Daily { at } => Self::Days { days: Weekday::ALL.to_vec(), times: vec![*at] },
+            Self::Weekly { day, at } => Self::Days { days: vec![*day], times: vec![*at] },
+            Self::Days { days, times } => {
+                let mut days = days.clone();
+                days.sort_unstable();
+                days.dedup();
+                if days.is_empty() {
+                    days = Weekday::ALL.to_vec();
+                }
+                let mut times = times.clone();
+                times.sort_unstable();
+                times.dedup();
+                times.truncate(MAX_TIMES_A_DAY);
+                if times.is_empty() {
+                    times.push(TimeOfDay::default());
+                }
+                Self::Days { days, times }
+            }
+            Self::Hours { hours, from, until } => Self::Hours {
+                hours: (*hours).clamp(*HOURS_RANGE.start(), *HOURS_RANGE.end()),
+                from: *from,
+                until: *until,
+            },
+            Self::Monthly { day, at } => {
+                Self::Monthly { day: (*day).clamp(*MONTH_DAY_RANGE.start(), *MONTH_DAY_RANGE.end()), at: *at }
+            }
+        }
+    }
 }
 
 /// A validated local time of day (hour 0–23, minute 0–59).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(try_from = "RawTime", into = "RawTime")]
 pub struct TimeOfDay {
     hour: u8,
@@ -49,6 +114,12 @@ impl TimeOfDay {
     #[must_use]
     pub fn minute(self) -> u8 {
         self.minute
+    }
+
+    /// Minutes since midnight.
+    #[must_use]
+    pub fn minutes(self) -> u16 {
+        u16::from(self.hour) * 60 + u16::from(self.minute)
     }
 }
 
@@ -84,8 +155,8 @@ impl From<TimeOfDay> for RawTime {
     }
 }
 
-/// Day of the week, Monday first.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+/// Day of the week, Monday first (also the sort order).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Weekday {
     #[default]
@@ -132,6 +203,66 @@ mod tests {
         let s = Schedule::Weekly { day: Weekday::Friday, at: TimeOfDay::new(18, 5).unwrap() };
         let json = serde_json::to_string(&s).unwrap();
         assert_eq!(serde_json::from_str::<Schedule>(&json).unwrap(), s);
+    }
+
+    #[test]
+    fn old_forms_become_days_and_lists_are_cleaned() {
+        let at = TimeOfDay::new(9, 0).unwrap();
+        let late = TimeOfDay::new(21, 0).unwrap();
+        assert_eq!(
+            Schedule::Daily { at }.normalized(),
+            Schedule::Days { days: Weekday::ALL.to_vec(), times: vec![at] }
+        );
+        assert_eq!(
+            Schedule::Weekly { day: Weekday::Friday, at }.normalized(),
+            Schedule::Days { days: vec![Weekday::Friday], times: vec![at] }
+        );
+        let messy = Schedule::Days {
+            days: vec![Weekday::Sunday, Weekday::Monday, Weekday::Sunday],
+            times: vec![late, at, late],
+        };
+        assert_eq!(
+            messy.normalized(),
+            Schedule::Days { days: vec![Weekday::Monday, Weekday::Sunday], times: vec![at, late] }
+        );
+        let empty = Schedule::Days { days: Vec::new(), times: Vec::new() }.normalized();
+        assert_eq!(empty, Schedule::Days { days: Weekday::ALL.to_vec(), times: vec![TimeOfDay::default()] });
+        let many: Vec<TimeOfDay> = (0..10).map(|h| TimeOfDay::new(h, 0).unwrap()).collect();
+        let Schedule::Days { times, .. } =
+            (Schedule::Days { days: vec![Weekday::Monday], times: many }).normalized()
+        else {
+            panic!("days")
+        };
+        assert_eq!(times.len(), MAX_TIMES_A_DAY);
+    }
+
+    #[test]
+    fn numbers_are_brought_within_range() {
+        let at = TimeOfDay::default();
+        assert_eq!(
+            Schedule::Hours { hours: 0, from: at, until: at }.normalized(),
+            Schedule::Hours { hours: 1, from: at, until: at }
+        );
+        assert_eq!(Schedule::Monthly { day: 31, at }.normalized(), Schedule::Monthly { day: 28, at });
+    }
+
+    #[test]
+    fn every_form_round_trips_through_toml() {
+        #[derive(Serialize, Deserialize, PartialEq, Debug)]
+        struct Wrap {
+            schedule: Schedule,
+        }
+        let at = TimeOfDay::new(8, 15).unwrap();
+        for schedule in [
+            Schedule::Manual,
+            Schedule::Days { days: vec![Weekday::Monday, Weekday::Thursday], times: vec![at] },
+            Schedule::Hours { hours: 3, from: at, until: TimeOfDay::new(20, 0).unwrap() },
+            Schedule::Monthly { day: 1, at },
+        ] {
+            let w = Wrap { schedule };
+            let text = toml::to_string(&w).unwrap();
+            assert_eq!(toml::from_str::<Wrap>(&text).unwrap(), w, "{text}");
+        }
     }
 
     #[test]

@@ -5,6 +5,12 @@
 # Logs written by the tools\*.bat scripts
 /tools/*.log
 
+# Commit message being written for tools\git_commit.bat, and the last one
+# used: personal drafts, rewritten at every commit (the script recreates the
+# template when it is missing)
+/tools/commit-message.txt
+/tools/commit-message.last.txt
+
 # Portable data folder, if the program is run from the repository
 /data
 

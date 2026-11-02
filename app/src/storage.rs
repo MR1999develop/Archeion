@@ -67,6 +67,11 @@ impl Storage {
         &self.dir
     }
 
+    /// Folder of the run logs (it exists once the first run wrote one).
+    pub fn logs_dir(&self) -> PathBuf {
+        self.dir.join(crate::history::LOG_DIR)
+    }
+
     /// Saved settings; a missing file gives the defaults.
     pub fn load(&self) -> anyhow::Result<Settings> {
         let path = self.dir.join(SETTINGS_FILE);
@@ -91,9 +96,46 @@ impl Storage {
 
     /// Log file in append mode, restarted when it grew past the limit.
     pub fn open_log(&self) -> std::io::Result<fs::File> {
-        let path = self.dir.join(LOG_FILE);
+        let path = program_log_path(&self.dir);
         let too_big = fs::metadata(&path).is_ok_and(|m| m.len() > LOG_LIMIT_BYTES);
         fs::OpenOptions::new().create(true).append(!too_big).write(true).truncate(too_big).open(path)
+    }
+}
+
+/// The program's diagnostic log in the data folder `dir` (written through
+/// `tracing` by the window and by every worker).
+pub fn program_log_path(dir: &Path) -> PathBuf {
+    dir.join(LOG_FILE)
+}
+
+/// Restore requests older than this are leftovers of a worker that never
+/// started (or crashed before reading its request).
+const STALE_REQUEST: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
+
+/// Deletes `restore-*.json` files of `dir` older than a day. The window
+/// writes one per restore and the worker deletes it once read.
+pub fn remove_stale_requests(dir: &Path) {
+    remove_requests_older_than(dir, STALE_REQUEST);
+}
+
+fn remove_requests_older_than(dir: &Path, age: std::time::Duration) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !(name.starts_with("restore-") && name.ends_with(".json")) {
+            continue;
+        }
+        let old = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .is_ok_and(|t| now.duration_since(t).is_ok_and(|d| d >= age));
+        if old {
+            match fs::remove_file(entry.path()) {
+                Ok(()) => tracing::info!(file = %name, "old restore request removed"),
+                Err(e) => tracing::warn!(file = %name, error = %e, "removing an old restore request"),
+            }
+        }
     }
 }
 
@@ -154,6 +196,20 @@ mod tests {
         fs::write(old.join(SETTINGS_FILE), "older").unwrap();
         move_legacy_folder(&old, &new);
         assert_eq!(fs::read_to_string(new.join(SETTINGS_FILE)).unwrap(), "x");
+    }
+
+    #[test]
+    fn only_old_restore_requests_are_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["restore-1.json", "settings.toml", "restore-notes.txt"] {
+            fs::write(dir.path().join(name), "x").unwrap();
+        }
+        remove_requests_older_than(dir.path(), std::time::Duration::from_secs(3600));
+        assert!(dir.path().join("restore-1.json").exists(), "a fresh request stays");
+        remove_requests_older_than(dir.path(), std::time::Duration::ZERO);
+        assert!(!dir.path().join("restore-1.json").exists());
+        assert!(dir.path().join("settings.toml").exists());
+        assert!(dir.path().join("restore-notes.txt").exists());
     }
 
     #[test]

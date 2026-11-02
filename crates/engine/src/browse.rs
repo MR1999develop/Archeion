@@ -1,6 +1,6 @@
-//! Read-only queries for the restore browser: the tree of a date, the
-//! versions of one file, search by name. They take no lock: a running backup
-//! is invisible until committed.
+//! Read-only queries for the restore browser: every file ever saved, the
+//! tree of a date, the versions of one file, search by name. They take no
+//! lock: a running backup is invisible until committed.
 
 use crate::{
     EngineError, Result,
@@ -35,6 +35,89 @@ pub struct SearchHit {
     pub latest_archive: String,
     /// The file still exists in the newest backup.
     pub present_now: bool,
+}
+
+/// Every file and folder a profile's backups ever listed.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Catalog {
+    /// The backups, oldest first; [`CatalogEntry::present`] counts in this
+    /// list.
+    pub archives: Vec<CatalogArchive>,
+    /// Sorted by key: a folder comes before what it holds.
+    pub entries: Vec<CatalogEntry>,
+}
+
+/// One backup of a [`Catalog`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogArchive {
+    /// Archive name, to restore from.
+    pub name: String,
+    /// Backup date, `YYYY-MM-DD HH:MM`.
+    pub label: String,
+}
+
+/// A file or folder of a [`Catalog`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CatalogEntry {
+    pub key: String,
+    pub kind: EntryKind,
+    /// Bytes, as last listed.
+    pub size: u64,
+    /// The backups listing it, as runs of consecutive positions in
+    /// [`Catalog::archives`], oldest first: `[(0, 3), (6, 6)]` was deleted
+    /// after the fourth backup and came back in the seventh.
+    pub present: Vec<(usize, usize)>,
+}
+
+impl CatalogEntry {
+    /// Not listed by the newest backup: deleted at the source since.
+    #[must_use]
+    pub fn deleted(&self, archives: usize) -> bool {
+        self.present.last().is_none_or(|&(_, last)| last.saturating_add(1) != archives)
+    }
+
+    /// Positions of the backups listing it, newest first.
+    pub fn archives_newest_first(&self) -> impl Iterator<Item = usize> + '_ {
+        self.present.iter().rev().flat_map(|&(first, last)| (first..=last).rev())
+    }
+}
+
+/// Every file and folder listed by any backup of the profile, with the
+/// backups listing it. Manifests are read one at a time.
+///
+/// # Errors
+/// See [`archive_manifest`].
+pub fn catalog(profile: &Profile, password: Option<&Password>) -> Result<Catalog> {
+    let Some(root) = root(profile)? else { return Ok(Catalog::default()) };
+    let names = archives_in(root)?;
+    if names.is_empty() {
+        return Ok(Catalog::default());
+    }
+    let keys = unlock(root, password)?;
+    let mut entries: BTreeMap<String, CatalogEntry> = BTreeMap::new();
+    for (j, name) in names.iter().enumerate() {
+        let manifest = read_manifest(&root.join(name.to_string()), name, keys.as_ref())?;
+        for e in manifest.entries {
+            match entries.get_mut(e.key.as_str()) {
+                Some(c) => {
+                    c.size = e.size;
+                    c.kind = e.kind;
+                    match c.present.last_mut() {
+                        Some(run) if run.1.saturating_add(1) == j => run.1 = j,
+                        _ => c.present.push((j, j)),
+                    }
+                }
+                None => {
+                    let key = e.key;
+                    let c =
+                        CatalogEntry { key: key.clone(), kind: e.kind, size: e.size, present: vec![(j, j)] };
+                    entries.insert(key, c);
+                }
+            }
+        }
+    }
+    let archives = names.iter().map(|n| CatalogArchive { name: n.to_string(), label: n.label() }).collect();
+    Ok(Catalog { archives, entries: entries.into_values().collect() })
 }
 
 /// Folder of the profile's archives, or `None` when it does not exist yet.
@@ -75,6 +158,27 @@ pub fn existing_format(profile: &Profile) -> Result<Option<ExistingFormat>> {
     let Some(last) = archives_in(root)?.last().copied() else { return Ok(None) };
     let container = crate::container::detect(&root.join(last.to_string()));
     Ok(Some(ExistingFormat { container, encrypted: is_encrypted(root)? }))
+}
+
+/// True when the drive or share of the destination is there (the folder
+/// itself may not exist yet). Cheap: for event backups that must skip
+/// quietly when another drive was plugged in.
+#[must_use]
+pub fn destination_reachable(profile: &Profile) -> bool {
+    let root = profile.destination.path();
+    !root.as_os_str().is_empty() && ensure_reachable(root).is_ok()
+}
+
+/// Free bytes on the drive or share of the destination (of its nearest
+/// existing parent when the folder is not created yet); `None` when it is
+/// not reachable or does not say.
+#[must_use]
+pub fn free_space(profile: &Profile) -> Option<u64> {
+    let root = profile.destination.path();
+    if root.as_os_str().is_empty() || ensure_reachable(root).is_err() {
+        return None;
+    }
+    crate::space::available(crate::space::existing_ancestor(root)?)
 }
 
 /// The recovery key of an encrypted destination: 64 hex characters in

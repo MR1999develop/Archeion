@@ -1,118 +1,46 @@
-//! Backups tab: the list of dates (with the manual merge and the deletion
-//! of one backup), the tree of a date, search across every date, the
-//! versions of one file, and the restore options.
+//! Backups tab, in two views.
+//!
+//! "Restore files" (the default): one folder tree of every file the
+//! profile's backups ever saved, with search above it; files deleted at the
+//! source since the newest backup are marked. On the right, the selection:
+//! one card per ticked file (its versions, the newest ticked) or folder
+//! (the date it comes back as), each version or folder with its
+//! destination, the default destination at the top and the Restore button
+//! at the bottom. The decisions are in [`crate::restore_plan`].
+//!
+//! "Manage backups": the list of dates with the manual merge and the
+//! deletion of one backup ([`super::backups`]).
 //!
 //! An encrypted destination is read with the password saved in Credential
-//! Manager.
-//!
-//! Every query reads manifests on a background thread; the restore itself
-//! runs in the worker process like a backup.
+//! Manager. Every query reads manifests on a background thread; the tree is
+//! kept per profile until the archives change. The restore itself runs in
+//! the worker process like a backup.
 
-use super::{theme, tree::Tree};
+use super::{
+    backups::BackupsView,
+    load::{Load, Problem},
+    theme,
+    tree::{Node, Tree},
+};
 use crate::{
     credentials,
     i18n::{Tr, arg},
+    restore_plan::{self, Blocker, DefaultDest, Dest, DestKind, Pick, Plan, Version},
 };
-use archeion_core::{
-    ArchiveInfo, ArchiveKind, ArchiveName, EntryKind, Profile, ProfileId, keys,
-    merge_plan::{DeleteError, Deletion, deletion},
-};
-use archeion_engine::{EngineError, FileVersion, RestoreRequest, RestoreTarget, SearchHit};
+use archeion_core::{EntryKind, Profile, ProfileId, keys};
+use archeion_engine::{FileVersion, RestoreRequest};
 use eframe::egui::{self, Context, RichText, Ui, collapsing_header::CollapsingState};
 use std::{
-    collections::BTreeSet,
-    path::PathBuf,
-    sync::mpsc,
+    collections::{HashMap, HashSet},
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
-/// Typing pause before a search starts.
+/// Typing pause before a search runs.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
 const SEARCH_LIMIT: usize = 200;
-
-/// Why a query failed, as the tab explains it.
-#[derive(Debug)]
-enum Problem {
-    PasswordNeeded,
-    WrongPassword,
-    Other(String),
-}
-
-impl From<EngineError> for Problem {
-    fn from(e: EngineError) -> Self {
-        match e {
-            EngineError::PasswordNeeded => Self::PasswordNeeded,
-            EngineError::WrongPassword => Self::WrongPassword,
-            other => Self::Other(other.to_string()),
-        }
-    }
-}
-
-/// Result of a background query.
-#[derive(Debug, Default)]
-enum Load<T> {
-    #[default]
-    Idle,
-    Loading(mpsc::Receiver<Result<T, Problem>>),
-    Ready(T),
-    Failed(Problem),
-}
-
-impl<T: Send + 'static> Load<T> {
-    fn spawn(ctx: &Context, f: impl FnOnce() -> Result<T, Problem> + Send + 'static) -> Self {
-        let (tx, rx) = mpsc::channel();
-        let ctx = ctx.clone();
-        let spawned = std::thread::Builder::new().name("restore-query".into()).spawn(move || {
-            let _ = tx.send(f());
-            ctx.request_repaint();
-        });
-        match spawned {
-            Ok(_) => Self::Loading(rx),
-            Err(e) => Self::Failed(Problem::Other(e.to_string())),
-        }
-    }
-
-    fn poll(&mut self, stopped: &str) {
-        if let Self::Loading(rx) = self {
-            match rx.try_recv() {
-                Ok(Ok(v)) => *self = Self::Ready(v),
-                Ok(Err(e)) => *self = Self::Failed(e),
-                Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    *self = Self::Failed(Problem::Other(stopped.to_owned()));
-                }
-            }
-        }
-    }
-
-    fn ready(&self) -> Option<&T> {
-        match self {
-            Self::Ready(v) => Some(v),
-            _ => None,
-        }
-    }
-
-    /// Spinner or error for the states without a value.
-    fn status_ui(&self, ui: &mut Ui, tr: &Tr, loading: &str) {
-        match self {
-            Self::Idle | Self::Loading(_) => {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(loading);
-                });
-            }
-            Self::Failed(p) => {
-                let text = match p {
-                    Problem::PasswordNeeded => tr.t("run-password-needed"),
-                    Problem::WrongPassword => tr.t("run-wrong-password"),
-                    Problem::Other(e) => e.clone(),
-                };
-                ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {text}"));
-            }
-            Self::Ready(_) => {}
-        }
-    }
-}
+/// Starting width of the selection panel.
+const SELECTION_WIDTH: f32 = 380.0;
 
 /// What the tab asks the window to start.
 #[derive(Debug, Clone)]
@@ -129,625 +57,696 @@ pub enum Action {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Target {
-    Original,
-    Beside,
-    Folder,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum View {
+    #[default]
+    Files,
+    Backups,
 }
 
 #[derive(Debug, Default)]
 pub struct RestoreView {
     profile: Option<ProfileId>,
-    archives: Load<Vec<ArchiveInfo>>,
-    /// Archive whose tree is shown.
-    selected: Option<String>,
-    /// Every file present at that date; those saved by this archive stand
-    /// out, the others are greyed.
-    tree: Load<Tree>,
-    /// Keys of the files and folders ticked for restore.
-    checked: BTreeSet<String>,
-    /// File whose versions are shown.
-    focused: Option<String>,
-    versions: Load<Vec<FileVersion>>,
+    view: View,
+    /// Every file ever saved, per profile, with the destination it was
+    /// read from.
+    trees: HashMap<ProfileId, (PathBuf, Load<Tree>)>,
     query: String,
     query_edited: Option<Instant>,
-    search: Load<Vec<SearchHit>>,
-    target: Option<Target>,
-    folder: Option<PathBuf>,
-    overwrite: bool,
-    /// Choosing backups to merge.
-    merge_mode: bool,
-    /// Backups ticked for the merge; everything between the oldest and the
-    /// newest ticked one is merged.
-    merge_marks: BTreeSet<String>,
-    /// "I understand" for a merge that replaces the initial complete backup.
-    merge_ack: bool,
-    /// Backup whose deletion is being confirmed.
-    deleting: Option<String>,
-    /// "I understand" for the deletion.
-    delete_ack: bool,
+    /// Nodes matching the query, once searched.
+    hits: Option<Vec<usize>>,
+    /// The selection, in the order things were ticked.
+    picks: Vec<Pick>,
+    /// Versions of the ticked files, by key.
+    versions: HashMap<String, Load<Vec<FileVersion>>>,
+    /// Bytes of a ticked folder at a date, by key and archive.
+    folder_sizes: HashMap<(String, String), Load<u64>>,
+    /// Kept when the archives change and across profiles, like a folder
+    /// chosen in a file dialog.
+    default: DefaultDest,
+    backups: BackupsView,
+}
+
+/// What a click in a card asks for, applied once the cards are drawn.
+#[derive(Debug)]
+enum CardEdit {
+    Remove(usize),
+    /// Tick or untick the version at this position of the file's list.
+    Version {
+        card: usize,
+        index: usize,
+        on: bool,
+    },
+    /// A folder comes back as it was in this archive.
+    Date {
+        card: usize,
+        archive: String,
+    },
 }
 
 impl RestoreView {
-    /// Forget everything loaded, e.g. after a backup or merge changed the
-    /// archives. The restore options stay.
+    /// Forget everything read, e.g. after a backup, merge or deletion
+    /// changed the archives. The default destination and the view stay.
     pub fn invalidate(&mut self) {
-        let (target, folder, overwrite) = (self.target, self.folder.take(), self.overwrite);
-        *self = Self { target, folder, overwrite, ..Self::default() };
+        let (default, view) = (std::mem::take(&mut self.default), self.view);
+        *self = Self { default, view, ..Self::default() };
     }
 
-    /// Draws the tab; returns a restore or merge to start.
+    /// Shows the "Restore files" view next time the tab is drawn.
+    pub fn open_files(&mut self) {
+        self.view = View::Files;
+    }
+
+    /// Draws the tab; returns a restore, merge or deletion to start.
     pub fn show(&mut self, ui: &mut Ui, tr: &Tr, profile: &Profile, busy: bool) -> Option<Action> {
         if self.profile != Some(profile.id) {
-            self.invalidate();
-            self.profile = Some(profile.id);
+            self.switch_to(profile.id);
         }
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut self.view, View::Files, tr.t("backups-restore-files"))
+                .on_hover_text(tr.t("backups-restore-files-hint"));
+            ui.selectable_value(&mut self.view, View::Backups, tr.t("backups-manage"))
+                .on_hover_text(tr.t("backups-manage-hint"));
+        });
+        ui.separator();
+        match self.view {
+            View::Files => self.files_view(ui, tr, profile, busy),
+            View::Backups => {
+                let mut refresh = false;
+                let action = self.backups.show(ui, tr, profile, busy, &mut refresh);
+                if refresh {
+                    self.invalidate();
+                }
+                action
+            }
+        }
+    }
+
+    /// Another profile: its own selection. The trees read so far stay,
+    /// except those that failed: a password may have been typed since.
+    fn switch_to(&mut self, id: ProfileId) {
+        self.profile = Some(id);
+        self.trees.retain(|_, (_, t)| !matches!(t, Load::Failed(_)));
+        self.picks.clear();
+        self.versions.clear();
+        self.folder_sizes.clear();
+        self.query.clear();
+        self.query_edited = None;
+        self.hits = None;
+        self.backups = BackupsView::default();
+    }
+
+    fn files_view(&mut self, ui: &mut Ui, tr: &Tr, profile: &Profile, busy: bool) -> Option<Action> {
         let ctx = ui.ctx().clone();
         let stopped = tr.t("unexpected-stop");
-        self.archives.poll(&stopped);
-        self.tree.poll(&stopped);
-        self.versions.poll(&stopped);
-        self.search.poll(&stopped);
-        if matches!(self.archives, Load::Idle) {
+        let destination = profile.destination.path();
+        let (read_from, tree) = self.trees.entry(profile.id).or_default();
+        if read_from != destination {
+            // The destination was changed in the settings.
+            *read_from = destination.to_path_buf();
+            *tree = Load::Idle;
+        }
+        tree.poll(&stopped);
+        if matches!(tree, Load::Idle) {
             let p = profile.clone();
-            self.archives = Load::spawn(&ctx, move || {
+            *tree = Load::spawn(&ctx, move || {
                 let pw = credentials::get_or_none(p.id);
-                archeion_engine::list_archives(&p, pw.as_ref()).map_err(Problem::from)
+                archeion_engine::catalog(&p, pw.as_ref()).map(Tree::build).map_err(Problem::from)
             });
         }
-        if self.selected.is_none()
-            && let Some(newest) = self.archives.ready().and_then(|l| l.first()).map(|a| a.name.clone())
-        {
-            self.select_archive(&ctx, profile, newest);
+        for l in self.versions.values_mut() {
+            l.poll(&stopped);
         }
-        self.run_search_when_idle(&ctx, profile);
+        for l in self.folder_sizes.values_mut() {
+            l.poll(&stopped);
+        }
+        self.sync_picks();
+        self.run_search_when_idle(&ctx, profile.id);
 
         let mut action = None;
-        egui::Panel::left("restore-dates")
-            .resizable(true)
-            .default_size(theme::SIDE_PANEL_WIDTH)
-            .show(ui, |ui| action = self.dates_ui(ui, tr, profile, busy));
-        egui::Panel::bottom("restore-options").show(ui, |ui| {
-            if let Some(r) = self.options_ui(ui, tr, busy) {
-                action = Some(Action::Restore(r));
-            }
-        });
-        if self.focused.is_some() {
-            egui::Panel::right("restore-versions").resizable(true).default_size(300.0).show(ui, |ui| {
-                if let Some(r) = self.versions_ui(ui, tr, busy) {
+        egui::Panel::right("restore-selection").resizable(true).default_size(SELECTION_WIDTH).show(
+            ui,
+            |ui| {
+                if let Some(r) = self.selection_ui(ui, tr, profile, busy) {
                     action = Some(Action::Restore(r));
                 }
-            });
-        }
-        egui::CentralPanel::default().show(ui, |ui| self.files_ui(ui, tr, profile));
+            },
+        );
+        egui::CentralPanel::default().show(ui, |ui| self.tree_ui(ui, tr, profile));
         action
     }
 
-    fn select_archive(&mut self, ctx: &Context, profile: &Profile, name: String) {
-        if self.selected.as_deref() == Some(name.as_str()) {
-            return;
+    /// Brings the cards up to date with what was read: the newest version
+    /// of a file is ticked when its versions arrive, a folder learns its
+    /// size.
+    fn sync_picks(&mut self) {
+        for pick in &mut self.picks {
+            match pick {
+                Pick::File { key, loading, versions } if *loading => match self.versions.get(key.as_str()) {
+                    Some(Load::Ready(list)) => {
+                        *loading = false;
+                        if let Some(v) = list.first() {
+                            versions.push(Version { archive: v.archive.clone(), size: v.size, dest: None });
+                        }
+                    }
+                    Some(Load::Failed(_)) | None => *loading = false,
+                    Some(Load::Idle | Load::Loading(_)) => {}
+                },
+                Pick::File { .. } => {}
+                Pick::Folder { key, archive, size, .. } => {
+                    let read = self.folder_sizes.get(&(key.clone(), archive.clone()));
+                    *size = read.and_then(Load::ready).copied();
+                }
+            }
         }
-        self.checked.clear();
-        let p = profile.clone();
-        let n = name.clone();
-        self.tree = Load::spawn(ctx, move || {
-            let pw = credentials::get_or_none(p.id);
-            archeion_engine::archive_manifest(&p, pw.as_ref(), &n)
-                .map(|m| Tree::build(&m.entries))
-                .map_err(Problem::from)
-        });
-        self.selected = Some(name);
     }
 
-    fn focus(&mut self, ctx: &Context, profile: &Profile, key: String) {
-        if self.focused.as_deref() == Some(key.as_str()) {
-            return;
-        }
-        let p = profile.clone();
-        let k = key.clone();
-        self.versions = Load::spawn(ctx, move || {
-            let pw = credentials::get_or_none(p.id);
-            archeion_engine::file_versions(&p, pw.as_ref(), &k).map_err(Problem::from)
-        });
-        self.focused = Some(key);
-    }
-
-    fn run_search_when_idle(&mut self, ctx: &Context, profile: &Profile) {
+    fn run_search_when_idle(&mut self, ctx: &Context, id: ProfileId) {
         let Some(edited) = self.query_edited else { return };
         if edited.elapsed() < SEARCH_DEBOUNCE {
             ctx.request_repaint_after(SEARCH_DEBOUNCE.saturating_sub(edited.elapsed()));
             return;
         }
+        // Searched once the tree is there.
+        let Some(tree) = self.trees.get(&id).and_then(|(_, t)| t.ready()) else { return };
+        let hits = (!self.query.trim().is_empty()).then(|| tree.search(&self.query, SEARCH_LIMIT));
+        self.hits = hits;
         self.query_edited = None;
-        let (p, q) = (profile.clone(), self.query.clone());
-        self.search = if q.trim().is_empty() {
-            Load::Idle
-        } else {
-            Load::spawn(ctx, move || {
-                let pw = credentials::get_or_none(p.id);
-                archeion_engine::search(&p, pw.as_ref(), &q, SEARCH_LIMIT).map_err(Problem::from)
-            })
-        };
     }
 
-    fn dates_ui(&mut self, ui: &mut Ui, tr: &Tr, profile: &Profile, busy: bool) -> Option<Action> {
-        ui.add_space(theme::SPACE_S);
-        ui.horizontal(|ui| {
-            ui.strong(tr.t("dates"));
-            if ui.small_button("⟳").on_hover_text(tr.t("refresh")).clicked() {
-                self.invalidate();
-                self.profile = Some(profile.id);
-            }
-        });
-        let Some(list) = self.archives.ready().cloned() else {
-            self.archives.status_ui(ui, tr, &tr.t("reading-backups"));
-            return None;
-        };
-        if list.is_empty() {
-            ui.weak(tr.t("no-backups-yet"));
-            return None;
-        }
-        // `list` is newest first: the range is between the two ticked ends.
-        let ticked: Vec<usize> = list
-            .iter()
-            .enumerate()
-            .filter(|(_, a)| self.merge_marks.contains(&a.name))
-            .map(|(i, _)| i)
-            .collect();
-        let range = match (ticked.first(), ticked.last()) {
-            (Some(&lo), Some(&hi)) => Some(lo..=hi),
-            _ => None,
-        };
-
-        let mut action = None;
-        if self.merge_mode {
-            action = self.merge_controls(ui, tr, &list, range.clone(), busy);
-        } else if list.len() >= 2
-            && ui.button(tr.t("merge-choose")).on_hover_text(tr.t("merge-choose-hint")).clicked()
-        {
-            self.merge_mode = true;
-        }
-        ui.add_space(theme::SPACE_S);
-
-        let mut clicked = None;
-        let mut toggled = None;
-        egui::ScrollArea::vertical().id_salt("dates").show(ui, |ui| {
-            for (i, a) in list.iter().enumerate() {
-                let kind = tr.t(match a.kind {
-                    ArchiveKind::Complete => "kind-complete",
-                    ArchiveKind::Incremental => "kind-incremental",
-                });
-                ui.horizontal(|ui| {
-                    if self.merge_mode {
-                        let mut on = range.as_ref().is_some_and(|r| r.contains(&i));
-                        if ui.checkbox(&mut on, "").on_hover_text(tr.t("merge-tick")).changed() {
-                            toggled = Some(a.name.clone());
-                        }
-                    }
-                    let selected = self.selected.as_deref() == Some(a.name.as_str());
-                    let resp = ui
-                        .selectable_label(selected, format!("{}  ·  {kind}", a.time_label))
-                        .on_hover_text(tr.t_args(
-                            "archive-tooltip",
-                            &[
-                                ("files", arg(a.files_total)),
-                                ("stored", arg(a.files_stored)),
-                                ("size", arg(tr.bytes(a.bytes_stored))),
-                            ],
-                        ));
-                    if resp.clicked() {
-                        clicked = Some(a.name.clone());
-                    }
-                });
-            }
-        });
-        if let Some(name) = toggled {
-            self.toggle_mark(&list, name);
-        }
-        if let Some(name) = clicked {
-            let ctx = ui.ctx().clone();
-            self.select_archive(&ctx, profile, name);
-        }
-        if !self.merge_mode
-            && let Some(a) = self.delete_controls(ui, tr, &list, busy)
-        {
-            action = Some(a);
-        }
-        action
-    }
-
-    /// "Delete this backup…" for the selected date, with its confirmation.
-    fn delete_controls(&mut self, ui: &mut Ui, tr: &Tr, list: &[ArchiveInfo], busy: bool) -> Option<Action> {
-        let selected = self.selected.clone()?;
-        let info = list.iter().find(|a| a.name == selected)?;
-        // `list` is newest first; the plan wants oldest first.
-        let names: Vec<ArchiveName> = list.iter().rev().filter_map(|a| a.name.parse().ok()).collect();
-        let name: ArchiveName = selected.parse().ok()?;
-        let plan = deletion(&names, &name);
-        if self.deleting.as_deref() != Some(selected.as_str()) {
-            self.deleting = None;
-            self.delete_ack = false;
-        }
-
-        ui.add_space(theme::SPACE_S);
-        ui.separator();
-        let mut action = None;
-        let confirming = self.deleting.is_some();
-        match (confirming, &plan) {
-            (false, _) => {
-                let why = match &plan {
-                    Ok(_) if busy => Some(tr.t("busy-hint")),
-                    Ok(_) => None,
-                    Err(DeleteError::InitialWithOthers) => Some(tr.t("delete-initial-hint")),
-                    Err(DeleteError::Complete) => Some(tr.t("delete-complete-hint")),
-                    Err(DeleteError::Unknown) => Some(tr.t("unexpected-stop")),
-                };
-                let resp = ui.add_enabled(why.is_none(), egui::Button::new(tr.t("delete-backup")));
-                let resp = match why {
-                    Some(w) => resp.on_disabled_hover_text(w),
-                    None => resp.on_hover_text(tr.t("delete-backup-hint")),
-                };
-                if resp.clicked() {
-                    self.deleting = Some(selected.clone());
-                    self.delete_ack = false;
-                }
-            }
-            (true, Ok(d)) => {
-                let date = arg(info.time_label.clone());
-                let text = match d {
-                    Deletion::Remove(_) if list.len() == 1 => {
-                        tr.t_args("delete-only-warning", &[("date", date)])
-                    }
-                    Deletion::Remove(_) => tr.t_args("delete-newest-warning", &[("date", date)]),
-                    Deletion::MergeWithNext(_) => tr.t_args("delete-middle-warning", &[("date", date)]),
-                };
-                ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {text}"));
-                ui.checkbox(&mut self.delete_ack, tr.t("merge-complete-ack"));
-                ui.horizontal(|ui| {
-                    let ready = self.delete_ack && !busy;
-                    let why = if busy { tr.t("busy-hint") } else { tr.t("merge-ack-hint") };
-                    let button = egui::Button::new(
-                        RichText::new(tr.t("delete-backup-confirm")).color(ui.visuals().error_fg_color),
-                    );
-                    if ui.add_enabled(ready, button).on_disabled_hover_text(why).clicked() {
-                        action = Some(Action::Delete { archive: selected.clone() });
-                    }
-                    if ui.button(tr.t("cancel")).clicked() || action.is_some() {
-                        self.deleting = None;
-                        self.delete_ack = false;
-                    }
-                });
-            }
-            (true, Err(_)) => self.deleting = None,
-        }
-        action
-    }
-
-    /// The marks are the two ends of the range. Clicking an end removes it;
-    /// clicking another backup adds it, replacing the nearer end when both
-    /// are already set.
-    fn toggle_mark(&mut self, list: &[ArchiveInfo], name: String) {
-        self.merge_ack = false;
-        if self.merge_marks.remove(&name) {
+    /// Ticks or unticks the node `idx`. A ticked file reads its versions,
+    /// a ticked folder comes back as it was in the newest backup listing it.
+    fn toggle(&mut self, ctx: &Context, profile: &Profile, idx: usize) {
+        let Some(tree) = self.trees.get(&profile.id).and_then(|(_, t)| t.ready()) else { return };
+        let Some(node) = tree.node(idx) else { return };
+        let key = node.key().to_owned();
+        if let Some(pos) = self.picks.iter().position(|p| p.key() == key) {
+            self.picks.remove(pos);
             return;
         }
-        if self.merge_marks.len() >= 2 {
-            let pos = |n: &str| list.iter().position(|a| a.name == n).unwrap_or(0);
-            let target = pos(&name);
-            let nearer = self.merge_marks.iter().min_by_key(|m| pos(m).abs_diff(target)).cloned();
-            if let Some(n) = nearer {
-                self.merge_marks.remove(&n);
+        if node.is_dir() {
+            let Some(newest) = tree.dates(node).first().map(|a| a.name.clone()) else { return };
+            spawn_folder_size(&mut self.folder_sizes, ctx, profile, &key, &newest);
+            self.picks.push(Pick::Folder { key, archive: newest, dest: None, size: None });
+        } else {
+            if self.versions.get(&key).is_none_or(|l| matches!(l, Load::Failed(_))) {
+                let (p, k) = (profile.clone(), key.clone());
+                let load = Load::spawn(ctx, move || {
+                    let pw = credentials::get_or_none(p.id);
+                    archeion_engine::file_versions(&p, pw.as_ref(), &k).map_err(Problem::from)
+                });
+                self.versions.insert(key.clone(), load);
             }
+            self.picks.push(Pick::File { key, loading: true, versions: Vec::new() });
         }
-        self.merge_marks.insert(name);
     }
 
-    /// Summary, warning and buttons of the manual merge.
-    fn merge_controls(
+    fn tree_ui(&mut self, ui: &mut Ui, tr: &Tr, profile: &Profile) {
+        let mut refresh = false;
+        ui.horizontal(|ui| {
+            refresh = ui.small_button("⟳").on_hover_text(tr.t("refresh")).clicked();
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut self.query)
+                    .hint_text(tr.t("search-hint"))
+                    .desired_width(f32::INFINITY),
+            );
+            if resp.changed() {
+                self.query_edited = Some(Instant::now());
+            }
+        });
+        if refresh {
+            // Read the backups again; the selection stays.
+            self.trees.remove(&profile.id);
+            self.versions.retain(|_, l| !matches!(l, Load::Failed(_)));
+            self.folder_sizes.retain(|_, l| !matches!(l, Load::Failed(_)));
+            self.hits = None;
+            self.query_edited = Some(Instant::now());
+            return;
+        }
+        ui.add_space(theme::SPACE_S);
+        let mut toggled: Vec<usize> = Vec::new();
+        match self.trees.get(&profile.id).map(|(_, t)| t) {
+            Some(Load::Ready(tree)) => {
+                let picked: HashSet<&str> = self.picks.iter().map(Pick::key).collect();
+                if tree.files == 0 {
+                    ui.weak(tr.t("no-backups-yet"));
+                } else if self.query.trim().is_empty() {
+                    tree_list_ui(ui, tr, tree, &picked, &mut toggled);
+                } else {
+                    hits_ui(ui, tr, tree, self.hits.as_deref(), &picked, &mut toggled);
+                }
+            }
+            Some(other) => other.status_ui(ui, tr, &tr.t("reading-backups")),
+            None => {}
+        }
+        let ctx = ui.ctx().clone();
+        for idx in toggled {
+            self.toggle(&ctx, profile, idx);
+        }
+    }
+
+    /// Right panel: default destination, cards, summary and Restore.
+    fn selection_ui(
         &mut self,
         ui: &mut Ui,
         tr: &Tr,
-        list: &[ArchiveInfo],
-        range: Option<std::ops::RangeInclusive<usize>>,
+        profile: &Profile,
         busy: bool,
-    ) -> Option<Action> {
-        ui.weak(tr.t("merge-tick-hint"));
-        let mut action = None;
-        let chosen = range.as_ref().map_or(0, |r| r.clone().count());
-        let (newest, oldest) = match &range {
-            Some(r) => (list.get(*r.start()), list.get(*r.end())),
-            None => (None, None),
-        };
-        // The initial complete backup is the oldest of all.
-        let replaces_complete = oldest.is_some_and(|o| {
-            o.kind == ArchiveKind::Complete && list.last().is_some_and(|l| l.name == o.name)
-        });
-        if chosen >= 2
-            && let Some(n) = newest
-        {
-            ui.label(
-                tr.t_args("merge-summary", &[("count", arg(chosen)), ("date", arg(n.time_label.clone()))]),
-            );
-        }
-        if chosen >= 2 && replaces_complete {
-            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("merge-complete-warning")));
-            ui.checkbox(&mut self.merge_ack, tr.t("merge-complete-ack"));
-        }
-        ui.horizontal(|ui| {
-            let ready = chosen >= 2 && !busy && (!replaces_complete || self.merge_ack);
-            let why = if busy {
-                tr.t("busy-hint")
-            } else if chosen < 2 {
-                tr.t("merge-two-hint")
-            } else {
-                tr.t("merge-ack-hint")
-            };
-            if ui
-                .add_enabled(ready, egui::Button::new(tr.t("merge-selected")))
-                .on_disabled_hover_text(why)
-                .clicked()
-                && let (Some(n), Some(o)) = (newest, oldest)
-            {
-                action = Some(Action::Merge { first: o.name.clone(), last: n.name.clone() });
+    ) -> Option<RestoreRequest> {
+        let plan = restore_plan::plan(&self.picks, &self.default, busy);
+        egui::Panel::top("restore-default").show(ui, |ui| default_ui(ui, tr, &mut self.default));
+        let mut request = None;
+        egui::Panel::bottom("restore-go").show(ui, |ui| {
+            request = go_ui(ui, tr, &plan);
+            if !self.picks.is_empty() && ui.link(tr.t("clear-selection")).clicked() {
+                self.picks.clear();
             }
-            if ui.button(tr.t("cancel")).clicked() || action.is_some() {
-                self.merge_mode = false;
-                self.merge_marks.clear();
-                self.merge_ack = false;
-            }
+            ui.add_space(theme::SPACE_S);
         });
-        action
+        egui::CentralPanel::default().show(ui, |ui| self.cards_ui(ui, tr, profile, &plan));
+        if request.is_some() {
+            // Started: the Activity tab shows it; the selection is done.
+            self.picks.clear();
+        }
+        request
     }
 
-    fn files_ui(&mut self, ui: &mut Ui, tr: &Tr, profile: &Profile) {
-        let resp = ui.add(
-            egui::TextEdit::singleline(&mut self.query)
-                .hint_text(tr.t("search-hint"))
-                .desired_width(f32::INFINITY),
-        );
-        if resp.changed() {
-            self.query_edited = Some(Instant::now());
+    fn cards_ui(&mut self, ui: &mut Ui, tr: &Tr, profile: &Profile, plan: &Plan) {
+        if self.picks.is_empty() {
+            ui.add_space(theme::SPACE_S);
+            ui.weak(tr.t("selection-empty"));
+            return;
         }
-        ui.add_space(theme::SPACE_S);
-        let mut focus = None;
-        if self.query.trim().is_empty() {
-            match self.tree.ready() {
-                None if self.selected.is_none() => {
-                    ui.weak(tr.t("pick-date"));
-                }
-                None => self.tree.status_ui(ui, tr, &tr.t("reading-backups")),
-                Some(tree) => {
-                    ui.weak(tr.t_args(
-                        "tree-count",
-                        &[("stored", arg(tree.stored_files)), ("total", arg(tree.files))],
-                    ));
-                    ui.weak(tr.t("tree-stored-hint"));
-                    if tree.stored_files == 0 && tree.files > 0 {
-                        ui.add_space(theme::SPACE_S);
-                        ui.weak(tr.t("tree-nothing-stored"));
+        let tree = self.trees.get(&profile.id).and_then(|(_, t)| t.ready());
+        let mut edits: Vec<CardEdit> = Vec::new();
+        egui::ScrollArea::vertical().id_salt("cards").auto_shrink(false).show(ui, |ui| {
+            for (card, pick) in self.picks.iter_mut().enumerate() {
+                ui.push_id(("card", pick.key().to_owned()), |ui| {
+                    let node = tree.and_then(|t| t.find(pick.key()));
+                    if card_header(ui, tr, pick.key(), node) {
+                        edits.push(CardEdit::Remove(card));
                     }
-                    egui::ScrollArea::vertical().id_salt("tree").auto_shrink(false).show(ui, |ui| {
-                        for &r in &tree.roots {
-                            node_ui(ui, tr, tree, r, &mut self.checked, self.focused.as_deref(), &mut focus);
+                    match pick {
+                        Pick::File { key, versions, .. } => {
+                            let read = self.versions.get(key.as_str());
+                            file_card(ui, tr, &self.default, plan, card, read, versions, &mut edits);
                         }
-                    });
-                }
-            }
-        } else {
-            match self.search.ready() {
-                None if self.query_edited.is_some() => {}
-                None => self.search.status_ui(ui, tr, &tr.t("searching")),
-                Some(hits) if hits.is_empty() => {
-                    ui.weak(tr.t("no-results"));
-                }
-                Some(hits) => {
-                    ui.weak(tr.t_args("results", &[("count", arg(hits.len()))]));
-                    egui::ScrollArea::vertical().id_salt("hits").auto_shrink(false).show(ui, |ui| {
-                        for h in hits {
-                            let path = keys::path_for(&h.key).display().to_string();
-                            let mut text = format!(
-                                "{path}  ·  {}",
-                                tr.t_args("version-count", &[("count", arg(h.versions))])
-                            );
-                            if !h.present_now {
-                                text.push_str(&format!("  ·  {}", tr.t("deleted-now")));
-                            }
-                            let selected = self.focused.as_deref() == Some(h.key.as_str());
-                            if ui.selectable_label(selected, text).clicked() {
-                                focus = Some(h.key.clone());
-                            }
+                        Pick::Folder { key, archive, dest, .. } => {
+                            let size = self.folder_sizes.get(&(key.clone(), archive.clone()));
+                            let dates = match (tree, node) {
+                                (Some(t), Some(n)) => t.dates(n),
+                                _ => Vec::new(),
+                            };
+                            folder_card(ui, tr, &self.default, card, archive, dest, &dates, size, &mut edits);
                         }
-                    });
-                }
-            }
-        }
-        if let Some(key) = focus {
-            let ctx = ui.ctx().clone();
-            self.focus(&ctx, profile, key);
-        }
-    }
-
-    fn versions_ui(&mut self, ui: &mut Ui, tr: &Tr, busy: bool) -> Option<RestoreRequest> {
-        let key = self.focused.clone()?;
-        let mut request = None;
-        ui.add_space(theme::SPACE_S);
-        ui.horizontal(|ui| {
-            let name = key.rsplit('/').next().unwrap_or(&key).to_owned();
-            ui.strong(name).on_hover_text(keys::path_for(&key).display().to_string());
-            if ui.small_button("✕").on_hover_text(tr.t("close")).clicked() {
-                self.focused = None;
-            }
-        });
-        ui.weak(tr.t("versions-hint"));
-        let Some(list) = self.versions.ready() else {
-            self.versions.status_ui(ui, tr, &tr.t("reading-backups"));
-            return None;
-        };
-        let target = self.restore_target();
-        egui::ScrollArea::vertical().id_salt("versions").show(ui, |ui| {
-            for v in list {
-                ui.add_space(theme::SPACE_S);
-                ui.label(
-                    RichText::new(tr.t_args("version-modified", &[("date", arg(v.modified_label.clone()))]))
-                        .strong(),
-                );
-                ui.weak(tr.t_args(
-                    "version-detail",
-                    &[("backup", arg(v.backup_label.clone())), ("size", arg(tr.bytes(v.size)))],
-                ));
-                let ready = !busy && target.is_some();
-                if ui
-                    .add_enabled(ready, egui::Button::new(tr.t("restore-version")))
-                    .on_disabled_hover_text(if busy { tr.t("busy-hint") } else { tr.t("choose-folder-hint") })
-                    .clicked()
-                    && let Some(t) = target.clone()
-                {
-                    request = Some(RestoreRequest {
-                        archive: v.archive.clone(),
-                        keys: vec![key.clone()],
-                        target: t,
-                        overwrite: self.overwrite,
-                    });
-                }
-            }
-        });
-        request
-    }
-
-    fn options_ui(&mut self, ui: &mut Ui, tr: &Tr, busy: bool) -> Option<RestoreRequest> {
-        ui.add_space(theme::SPACE_S);
-        let mut chosen = self.target.unwrap_or(Target::Beside);
-        ui.horizontal(|ui| {
-            ui.label(tr.t("restore-to"));
-            ui.radio_value(&mut chosen, Target::Beside, tr.t("target-beside"))
-                .on_hover_text(tr.t("target-beside-hint"));
-            ui.radio_value(&mut chosen, Target::Original, tr.t("target-original"));
-            ui.radio_value(&mut chosen, Target::Folder, tr.t("target-folder"));
-            if chosen == Target::Folder {
-                let label = self.folder.as_ref().map_or_else(|| tr.t("browse"), |f| f.display().to_string());
-                if ui.button(label).clicked()
-                    && let Some(dir) = rfd::FileDialog::new().pick_folder()
-                {
-                    self.folder = Some(dir);
-                }
-            }
-        });
-        self.target = Some(chosen);
-        ui.horizontal(|ui| {
-            ui.checkbox(&mut self.overwrite, tr.t("replace-existing"));
-            if self.overwrite && chosen == Target::Original {
-                ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("replace-warning")));
-            }
-        });
-
-        let label = self
-            .archives
-            .ready()
-            .and_then(|l| l.iter().find(|a| Some(a.name.as_str()) == self.selected.as_deref()))
-            .map(|a| a.time_label.clone())
-            .unwrap_or_default();
-        let target = self.restore_target();
-        let mut request = None;
-        ui.horizontal(|ui| {
-            let ready = !busy && !self.checked.is_empty() && self.selected.is_some() && target.is_some();
-            let why = if busy {
-                tr.t("busy-hint")
-            } else if self.checked.is_empty() {
-                tr.t("tick-files-hint")
-            } else {
-                tr.t("choose-folder-hint")
-            };
-            let button = egui::Button::new(RichText::new(tr.t("restore-selected")).strong())
-                .fill(ui.visuals().selection.bg_fill);
-            if ui.add_enabled(ready, button).on_disabled_hover_text(why).clicked()
-                && let (Some(archive), Some(t)) = (self.selected.clone(), target)
-            {
-                request = Some(RestoreRequest {
-                    archive,
-                    keys: self.checked.iter().cloned().collect(),
-                    target: t,
-                    overwrite: self.overwrite,
+                    }
+                    if plan.conflicts.contains(&card) {
+                        ui.colored_label(
+                            ui.visuals().error_fg_color,
+                            format!("⚠ {}", tr.t("restore-conflict")),
+                        );
+                    }
                 });
-            }
-            if !self.checked.is_empty() {
-                ui.label(
-                    tr.t_args("selected-count", &[("count", arg(self.checked.len())), ("date", arg(label))]),
-                );
-                if ui.small_button(tr.t("clear-selection")).clicked() {
-                    self.checked.clear();
-                }
+                ui.separator();
             }
         });
-        ui.add_space(theme::SPACE_S);
-        request
+        self.apply(ui.ctx(), profile, edits);
     }
 
-    /// `None` while "another folder" has no folder yet.
-    fn restore_target(&self) -> Option<RestoreTarget> {
-        match self.target.unwrap_or(Target::Beside) {
-            Target::Original => Some(RestoreTarget::Original),
-            Target::Beside => Some(RestoreTarget::BesideOriginal),
-            Target::Folder => self.folder.clone().map(|path| RestoreTarget::Folder { path }),
+    fn apply(&mut self, ctx: &Context, profile: &Profile, edits: Vec<CardEdit>) {
+        let mut removed: Vec<usize> = Vec::new();
+        for edit in edits {
+            match edit {
+                CardEdit::Remove(card) => removed.push(card),
+                CardEdit::Version { card, index, on } => {
+                    let Some(Pick::File { key, versions, .. }) = self.picks.get_mut(card) else { continue };
+                    let Some(list) = self.versions.get(key.as_str()).and_then(Load::ready) else { continue };
+                    let Some(v) = list.get(index) else { continue };
+                    if on {
+                        // Ticked versions stay newest first, like the list.
+                        let position = |archive: &str| list.iter().position(|l| l.archive == archive);
+                        let at = versions.iter().filter(|t| position(&t.archive) < Some(index)).count();
+                        versions.insert(at, Version { archive: v.archive.clone(), size: v.size, dest: None });
+                    } else {
+                        versions.retain(|t| t.archive != v.archive);
+                    }
+                }
+                CardEdit::Date { card, archive } => {
+                    let Some(Pick::Folder { key, archive: current, size, .. }) = self.picks.get_mut(card)
+                    else {
+                        continue;
+                    };
+                    spawn_folder_size(&mut self.folder_sizes, ctx, profile, key, &archive);
+                    *current = archive;
+                    *size = None;
+                }
+            }
+        }
+        removed.sort_unstable();
+        for card in removed.into_iter().rev() {
+            if card < self.picks.len() {
+                self.picks.remove(card);
+            }
         }
     }
 }
 
-/// One node of the tree, its children inside a collapsible header.
-fn node_ui(
+/// Reads the bytes of folder `key` as it was in `archive`, unless already
+/// read or being read.
+fn spawn_folder_size(
+    sizes: &mut HashMap<(String, String), Load<u64>>,
+    ctx: &Context,
+    profile: &Profile,
+    key: &str,
+    archive: &str,
+) {
+    let slot = (key.to_owned(), archive.to_owned());
+    if sizes.get(&slot).is_some_and(|l| !matches!(l, Load::Failed(_))) {
+        return;
+    }
+    let (p, k, a) = (profile.clone(), key.to_owned(), archive.to_owned());
+    let load = Load::spawn(ctx, move || {
+        let pw = credentials::get_or_none(p.id);
+        let m = archeion_engine::archive_manifest(&p, pw.as_ref(), &a).map_err(Problem::from)?;
+        let files = m.entries.iter().filter(|e| e.kind == EntryKind::File && keys::is_within(&e.key, &k));
+        Ok(files.fold(0u64, |sum, e| sum.saturating_add(e.size)))
+    });
+    sizes.insert(slot, load);
+}
+
+/// The whole tree, with its counts.
+fn tree_list_ui(ui: &mut Ui, tr: &Tr, tree: &Tree, picked: &HashSet<&str>, toggled: &mut Vec<usize>) {
+    ui.weak(
+        tr.t_args("restore-tree-count", &[("files", arg(tree.files)), ("deleted", arg(tree.deleted_files))]),
+    );
+    ui.weak(tr.t("restore-tree-hint"));
+    egui::ScrollArea::vertical().id_salt("tree").auto_shrink(false).show(ui, |ui| {
+        for &r in &tree.roots {
+            node_ui(ui, tr, tree, r, picked, toggled);
+        }
+    });
+}
+
+/// Search results: tickable like the tree, with the full path.
+fn hits_ui(
     ui: &mut Ui,
     tr: &Tr,
     tree: &Tree,
-    idx: usize,
-    checked: &mut BTreeSet<String>,
-    focused: Option<&str>,
-    focus: &mut Option<String>,
+    hits: Option<&[usize]>,
+    picked: &HashSet<&str>,
+    toggled: &mut Vec<usize>,
 ) {
-    let Some(n) = tree.node(idx) else { return };
-    let mut on = checked.contains(&n.key);
-    // Not saved by this backup: still there to browse and restore, greyed.
-    let paint = |text: String, ui: &Ui| {
-        let t = RichText::new(text);
-        if n.stored { t } else { t.color(ui.visuals().weak_text_color()) }
-    };
-    // Folders with saved files open by themselves, unless everything was
-    // saved (a complete backup), which would open the whole tree.
-    let open = n.stored && tree.stored_files < tree.files;
-    let toggle = |on: bool, checked: &mut BTreeSet<String>| {
-        if on {
-            checked.insert(n.key.clone());
-        } else {
-            checked.remove(&n.key);
+    let Some(hits) = hits else { return };
+    if hits.is_empty() {
+        ui.weak(tr.t("no-results"));
+        return;
+    }
+    ui.weak(tr.t_args("results", &[("count", arg(hits.len()))]));
+    egui::ScrollArea::vertical().id_salt("hits").auto_shrink(false).show(ui, |ui| {
+        for &idx in hits {
+            let Some(n) = tree.node(idx) else { continue };
+            let mut on = picked.contains(n.key());
+            let path = keys::path_for(n.key()).display().to_string();
+            let text = node_text(ui, tr, n, format!("📄 {path}   {}", tr.bytes(n.entry.size)));
+            if ui.checkbox(&mut on, text).on_hover_text(node_hint(tr, n)).changed() {
+                toggled.push(idx);
+            }
         }
-    };
-    if n.kind == EntryKind::Dir {
-        let id = ui.make_persistent_id(("tree", &n.key));
+    });
+}
+
+/// One node of the tree, its children inside a collapsible header. Only
+/// the roots start open.
+fn node_ui(ui: &mut Ui, tr: &Tr, tree: &Tree, idx: usize, picked: &HashSet<&str>, toggled: &mut Vec<usize>) {
+    let Some(n) = tree.node(idx) else { return };
+    let mut on = picked.contains(n.key());
+    if n.is_dir() {
+        let id = ui.make_persistent_id(("tree", n.key()));
+        let open = tree.roots.contains(&idx);
         CollapsingState::load_with_default_open(ui.ctx(), id, open)
             .show_header(ui, |ui| {
-                if ui.checkbox(&mut on, "").on_hover_text(tr.t("tick-folder")).changed() {
-                    toggle(on, checked);
-                }
-                let label = paint(format!("📁 {}", n.label), ui);
-                let resp = ui.label(label);
-                if !n.stored {
-                    let _ = resp.on_hover_text(tr.t("tree-not-saved-folder"));
+                let text = node_text(ui, tr, n, format!("📁 {}", n.label));
+                if ui.checkbox(&mut on, text).on_hover_text(node_hint(tr, n)).changed() {
+                    toggled.push(idx);
                 }
             })
             .body(|ui| {
                 for &c in &n.children {
-                    node_ui(ui, tr, tree, c, checked, focused, focus);
+                    node_ui(ui, tr, tree, c, picked, toggled);
                 }
             });
     } else {
-        ui.horizontal(|ui| {
-            if ui.checkbox(&mut on, "").on_hover_text(tr.t("tick-file")).changed() {
-                toggle(on, checked);
-            }
-            let text = paint(format!("{}   {}", n.label, tr.bytes(n.size)), ui);
-            let hint = if n.stored { tr.t("show-versions") } else { tr.t("tree-not-saved-file") };
-            if ui.selectable_label(focused == Some(n.key.as_str()), text).on_hover_text(hint).clicked() {
-                *focus = Some(n.key.clone());
-            }
-        });
+        let text = node_text(ui, tr, n, format!("📄 {}   {}", n.label, tr.bytes(n.entry.size)));
+        if ui.checkbox(&mut on, text).on_hover_text(node_hint(tr, n)).changed() {
+            toggled.push(idx);
+        }
     }
+}
+
+/// A deleted node says so in words and with an icon, and is greyed.
+fn node_text(ui: &Ui, tr: &Tr, n: &Node, base: String) -> RichText {
+    if n.deleted {
+        RichText::new(format!("{base}   🗑 {}", tr.t("deleted-label"))).color(ui.visuals().weak_text_color())
+    } else {
+        RichText::new(base)
+    }
+}
+
+fn node_hint(tr: &Tr, n: &Node) -> String {
+    tr.t(match (n.is_dir(), n.deleted) {
+        (true, false) => "tick-folder",
+        (true, true) => "tree-deleted-folder",
+        (false, false) => "tick-file",
+        (false, true) => "tree-deleted-file",
+    })
+}
+
+/// Name, folder and ✕ of a card; true when ✕ was clicked.
+fn card_header(ui: &mut Ui, tr: &Tr, key: &str, node: Option<&Node>) -> bool {
+    let dir = node.is_some_and(Node::is_dir);
+    let name = key.rsplit('/').next().unwrap_or(key);
+    let path = keys::path_for(key);
+    let mut remove = false;
+    ui.horizontal(|ui| {
+        let icon = if dir { "📁" } else { "📄" };
+        ui.strong(format!("{icon} {name}")).on_hover_text(path.display().to_string());
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let label = tr.t("remove-from-selection");
+            let resp = ui.small_button("✕").on_hover_text(&label);
+            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+            remove = resp.clicked();
+        });
+    });
+    if let Some(parent) = path.parent() {
+        ui.weak(parent.display().to_string());
+    }
+    if node.is_some_and(|n| n.deleted) {
+        ui.weak(format!("🗑 {}", tr.t("deleted-since")));
+    }
+    remove
+}
+
+/// The versions of a ticked file, each tickable; under a ticked one, its
+/// destination and the name it will take.
+#[expect(clippy::too_many_arguments, reason = "one card: its parts are drawn together")]
+fn file_card(
+    ui: &mut Ui,
+    tr: &Tr,
+    default: &DefaultDest,
+    plan: &Plan,
+    card: usize,
+    read: Option<&Load<Vec<FileVersion>>>,
+    ticked: &mut [Version],
+    edits: &mut Vec<CardEdit>,
+) {
+    let Some(read) = read else { return };
+    let Some(list) = read.ready() else {
+        read.status_ui(ui, tr, &tr.t("reading-backups"));
+        return;
+    };
+    ui.weak(tr.t("versions-hint"));
+    for (index, v) in list.iter().enumerate() {
+        let position = ticked.iter().position(|t| t.archive == v.archive);
+        let mut on = position.is_some();
+        let label = tr.t_args(
+            "version-detail",
+            &[("backup", arg(v.backup_label.clone())), ("size", arg(tr.bytes(v.size)))],
+        );
+        let hint = tr.t_args("version-modified", &[("date", arg(v.modified_label.clone()))]);
+        if ui.checkbox(&mut on, label).on_hover_text(hint).changed() {
+            edits.push(CardEdit::Version { card, index, on });
+        }
+        if let Some(n) = position
+            && let Some(t) = ticked.get_mut(n)
+        {
+            ui.indent(("dest", index), |ui| {
+                dest_ui(ui, tr, &mut t.dest, default, plan.output(card, n));
+            });
+        }
+    }
+}
+
+/// The date a ticked folder comes back as, its size then and its
+/// destination.
+#[expect(clippy::too_many_arguments, reason = "one card: its parts are drawn together")]
+fn folder_card(
+    ui: &mut Ui,
+    tr: &Tr,
+    default: &DefaultDest,
+    card: usize,
+    archive: &str,
+    dest: &mut Option<Dest>,
+    dates: &[&archeion_engine::CatalogArchive],
+    size: Option<&Load<u64>>,
+    edits: &mut Vec<CardEdit>,
+) {
+    let current =
+        dates.iter().find(|a| a.name == archive).map_or_else(|| archive.to_owned(), |a| a.label.clone());
+    ui.horizontal(|ui| {
+        ui.label(tr.t("folder-as-of"));
+        let mut chosen = archive.to_owned();
+        egui::ComboBox::from_id_salt("folder-date")
+            .selected_text(current)
+            .show_ui(ui, |ui| {
+                for a in dates {
+                    ui.selectable_value(&mut chosen, a.name.clone(), a.label.clone());
+                }
+            })
+            .response
+            .on_hover_text(tr.t("folder-as-of-hint"));
+        if chosen != archive {
+            edits.push(CardEdit::Date { card, archive: chosen });
+        }
+    });
+    match size {
+        Some(Load::Ready(bytes)) => {
+            ui.weak(tr.t_args("folder-size", &[("size", arg(tr.bytes(*bytes)))]));
+        }
+        Some(other) => other.status_ui(ui, tr, &tr.t("reading-backups")),
+        None => {}
+    }
+    dest_ui(ui, tr, dest, default, None);
+}
+
+/// Where a version or folder goes: the file name it takes (for a version)
+/// and a menu to change the destination; a changed one is marked ✎.
+fn dest_ui(ui: &mut Ui, tr: &Tr, dest: &mut Option<Dest>, default: &DefaultDest, output: Option<&Path>) {
+    if let Some(path) = output {
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        ui.label(format!("→ {name}")).on_hover_text(path.display().to_string());
+    }
+    let text = match dest {
+        None => tr.t_args("dest-default", &[("dest", arg(default_text(tr, default)))]),
+        Some(d) => format!("✎ {}", dest_text(tr, d)),
+    };
+    ui.menu_button(text, |ui| {
+        if ui.button(tr.t("dest-follow-default")).clicked() {
+            *dest = None;
+            ui.close();
+        }
+        if ui.button(tr.t("target-beside")).clicked() {
+            *dest = Some(Dest::Beside);
+            ui.close();
+        }
+        if ui.button(tr.t("dest-overwrite")).on_hover_text(tr.t("replace-warning")).clicked() {
+            *dest = Some(Dest::Original { replace: true });
+            ui.close();
+        }
+        if ui.button(tr.t("dest-folder")).clicked() {
+            if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                *dest = Some(Dest::Folder { path, replace: false });
+            }
+            ui.close();
+        }
+    })
+    .response
+    .on_hover_text(tr.t("dest-change-hint"));
+    if dest.as_ref().is_some_and(Dest::overwrites_original) {
+        ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("replace-warning")));
+    }
+}
+
+fn default_text(tr: &Tr, default: &DefaultDest) -> String {
+    match default.resolve() {
+        Some(d) => dest_text(tr, &d),
+        None => tr.t("dest-folder-missing"),
+    }
+}
+
+fn dest_text(tr: &Tr, dest: &Dest) -> String {
+    match dest {
+        Dest::Beside => tr.t("target-beside"),
+        Dest::Original { replace: true } => tr.t("dest-overwrite"),
+        Dest::Original { replace: false } => tr.t("target-original"),
+        Dest::Folder { path, .. } => path.display().to_string(),
+    }
+}
+
+/// The default destination, at the top of the selection.
+fn default_ui(ui: &mut Ui, tr: &Tr, default: &mut DefaultDest) {
+    ui.add_space(theme::SPACE_S);
+    ui.strong(tr.t("restore-to"));
+    ui.weak(tr.t("restore-to-hint"));
+    ui.radio_value(&mut default.kind, DestKind::Beside, tr.t("target-beside"))
+        .on_hover_text(tr.t("target-beside-hint"));
+    ui.radio_value(&mut default.kind, DestKind::Original, tr.t("target-original"));
+    ui.horizontal(|ui| {
+        ui.radio_value(&mut default.kind, DestKind::Folder, tr.t("target-folder"));
+        if default.kind == DestKind::Folder {
+            let label = default.folder.as_ref().map_or_else(|| tr.t("browse"), |f| f.display().to_string());
+            if ui.button(label).clicked()
+                && let Some(dir) = rfd::FileDialog::new().pick_folder()
+            {
+                default.folder = Some(dir);
+            }
+        }
+    });
+    if default.kind != DestKind::Beside {
+        ui.checkbox(&mut default.replace, tr.t("replace-existing"));
+        if default.replace && default.kind == DestKind::Original {
+            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("replace-warning")));
+        }
+    }
+    ui.add_space(theme::SPACE_S);
+}
+
+/// Summary and the Restore button, with the reason when it waits.
+fn go_ui(ui: &mut Ui, tr: &Tr, plan: &Plan) -> Option<RestoreRequest> {
+    ui.add_space(theme::SPACE_S);
+    let s = plan.summary;
+    let mut size = tr.bytes(s.bytes);
+    if s.partial {
+        size.push('…');
+    }
+    ui.label(tr.t_args(
+        "restore-summary",
+        &[
+            ("files", arg(s.files)),
+            ("versions", arg(s.versions)),
+            ("folders", arg(s.folders)),
+            ("size", arg(size)),
+        ],
+    ));
+    let why = plan.blocker.map(|b| {
+        tr.t(match b {
+            Blocker::Nothing => "tick-files-hint",
+            Blocker::Loading => "restore-wait-versions",
+            Blocker::NoFolder => "choose-folder-hint",
+            Blocker::Conflict => "restore-conflict-hint",
+            Blocker::Busy => "busy-hint",
+        })
+    });
+    let button = egui::Button::new(RichText::new(tr.t("restore-selected")).strong())
+        .fill(ui.visuals().selection.bg_fill);
+    let resp = ui.add_enabled(why.is_none(), button);
+    let mut request = None;
+    match &why {
+        Some(w) => {
+            let _ = resp.on_disabled_hover_text(w);
+            ui.weak(w);
+        }
+        None if resp.clicked() => request = Some(plan.request.clone()),
+        None => {}
+    }
+    request
 }

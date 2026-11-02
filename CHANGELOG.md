@@ -6,6 +6,163 @@ All notable changes to Archeion are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Restoring is redesigned. Backups > "Restore files" shows one tree of
+  every file and folder the profile's backups ever saved, with the search
+  above it; files no longer at the source are marked "deleted" (icon and
+  text). Files and folders are ticked in the tree or in the search
+  results, and each appears as a card on the right: a file with its
+  versions (the newest ticked, more can be ticked), a folder with the date
+  it comes back as. A default destination at the top (next to the
+  original with the date, original location, another folder; "Replace
+  files that already exist") applies to everything, and each version or
+  folder can have its own (marked ✎). Several versions of a file sent to
+  the same folder each get their date in the name; two versions
+  overwriting the same original are refused until one changes. A summary
+  ("3 files, 5 versions, 1 folder — 1.2 GB") sits above the Restore
+  button, which says why it waits. Everything restores in one run, with
+  one free-space check, one progress and one log.
+- The list of backup dates with the manual merge and the deletion of one
+  backup moved to Backups > "Manage backups", unchanged.
+- Restore requests hold a list of items (backup, file or folder, target,
+  replace); request files written by the previous version are still read.
+
+- New backups are written in format 2 (manifests may list chunks); older
+  versions of Archeion cannot read them. Backups of earlier versions stay
+  readable as they are; on such a destination the next automatic backup
+  is complete when large files would be chunked, and chunks start there.
+
+- "Delete profile" in the profile settings is a button at the far end of
+  the Run row and opens a warning first: it says what is removed (the
+  profile, its scheduled tasks, the saved password of an encrypted profile)
+  and that the backups stay at the destination. Enter does not confirm it.
+
+- The merge rules keep every backup of the last N days ("All, for days",
+  1 by default), so backups made minutes apart are no longer merged right
+  away; a day later the other rules apply as before.
+- Closing the window hides Archeion in the notification area, where it
+  keeps working; File > Quit or the icon's Quit closes it. Archeion starts
+  with Windows, hidden. Both are in the new Preferences window
+  (File > Preferences…, Ctrl+,), which also chooses the interface language
+  (or follows the Windows one) and shows the data folder.
+- Starting Archeion while it already runs brings the open window forward
+  instead of opening a second one.
+- The Activity tab shows the run in progress while it runs; once it ends
+  it becomes the newest entry of the log. The "Last operation" entry, the
+  "Show backups" button and the repeated outcome line are gone.
+- While a run is in progress the Activity tab lists each step with its
+  start time, duration and what it did so far (files and folders found,
+  new, changed and unchanged files, files moved, restored, kept, checked,
+  problems, skipped), the group of backups a merge is fusing, and the
+  latest files handled with what happened to each.
+- The password of an encrypted profile shows its requirements while it is
+  typed (at least 12 characters, both entries equal) and what is still
+  missing next to the Save button.
+- A new password must also mix three kinds of characters (not needed for a
+  passphrase of 20 characters or more), not be a common password, have no
+  runs like "1234", not contain the profile name and be at least "Fair" on
+  the new strength bar.
+- The "Monday to Friday" shortcut of the schedule is gone.
+
+- The profile settings are in collapsible sections, each remembering
+  whether it is open; a section with something to fix (a destination of
+  another profile, a missing password) stays open.
+- Backups started by events (logon, idle, drive connected) are no longer
+  offered in the window.
+
+- The merge of old backups is always automatic and has no days, times or
+  switch: it runs by its rules while Archeion is running (shortly after a
+  backup and every 15 minutes), only when no backup or other operation
+  uses the destination. The merge tasks of earlier versions are removed
+  from Task Scheduler.
+- "Exclude patterns" sits next to "Exclude folders" and "Exclude files"
+  instead of under "Advanced", with the wildcards explained.
+- Closing the window while a backup, merge or other operation runs no
+  longer cuts it short: a message says Archeion will close when it ends,
+  and it does (or the user chooses "Do not close").
+
+### Added
+
+- Large files are saved as changes only: files of at least a size chosen
+  in the profile's Storage section (500 MB unless changed, or never) are
+  cut into content-defined chunks of about 1 MB, and an incremental
+  backup stores only the chunks the destination does not hold yet (one
+  copy of identical chunks). On an encrypted destination every file is
+  saved this way, each chunk an AES-256 zip that 7-Zip opens with the
+  recovery key. Complete backups still keep every file whole, so they open
+  with 7-Zip alone. Restores, versions, merges, deletion, the integrity
+  check (which reads every chunk), the restore test, resuming an
+  interrupted backup and the free-space estimate (new chunks only) all
+  handle chunked files. The backup summary says how many files were saved
+  as changes only. Design in `docs/large-files.md`.
+- `archeion extract --destination <folder> --to <folder>` restores from a
+  backup folder alone, without settings or a profile (also `--archive`,
+  `--path`, `--overwrite`, and the password or recovery key from
+  `--stdin`, `--password`, `--recovery-key` or `ARCHEION_PASSWORD` /
+  `ARCHEION_RECOVERY_KEY`), so the portable executable recovers backups on
+  any computer. In the guide and the README.
+- Developer scripts for git and GitHub: `tools\git_status.bat` (overview,
+  read-only), `tools\git_commit.bat` (check, then commit on a feature
+  branch with the project's trailers) and `tools\git_push.bat` (push and
+  pull request); `tools\github_publish.bat` now logs every step, also
+  pushes the current branch and can be run again.
+- The Activity tab shows an operation's full log: "Open full log" writes
+  it as readable text (date and time, severity, every step, every skipped
+  file with its reason, every problem a check found) and opens it in the
+  default text editor; "Copy log" copies the same text. "Program log" and
+  "Logs folder" open Archeion's technical log and the logs folder.
+- The full log of an operation lists every file it worked on and what it
+  did with it, after the steps: time, what happened (new, changed, saved
+  as changes with the bytes of new chunks written, copied again by a
+  complete backup, deleted since the previous backup, moved into a merged
+  backup, older version removed by a merge or deletion, restored, kept,
+  checked by a restore test, problem, skipped with the reason), size and
+  full path, in the order of the run, with the count of each at the top.
+  Unchanged files of an incremental backup and intact files of a full
+  check are only counted. The list is kept beside each run log in
+  `logs\<run>.files.jsonl` and removed with it; operations made by earlier
+  versions say they have no list. The full log is prepared in the
+  background, with a spinner when it takes more than a second.
+- Automatic backups on chosen days of the week at up to six times a day,
+  every 1 to 12 hours within a time window, or once a month; schedules
+  saved before keep working.
+- Backups started by events: a few minutes after signing in to Windows,
+  when the computer is idle, when a drive is connected; skipped when the
+  last backup is recent or the destination is not connected.
+- Windows notifications when an automatic backup fails, and when a profile
+  has had no backup for a chosen number of days (`archeion watch`, run
+  daily and after signing in).
+
+- Free space of the destination shown under it in the profile settings,
+  as a warning below 2 GB.
+- A restore that does not fit on its drive stops before writing anything,
+  with a message saying how much is needed and free.
+- At startup the scheduled tasks are checked in the background and
+  registered again when missing or pointing to another `archeion.exe`
+  (program moved, portable copy started from another folder).
+
+### Fixed
+
+- A profile re-created with the destination of a deleted profile failed
+  with "the destination is used by another profile": the settings now say
+  so and offer "Use these backups for this profile".
+
+- Merging (or deleting) backups failed with "access denied" when Windows
+  still held a file of the backup open for a moment (antivirus, indexer,
+  thumbnails): renames and removals are now retried for a few seconds, and
+  an old folder still in use is removed by the next run instead of failing
+  a merge that is already complete.
+- Scheduled tasks were never registered: `schtasks` could not read the
+  task file while Archeion still held it open.
+- The backup button of a new encrypted profile stayed disabled until the
+  password was saved with its own button; it now saves the typed password
+  and starts the backup, and says what is missing.
+
+- Restore requests left behind by a worker that never started are deleted
+  after a day.
+- The destination hint no longer says that backups are never encrypted.
+
 ## [0.1.0] - 2026-11-01
 
 First version, not yet released.

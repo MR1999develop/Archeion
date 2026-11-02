@@ -5,15 +5,26 @@
 //! old archives, `archeion delete <profile id> --archive <name>` deletes one
 //! backup, `archeion restore <profile id> --request <file>` restores; all
 //! write progress as JSON lines on stdout. Task Scheduler starts the
-//! first two that way, and so does the window for its buttons, so every
-//! path runs the same code.
+//! first two that way (`run --event` for backups started by an event), and
+//! so does the window for its buttons, so every path runs the same code.
+//! `archeion watch` warns about profiles not backed up for too long.
+//! `archeion extract --destination <folder> --to <folder>` restores from a
+//! destination folder alone, without settings or a profile, on any computer.
+//! `archeion --tray` opens the window hidden in the notification area (how
+//! Windows starts it at sign-in); a second window is never opened: the
+//! running one is brought forward instead.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod activity;
+mod autostart;
 mod credentials;
+mod extract;
 mod history;
 mod i18n;
+mod instance;
 mod job;
+mod notify;
+mod restore_plan;
 mod storage;
 mod ui;
 mod worker;
@@ -31,6 +42,9 @@ struct Cli {
     /// without it a new one is created in the data folder.
     #[arg(long, global = true, hide = true)]
     log: Option<std::path::PathBuf>,
+    /// Open the window hidden in the notification area.
+    #[arg(long)]
+    tray: bool,
 }
 
 #[derive(Subcommand)]
@@ -45,7 +59,15 @@ enum Command {
         /// Kind of backup; without it the profile's full-backup rule decides.
         #[arg(long, value_enum)]
         kind: Option<Kind>,
+        /// Started by an event (logon, idle, drive connected): skipped
+        /// quietly when the last backup is recent or the destination is
+        /// not there.
+        #[arg(long, requires = "scheduled")]
+        event: bool,
     },
+    /// Show a Windows notification for every automatic profile whose last
+    /// backup is older than its limit (Task Scheduler runs it daily).
+    Watch,
     /// Merge the archives of one profile: by its rules, or the chosen range
     /// `--from <backup> --to <backup>` (everything between is included).
     Merge {
@@ -81,6 +103,9 @@ enum Command {
         #[arg(long)]
         request: std::path::PathBuf,
     },
+    /// Restore from a destination folder alone, without settings or a
+    /// profile: for recovering backups on any computer.
+    Extract(extract::ExtractArgs),
 }
 
 /// `--kind` values.
@@ -92,6 +117,11 @@ enum Kind {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
+    // Needs no settings and writes none: it works on any computer.
+    let command = match cli.command {
+        Some(Command::Extract(args)) => return extract::run(args),
+        other => other,
+    };
     let storage = match storage::Storage::locate() {
         Ok(s) => s,
         Err(e) => {
@@ -100,15 +130,19 @@ fn main() -> ExitCode {
         }
     };
     init_logging(&storage);
-    match cli.command {
-        Some(Command::Run { profile, scheduled, kind }) => {
+    match command {
+        Some(Command::Run { profile, scheduled, kind, event }) => {
             let mode = match kind {
                 None => BackupMode::Auto,
                 Some(Kind::Incremental) => BackupMode::Incremental,
                 Some(Kind::Complete) => BackupMode::Complete,
             };
+            if event && !worker::event_backup_wanted(&storage, profile) {
+                return ExitCode::SUCCESS;
+            }
             worker::run(&storage, profile, worker::Work::Backup { mode }, scheduled, cli.log)
         }
+        Some(Command::Watch) => worker::watch(&storage),
         Some(Command::Verify { profile, scheduled, sample }) => {
             worker::run(&storage, profile, worker::Work::Verify { sample }, scheduled, cli.log)
         }
@@ -122,13 +156,27 @@ fn main() -> ExitCode {
         Some(Command::Restore { profile, request }) => {
             worker::run(&storage, profile, worker::Work::Restore { request }, false, cli.log)
         }
-        None => match ui::run(storage) {
-            Ok(()) => ExitCode::SUCCESS,
-            Err(e) => {
-                tracing::error!(error = %e, "window failed");
-                ExitCode::FAILURE
+        Some(Command::Extract(args)) => extract::run(args),
+        None => {
+            let primary = match instance::claim(storage.dir()) {
+                Ok(instance::Claim::Primary(p)) => Some(p),
+                Ok(instance::Claim::Secondary) => {
+                    tracing::info!("Archeion is already open: brought it forward");
+                    return ExitCode::SUCCESS;
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "single-window check failed: opening anyway");
+                    None
+                }
+            };
+            match ui::run(storage, cli.tray, primary) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(e) => {
+                    tracing::error!(error = %e, "window failed");
+                    ExitCode::FAILURE
+                }
             }
-        },
+        }
     }
 }
 

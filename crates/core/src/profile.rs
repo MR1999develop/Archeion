@@ -1,6 +1,6 @@
 //! Backup profiles: what to save, where, when, and when to merge.
 
-use crate::{Destination, Exclusion, FullBackupRule, Retention, Schedule, TimeOfDay, Weekday};
+use crate::{Destination, Exclusion, FullBackupRule, LargeFiles, Retention, Schedule};
 use serde::{Deserialize, Serialize};
 use std::{fmt, path::PathBuf, str::FromStr};
 use uuid::Uuid;
@@ -44,24 +44,17 @@ pub enum Container {
     Folder,
 }
 
-/// When old archives are merged.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(default)]
+/// How old archives are merged.
+///
+/// The merge is always automatic: the window applies the rules while it
+/// runs, whenever they would merge something and nothing else uses the
+/// destination. Fields of older versions (`schedule`, `automatic`) are
+/// ignored when read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 pub struct MergePolicy {
-    /// Automatic merge; `Manual` = only with "Merge now".
-    pub schedule: Schedule,
     /// Which archives survive.
+    #[serde(default)]
     pub rules: Retention,
-}
-
-impl Default for MergePolicy {
-    /// Every Sunday, keeping the default rules.
-    fn default() -> Self {
-        Self {
-            schedule: Schedule::Weekly { day: Weekday::Sunday, at: TimeOfDay::default() },
-            rules: Retention::default(),
-        }
-    }
 }
 
 /// Periodic checks that the archives can really be restored.
@@ -79,6 +72,58 @@ pub struct Verification {
 impl Default for Verification {
     fn default() -> Self {
         Self { check_every_days: 30, restore_test_every_days: 90, restore_test_files: 20 }
+    }
+}
+
+/// Backups started by an event instead of the clock. They have their own
+/// scheduled task, and skip the run when the last backup is more recent
+/// than `min_hours_between` (idle periods and logons can come often) or
+/// when the destination is not there (another drive was plugged in).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EventTriggers {
+    /// A few minutes after the user signs in to Windows.
+    pub at_logon: bool,
+    /// When the computer has been idle for a while.
+    pub when_idle: bool,
+    /// When a drive is connected (the destination's, if it is removable).
+    pub drive_connected: bool,
+    /// Event runs closer than this to the last backup are skipped.
+    pub min_hours_between: u32,
+}
+
+impl Default for EventTriggers {
+    fn default() -> Self {
+        Self { at_logon: false, when_idle: false, drive_connected: false, min_hours_between: 4 }
+    }
+}
+
+impl EventTriggers {
+    /// Range of [`Self::min_hours_between`] in the editor.
+    pub const MIN_HOURS_RANGE: std::ops::RangeInclusive<u32> = 0..=168;
+
+    /// True when at least one event starts a backup.
+    #[must_use]
+    pub fn any(&self) -> bool {
+        self.at_logon || self.when_idle || self.drive_connected
+    }
+}
+
+/// Windows notifications about automatic backups (the window shows the
+/// same in its operations log).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Alerts {
+    /// When a scheduled or event backup fails, or cannot reach a destination
+    /// it should have reached at its scheduled time.
+    pub on_failure: bool,
+    /// When no backup has finished for this many days; 0 = never.
+    pub stale_days: u32,
+}
+
+impl Default for Alerts {
+    fn default() -> Self {
+        Self { on_failure: true, stale_days: 0 }
     }
 }
 
@@ -100,9 +145,16 @@ pub struct Profile {
     /// is kept in Windows Credential Manager, never here.
     #[serde(default)]
     pub encrypted: bool,
+    /// From which size files of an unencrypted destination are saved as
+    /// chunks (on an encrypted one every file is). Can change at any time.
+    #[serde(default)]
+    pub large_files: LargeFiles,
     /// Automatic backups.
     #[serde(default)]
     pub schedule: Schedule,
+    /// Backups started by events (logon, idle, drive connected).
+    #[serde(default)]
+    pub events: EventTriggers,
     /// When automatic backups are complete instead of incremental.
     #[serde(default)]
     pub full_backup: FullBackupRule,
@@ -110,6 +162,8 @@ pub struct Profile {
     pub merge: MergePolicy,
     #[serde(default)]
     pub verification: Verification,
+    #[serde(default)]
+    pub alerts: Alerts,
 }
 
 /// A rule a profile breaks; every broken rule is reported, not just the first.
@@ -139,11 +193,21 @@ impl Profile {
             destination: Destination::default(),
             container: Container::default(),
             encrypted: false,
+            large_files: LargeFiles::default(),
             schedule: Schedule::default(),
+            events: EventTriggers::default(),
             full_backup: FullBackupRule::default(),
             merge: MergePolicy::default(),
             verification: Verification::default(),
+            alerts: Alerts::default(),
         }
+    }
+
+    /// True when backups start without the user: by the clock or by an
+    /// event.
+    #[must_use]
+    pub fn backs_up_automatically(&self) -> bool {
+        self.schedule.is_automatic() || self.events.any()
     }
 
     /// Checks that the profile can run. Returns all broken rules.
@@ -216,9 +280,16 @@ mod tests {
         let map = v.as_object_mut().unwrap();
         map.remove("encrypted");
         map.remove("full_backup");
+        map.remove("events");
+        map.remove("alerts");
+        map.remove("large_files");
         let back: Profile = serde_json::from_value(v).unwrap();
+        assert_eq!(back.large_files, LargeFiles::default());
         assert!(!back.encrypted);
         assert_eq!(back.full_backup, FullBackupRule::Never);
+        assert_eq!(back.events, EventTriggers::default());
+        assert!(back.alerts.on_failure);
+        assert!(!back.backs_up_automatically());
     }
 
     #[test]
@@ -228,7 +299,14 @@ mod tests {
     }
 
     #[test]
-    fn default_merge_runs_weekly() {
-        assert!(MergePolicy::default().schedule.is_automatic());
+    fn old_merge_settings_still_load() {
+        let old: MergePolicy = serde_json::from_str(
+            r#"{"schedule":{"every":"weekly","day":"sunday","at":{"hour":12,"minute":30}},"automatic":false,"rules":{"keep_last":3}}"#,
+        )
+        .unwrap();
+        assert_eq!(old.rules.keep_last, 3);
+        assert_eq!(serde_json::from_str::<MergePolicy>("{}").unwrap(), MergePolicy::default());
+        let text = serde_json::to_string(&MergePolicy::default()).unwrap();
+        assert!(!text.contains("schedule") && !text.contains("automatic"));
     }
 }

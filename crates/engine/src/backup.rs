@@ -1,9 +1,16 @@
 //! Backup: scan, compare with the previous manifest, copy what changed (or
 //! everything, for a complete backup) into a new archive.
+//!
+//! Each file to copy is stored as the profile and the destination say
+//! ([`archeion_core::large_files`]): a whole copy, a whole copy with the
+//! list of its chunks (complete archives), or only the chunks the
+//! destination does not hold yet (see [`crate::chunks`]).
 
 use crate::{
     EngineError, EventSink, Result,
-    container::{Writer, mtime_ns},
+    chunker::{ChunkParams, Chunker},
+    chunks::{self, Form},
+    container::{Writer, hash_stream, mtime_ns},
     crypto::Password,
     progress::Progress,
     repo::{Purpose, Repo},
@@ -11,28 +18,52 @@ use crate::{
     space,
 };
 use archeion_core::exclusion::PathRules;
+use archeion_core::large_files::{self, ChunkPolicy, FileStorage};
 use archeion_core::{
-    ArchiveKind, ArchiveName, BackupMode, BackupReport, Entry, EntryKind, Exclusion, Manifest, Phase,
-    Profile, RunEvent, Skipped, Summary, backup_kind::next_kind, keys,
+    ArchiveKind, ArchiveName, BackupMode, BackupReport, ChunkId, ChunkRef, Chunks, Entry, EntryKind,
+    Exclusion, FileAction, FileDone, Manifest, Phase, Profile, RunEvent, Skipped, Summary,
+    backup_kind::next_kind, keys,
 };
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
+    io::Read,
     path::{Path, PathBuf},
 };
+
+/// Bytes read from a source at a time when it is chunked.
+const READ_BUFFER: usize = 256 * 1024;
+
+/// Settings of a backup that tests change; production code uses the
+/// default.
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Tuning {
+    /// Chunk sizes; `None` for [`ChunkParams::PRODUCTION`].
+    pub chunks: Option<ChunkParams>,
+    /// Stop, as if cancelled, once this many files have been copied.
+    pub stop_after_files: Option<u64>,
+}
 
 /// Backs up `profile` into a new archive. The first backup is complete;
 /// later ones are incremental or complete as `mode` (and, for
 /// [`BackupMode::Auto`], the profile's full-backup rule) says. A complete
-/// backup copies every file and starts a new chain.
+/// backup copies every file and starts a new chain. An automatic backup is
+/// also complete when chunked files are on and the newest chain was written
+/// before they existed ([`large_files::needs_new_chain`]).
 ///
 /// Files that cannot be read (in use, access denied) are reported as
 /// [`RunEvent::Skipped`]; their previous version stays restorable.
 ///
+/// Every file stored and every file deleted since the previous backup is
+/// listed by [`RunEvent::Files`]; unchanged files of an incremental backup
+/// are only counted.
+///
 /// A backup that stopped before committing (Cancel, full disk, unplugged
 /// drive, power cut) is resumed by the next one: files already copied and
-/// unchanged since are kept (see [`crate::resume`]).
+/// unchanged since are kept, and so are chunks already written (see
+/// [`crate::resume`]).
 ///
 /// # Errors
 /// See [`EngineError`]. An encrypted destination needs `password`;
@@ -44,7 +75,7 @@ pub fn backup(
     mode: BackupMode,
     sink: &dyn EventSink,
 ) -> Result<BackupReport> {
-    run(profile, password, mode, sink, None)
+    run(profile, password, mode, sink, Tuning::default())
 }
 
 /// [`backup`] that stops, as if cancelled, once `files` files have been
@@ -60,7 +91,22 @@ pub fn backup_stopping_after(
     sink: &dyn EventSink,
     files: u64,
 ) -> Result<BackupReport> {
-    run(profile, password, mode, sink, Some(files))
+    run(profile, password, mode, sink, Tuning { stop_after_files: Some(files), ..Tuning::default() })
+}
+
+/// [`backup`] with test settings (small chunks, a stop after some files).
+///
+/// # Errors
+/// As [`backup`].
+#[doc(hidden)]
+pub fn backup_tuned(
+    profile: &Profile,
+    password: Option<&Password>,
+    mode: BackupMode,
+    sink: &dyn EventSink,
+    tuning: Tuning,
+) -> Result<BackupReport> {
+    run(profile, password, mode, sink, tuning)
 }
 
 fn run(
@@ -68,7 +114,7 @@ fn run(
     password: Option<&Password>,
     mode: BackupMode,
     sink: &dyn EventSink,
-    stop_after: Option<u64>,
+    tuning: Tuning,
 ) -> Result<BackupReport> {
     profile.validate().map_err(|errors| {
         let text: Vec<String> = errors.iter().map(ToString::to_string).collect();
@@ -81,7 +127,17 @@ fn run(
         Some(name) => Some(repo.manifest(name)?),
         None => None,
     };
-    let wanted = next_kind(&archives, profile.full_backup, mode, jiff::Zoned::now().datetime());
+    // The destination decides whether it is encrypted, not the profile.
+    let encrypted = repo.keys().is_some();
+    let chain_format = newest_complete_format(&repo, &archives, previous.as_ref())?;
+    let new_chain = large_files::needs_new_chain(
+        large_files::chunking_enabled(encrypted, profile.large_files),
+        chain_format,
+    );
+    if new_chain {
+        tracing::info!("the newest backups predate chunked files: an automatic backup starts a new chain");
+    }
+    let wanted = next_kind(&archives, profile.full_backup, mode, jiff::Zoned::now().datetime(), new_chain);
     let resumed = match repo.take_partial(&archives)? {
         Some(p) if can_resume(p.kind, wanted, mode, archives.is_empty()) => Some(p),
         Some(p) => {
@@ -119,73 +175,123 @@ fn run(
         Some(a) => crate::container::detect(&repo.dir(a)),
         None => crate::container::detect_existing(&staging).unwrap_or(profile.container),
     };
-    let mut writer = Writer::create(&staging, container, repo.keys(), &name)?;
+    let writer = Writer::create(&staging, container, repo.keys(), &name)?;
     let mut journal = Journal::open(&staging, repo.keys())?;
+    let form = Form::of(container, repo.keys());
+    let policy = ChunkPolicy {
+        encrypted,
+        large_files: profile.large_files,
+        complete: kind == ArchiveKind::Complete,
+        chain_has_chunks: large_files::chain_has_chunks(chain_format),
+    };
+    let params = tuning.chunks.unwrap_or(ChunkParams::PRODUCTION);
 
-    // Files the interrupted run already copied, unchanged since.
-    let mut pending = Vec::with_capacity(scan.to_copy.len());
+    // What each file needs; files the interrupted run already copied whole,
+    // unchanged since, are kept as they are.
+    let mut pending: Vec<Pending> = Vec::with_capacity(scan.to_copy.len());
+    let mut kept: Vec<FileDone> = Vec::new();
     for (idx, path, change) in std::mem::take(&mut scan.to_copy) {
         let Some(entry) = scan.entries.get_mut(idx) else { continue };
-        let id = writer.journal_id(&entry.key);
-        match journal.get(&id) {
-            Some(done)
-                if done.size == entry.size
-                    && done.mtime_ns == entry.mtime_ns
-                    && writer.looks_complete(&entry.key, done.size) =>
-            {
-                entry.hash = Some(done.hash.clone());
-                entry.stored = true;
-                entry.blob = writer.stored_as(&entry.key);
-                report.resumed_files += 1;
-                report.bytes_copied = report.bytes_copied.saturating_add(entry.size);
+        let storage = policy.storage(entry.size);
+        let job = if storage == FileStorage::ChunksOnly {
+            Job::Chunks
+        } else {
+            let list = storage == FileStorage::WholeAndChunkList;
+            match journal.get(&writer.journal_id(&entry.key)) {
+                Some(done)
+                    if done.size == entry.size
+                        && done.mtime_ns == entry.mtime_ns
+                        && writer.looks_complete(&entry.key, done.size) =>
+                {
+                    if list {
+                        // The chunk list is not journalled: read it again.
+                        Job::ListOnly { hash: done.hash.clone() }
+                    } else {
+                        entry.hash = Some(done.hash.clone());
+                        entry.stored = true;
+                        entry.blob = writer.stored_as(&entry.key);
+                        report.resumed_files += 1;
+                        report.bytes_copied = report.bytes_copied.saturating_add(entry.size);
+                        let file = FileDone::new(path.display().to_string(), change.action(), entry.size);
+                        kept.push(FileDone { resumed: true, ..file });
+                        continue;
+                    }
+                }
+                _ if list => Job::CopyAndList,
+                _ => Job::Copy,
             }
-            _ => pending.push((idx, path, change)),
-        }
+        };
+        pending.push(Pending { idx, path, change, job });
     }
 
     if resumed.is_some() {
         tracing::info!(journalled = journal.len(), kept = report.resumed_files, "unfinished backup reopened");
     }
 
+    let store = if pending.iter().any(|p| p.job == Job::Chunks) {
+        Some(NewChunks::open(&repo, &archives, previous.as_ref(), &staging, &form)?)
+    } else {
+        None
+    };
+    let mut copier = Copier { writer, store, form: &form, params };
+
     // Room for what is left to copy.
-    let mut to_write: u64 =
-        pending.iter().map(|(i, _, _)| stored_estimate(&writer, scan.entries.get(*i))).sum();
+    let previous_size = |key: &str| previous.as_ref().and_then(|m| m.get(key)).map(|e| e.size);
+    let file_estimate = |copier: &Copier<'_>, p: &Pending, entries: &[Entry]| {
+        entries.get(p.idx).map_or(0, |e| copier.estimate(&p.job, e, previous_size(&e.key)))
+    };
+    let mut to_write: u64 = pending.iter().map(|p| file_estimate(&copier, p, &scan.entries)).sum();
     space::ensure(repo.root(), to_write)?;
 
     sink.emit(RunEvent::Phase { phase: Phase::Copying });
-    let total: u64 = pending.iter().filter_map(|(i, _, _)| scan.entries.get(*i)).map(|e| e.size).sum();
+    let total: u64 = pending.iter().filter_map(|p| scan.entries.get(p.idx)).map(|e| e.size).sum();
     let mut progress = Progress::new(sink, total, pending.len() as u64);
+    for file in kept {
+        progress.listed(file);
+    }
     let mut drop_entries = HashSet::new();
     let mut copied_now = 0u64;
-    for (idx, path, change) in pending {
-        if stop_after.is_some_and(|n| copied_now >= n) {
+    for p in pending {
+        if tuning.stop_after_files.is_some_and(|n| copied_now >= n) {
             return Err(EngineError::Io {
                 context: "backup".into(),
                 source: std::io::Error::other("stopped for a test"),
             });
         }
-        let estimate = stored_estimate(&writer, scan.entries.get(idx));
-        let Some(entry) = scan.entries.get_mut(idx) else { continue };
-        progress.start_file(path.display().to_string());
-        let copied =
-            File::open(&path).map_err(EngineError::io(path.display().to_string())).and_then(|mut f| {
-                writer.add_stream(&entry.key, &mut f, entry.size, entry.mtime_ns, &mut |n| progress.add(n))
-            });
-        match copied {
-            Ok((size, hash)) => {
+        let estimate = file_estimate(&copier, &p, &scan.entries);
+        let Some(entry) = scan.entries.get_mut(p.idx) else { continue };
+        progress.start_file(p.path.display().to_string());
+        match copier.copy_file(&p.job, &p.path, entry, &mut |n| progress.add(n)) {
+            Ok(stored) => {
                 // A file that changed while being read is copied again next time.
-                if size == entry.size {
-                    let done = Done { size, mtime_ns: entry.mtime_ns, hash: hash.clone() };
-                    journal.record(&writer.journal_id(&entry.key), done).map_err(|e| {
+                if stored.journal && stored.size == entry.size {
+                    let done =
+                        Done { size: stored.size, mtime_ns: entry.mtime_ns, hash: stored.hash.clone() };
+                    journal.record(&copier.writer.journal_id(&entry.key), done).map_err(|e| {
                         if space::is_disk_full(&e) { space::full(repo.root(), to_write) } else { e }
                     })?;
                 }
-                entry.size = size;
-                entry.hash = Some(hash);
+                entry.size = stored.size;
+                entry.hash = Some(stored.hash);
                 entry.stored = true;
-                entry.blob = writer.stored_as(&entry.key);
-                report.bytes_copied = report.bytes_copied.saturating_add(size);
-                copied_now += 1;
+                entry.blob = if stored.whole { copier.writer.stored_as(&entry.key) } else { None };
+                entry.chunks = stored.chunks;
+                if stored.resumed {
+                    report.resumed_files += 1;
+                    report.bytes_copied = report.bytes_copied.saturating_add(stored.size);
+                } else {
+                    report.bytes_copied = report.bytes_copied.saturating_add(stored.written);
+                    copied_now += 1;
+                }
+                let as_changes = p.job == Job::Chunks;
+                if as_changes {
+                    report.files_as_changes += 1;
+                }
+                progress.done_with(FileDone {
+                    new_chunk_bytes: as_changes.then_some(stored.written),
+                    resumed: stored.resumed,
+                    ..FileDone::new(p.path.display().to_string(), p.change.action(), stored.size)
+                });
             }
             Err(e) if space::is_disk_full(&e) => {
                 // Stop: skipping file after file would fill the log, not
@@ -194,9 +300,9 @@ fn run(
                 return Err(space::full(repo.root(), to_write));
             }
             Err(e) => {
-                let skipped = Skipped { path: path.display().to_string(), reason: reason(&e) };
+                let skipped = Skipped { path: p.path.display().to_string(), reason: reason(&e) };
                 tracing::warn!(path = %skipped.path, reason = %skipped.reason, "file skipped");
-                sink.emit(RunEvent::Skipped(skipped.clone()));
+                progress.skipped(skipped.clone());
                 report.skipped.push(skipped);
                 // Keep the last good version, if there is one.
                 match previous.as_ref().and_then(|m| m.get(&entry.key)) {
@@ -204,12 +310,13 @@ fn run(
                         *entry = old.clone();
                         entry.stored = false;
                         entry.blob = None;
+                        entry.chunks = None;
                     }
                     None => {
-                        drop_entries.insert(idx);
+                        drop_entries.insert(p.idx);
                     }
                 }
-                match change {
+                match p.change {
                     Change::New => report.files_new = report.files_new.saturating_sub(1),
                     Change::Changed => report.files_changed = report.files_changed.saturating_sub(1),
                     Change::Unchanged => {}
@@ -218,7 +325,6 @@ fn run(
         }
         to_write = to_write.saturating_sub(estimate);
     }
-    progress.finish();
 
     let entries: Vec<Entry> = scan
         .entries
@@ -227,39 +333,345 @@ fn run(
         .filter(|(i, _)| !drop_entries.contains(i))
         .map(|(_, e)| e)
         .collect();
-    let mut manifest = Manifest { kind, entries };
+    let mut manifest = Manifest::new(kind, entries);
     manifest.normalize();
     report.files_unchanged = scan.unchanged;
     if let Some(prev) = &previous {
         let now: HashSet<&str> = manifest.entries.iter().map(|e| e.key.as_str()).collect();
-        report.files_deleted = prev
-            .entries
-            .iter()
-            .filter(|e| e.kind == EntryKind::File && !now.contains(e.key.as_str()))
-            .count() as u64;
+        let gone = prev.entries.iter().filter(|e| e.kind == EntryKind::File && !now.contains(e.key.as_str()));
+        for gone in gone {
+            report.files_deleted += 1;
+            let path = keys::path_for(&gone.key).display().to_string();
+            progress.listed(FileDone::new(path, FileAction::Deleted, gone.size));
+        }
     }
+    progress.finish();
 
+    let Copier { writer, .. } = copier;
     if resumed.is_some() {
         let keep: HashSet<PathBuf> =
-            manifest.entries.iter().filter(|e| e.stored).map(|e| writer.content_path(&e.key)).collect();
+            manifest.entries.iter().filter(|e| e.whole_copy()).map(|e| writer.content_path(&e.key)).collect();
         let removed = writer.remove_others(&keep)?;
         if removed > 0 {
             tracing::info!(removed, "leftovers of the interrupted run removed");
         }
+    }
+    // Chunks written for a file that then failed, or left by an
+    // interrupted run and no longer needed.
+    let referenced: HashSet<ChunkId> = chunks::referenced(&manifest).map(|c| c.id).collect();
+    let removed = form.remove_others(&staging, &referenced)?;
+    if removed > 0 {
+        tracing::info!(removed, "unused chunks removed");
     }
     writer.finish()?;
     repo.write_manifest(&staging, &manifest)?;
     journal.remove()?;
     repo.commit(&staging, &name)?;
     report.archive = name.to_string();
-    tracing::info!(archive = %name, copied = report.bytes_copied, resumed = report.resumed_files, "archive committed");
+    tracing::info!(
+        archive = %name,
+        copied = report.bytes_copied,
+        resumed = report.resumed_files,
+        as_changes = report.files_as_changes,
+        "archive committed"
+    );
     sink.emit(RunEvent::Finished { summary: Summary::Backup(report.clone()) });
     Ok(report)
 }
 
-/// Expected stored size of `entry`'s content.
-fn stored_estimate(writer: &Writer, entry: Option<&Entry>) -> u64 {
-    entry.map_or(0, |e| space::estimate(e.size, writer.deflates(&e.key)))
+/// Format of the newest complete archive: the start of the chain an
+/// incremental would continue. `previous` is the newest archive's manifest.
+fn newest_complete_format(
+    repo: &Repo,
+    archives: &[ArchiveName],
+    previous: Option<&Manifest>,
+) -> Result<Option<u32>> {
+    let Some(pos) = archives.iter().rposition(|a| a.kind == ArchiveKind::Complete) else { return Ok(None) };
+    if pos + 1 == archives.len() {
+        return Ok(previous.map(|m| m.format));
+    }
+    archives.get(pos).map(|a| repo.manifest(a).map(|m| m.format)).transpose()
+}
+
+/// A file to store, as found by the scan.
+struct Pending {
+    /// Index into the scan's entries.
+    idx: usize,
+    path: PathBuf,
+    change: Change,
+    job: Job,
+}
+
+/// What storing one file takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Job {
+    /// A whole copy.
+    Copy,
+    /// A whole copy and its chunk list.
+    CopyAndList,
+    /// The whole copy is already there (interrupted run) and its hash is
+    /// `hash`: only the chunk list is computed again.
+    ListOnly { hash: String },
+    /// Only the chunks the destination lacks, and the list.
+    Chunks,
+}
+
+/// How one file was stored.
+struct Stored {
+    size: u64,
+    /// BLAKE3 of the content, hex.
+    hash: String,
+    chunks: Option<Chunks>,
+    /// Bytes written to the destination (new chunks, or the whole copy).
+    written: u64,
+    /// The archive holds a whole copy.
+    whole: bool,
+    /// Record the whole copy in the resume journal.
+    journal: bool,
+    /// Kept from the interrupted run.
+    resumed: bool,
+}
+
+/// Stores files into the archive being built.
+struct Copier<'a> {
+    writer: Writer,
+    /// Set when some file is stored as chunks only.
+    store: Option<NewChunks<'a>>,
+    form: &'a Form,
+    params: ChunkParams,
+}
+
+impl Copier<'_> {
+    /// Stores `entry`'s content, read from `path`, as `job` says.
+    fn copy_file(
+        &mut self,
+        job: &Job,
+        path: &Path,
+        entry: &Entry,
+        on_bytes: &mut dyn FnMut(u64),
+    ) -> Result<Stored> {
+        let ctx = path.display().to_string();
+        let mut file = File::open(path).map_err(EngineError::io(ctx.clone()))?;
+        match job {
+            Job::Copy => {
+                let (size, hash) =
+                    self.writer.add_stream(&entry.key, &mut file, entry.size, entry.mtime_ns, on_bytes)?;
+                Ok(Stored {
+                    size,
+                    hash,
+                    chunks: None,
+                    written: size,
+                    whole: true,
+                    journal: true,
+                    resumed: false,
+                })
+            }
+            Job::CopyAndList => {
+                let mut lister = ListingReader::new(&mut file, self.form, self.params);
+                let (size, hash) =
+                    self.writer.add_stream(&entry.key, &mut lister, entry.size, entry.mtime_ns, on_bytes)?;
+                let list = lister.finish().map_err(EngineError::io(ctx))?;
+                let chunks = Some(Chunks { whole: true, list });
+                Ok(Stored { size, hash, chunks, written: size, whole: true, journal: true, resumed: false })
+            }
+            Job::ListOnly { hash: journalled } => {
+                let mut lister = ListingReader::new(&mut file, self.form, self.params);
+                let (size, hash) =
+                    hash_stream(&mut lister, on_bytes).map_err(EngineError::io(ctx.clone()))?;
+                let list = lister.finish().map_err(EngineError::io(ctx))?;
+                if size != entry.size || hash != *journalled {
+                    // Changed in place without a new date: copy it again.
+                    return self.copy_file(&Job::CopyAndList, path, entry, on_bytes);
+                }
+                let chunks = Some(Chunks { whole: true, list });
+                Ok(Stored { size, hash, chunks, written: 0, whole: true, journal: false, resumed: true })
+            }
+            Job::Chunks => {
+                let store = self.store.as_mut().ok_or_else(|| EngineError::Io {
+                    context: ctx.clone(),
+                    source: std::io::Error::other("no chunk store"),
+                })?;
+                let deflate = self.writer.deflates(&entry.key);
+                let (size, hash, list, written) =
+                    store_chunks(&mut file, store, self.params, deflate, on_bytes, &ctx)?;
+                let chunks = Some(Chunks { whole: false, list });
+                Ok(Stored { size, hash, chunks, written, whole: false, journal: false, resumed: false })
+            }
+        }
+    }
+
+    /// Bytes `job` is expected to write for `entry`, which had `before`
+    /// bytes in the previous backup (`None`: a new file).
+    fn estimate(&self, job: &Job, entry: &Entry, before: Option<u64>) -> u64 {
+        let deflated = self.writer.deflates(&entry.key);
+        match job {
+            Job::Copy | Job::CopyAndList => space::estimate(entry.size, deflated),
+            Job::ListOnly { .. } => 0,
+            Job::Chunks => space::estimate(chunk_estimate(entry.size, before, self.params.max()), deflated),
+        }
+    }
+}
+
+/// Expected bytes of new chunks for a file of `size` bytes that had
+/// `before` bytes (`None`: a new file, all new). An edited file counts its
+/// growth and one chunk for the edit; a file rewritten throughout counts
+/// less than it writes, and the full-disk check during the copy stops the
+/// run in time, keeping what was written for the next one.
+fn chunk_estimate(size: u64, before: Option<u64>, max_chunk: usize) -> u64 {
+    match before {
+        None => size,
+        Some(b) => size.saturating_sub(b).saturating_add(max_chunk as u64).min(size),
+    }
+}
+
+/// Reads `src` to its end as chunks; the ones the destination lacks are
+/// written into the archive being built. Returns the size, the BLAKE3 hash
+/// of the content, the chunk list and the bytes written.
+fn store_chunks(
+    src: &mut dyn Read,
+    store: &mut NewChunks<'_>,
+    params: ChunkParams,
+    deflate: bool,
+    on_bytes: &mut dyn FnMut(u64),
+    ctx: &str,
+) -> Result<(u64, String, Vec<ChunkRef>, u64)> {
+    let mut hasher = blake3::Hasher::new();
+    let mut chunker = Chunker::new(params);
+    let mut list = Vec::new();
+    let mut written = 0u64;
+    let mut total = 0u64;
+    let mut emit = |data: &[u8]| -> Result<()> {
+        let chunk = chunk_ref(store.form, data).map_err(EngineError::io(ctx.to_owned()))?;
+        if store.put(&chunk.id, data, deflate)? {
+            written = written.saturating_add(u64::from(chunk.size));
+        }
+        list.push(chunk);
+        Ok(())
+    };
+    let mut buf = vec![0u8; READ_BUFFER];
+    loop {
+        let n = match src.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(EngineError::io(ctx.to_owned())(e)),
+        };
+        let data = buf.get(..n).unwrap_or_default();
+        hasher.update(data);
+        total = total.saturating_add(n as u64);
+        on_bytes(n as u64);
+        chunker.push(data, &mut emit)?;
+    }
+    chunker.finish(&mut emit)?;
+    Ok((total, hasher.finalize().to_hex().to_string(), list, written))
+}
+
+fn chunk_ref(form: &Form, data: &[u8]) -> std::io::Result<ChunkRef> {
+    let size = u32::try_from(data.len()).map_err(std::io::Error::other)?;
+    Ok(ChunkRef { id: form.id_of(data), size })
+}
+
+/// Passes reads through, listing the chunks of what was read: for a whole
+/// copy whose chunk list is kept beside it.
+struct ListingReader<'a> {
+    src: &'a mut dyn Read,
+    form: &'a Form,
+    chunker: Chunker,
+    list: Vec<ChunkRef>,
+}
+
+impl<'a> ListingReader<'a> {
+    fn new(src: &'a mut dyn Read, form: &'a Form, params: ChunkParams) -> Self {
+        Self { src, form, chunker: Chunker::new(params), list: Vec::new() }
+    }
+
+    /// The chunks of everything read.
+    fn finish(self) -> std::io::Result<Vec<ChunkRef>> {
+        let Self { form, chunker, mut list, .. } = self;
+        chunker.finish(&mut |d: &[u8]| -> std::io::Result<()> {
+            list.push(chunk_ref(form, d)?);
+            Ok(())
+        })?;
+        Ok(list)
+    }
+}
+
+impl Read for ListingReader<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.src.read(buf)?;
+        let (form, list) = (self.form, &mut self.list);
+        self.chunker.push(buf.get(..n).unwrap_or_default(), &mut |d: &[u8]| -> std::io::Result<()> {
+            list.push(chunk_ref(form, d)?);
+            Ok(())
+        })?;
+        Ok(n)
+    }
+}
+
+/// The chunks of the archive being built, and those the destination
+/// already holds: a chunk is written only when found nowhere.
+struct NewChunks<'a> {
+    form: &'a Form,
+    staging: &'a Path,
+    /// Readable in a committed archive (chunk file or whole copy).
+    committed: HashSet<ChunkId>,
+    /// Chunk files of the archive being built, known to be whole.
+    staged: HashSet<ChunkId>,
+    /// Chunk files left by an interrupted run, not checked yet.
+    unchecked: HashSet<ChunkId>,
+}
+
+impl<'a> NewChunks<'a> {
+    /// Indexes the chunks of every archive (`previous` is the newest one's
+    /// manifest, already read) and of the unfinished archive in `staging`.
+    fn open(
+        repo: &Repo,
+        archives: &[ArchiveName],
+        previous: Option<&Manifest>,
+        staging: &'a Path,
+        form: &'a Form,
+    ) -> Result<Self> {
+        let mut committed = HashSet::new();
+        for (i, name) in archives.iter().enumerate() {
+            let dir = repo.dir(name);
+            committed.extend(form.list(&dir)?);
+            if i + 1 == archives.len()
+                && let Some(m) = previous
+            {
+                committed.extend(chunks::in_whole_copies(m));
+            } else {
+                committed.extend(chunks::in_whole_copies(&repo.manifest(name)?));
+            }
+        }
+        let unchecked: HashSet<ChunkId> = form.list(staging)?.into_iter().collect();
+        if !unchecked.is_empty() {
+            tracing::info!(chunks = unchecked.len(), "chunks of the interrupted run found");
+        }
+        Ok(Self { form, staging, committed, staged: HashSet::new(), unchecked })
+    }
+
+    /// Makes sure the chunk `id`, whose content is `data`, can be read from
+    /// the destination once the archive is committed. Returns true when it
+    /// had to be written.
+    fn put(&mut self, id: &ChunkId, data: &[u8], deflate: bool) -> Result<bool> {
+        if self.unchecked.remove(id) {
+            // Left by the interrupted run: reused once read back whole.
+            let size = u32::try_from(data.len()).ok();
+            if self.form.read(self.staging, id, size).is_ok() {
+                self.staged.insert(*id);
+                return Ok(false);
+            }
+            let path = self.form.path(self.staging, id);
+            tracing::info!(chunk = %id, "damaged chunk of the interrupted run written again");
+            let _ = std::fs::remove_file(path);
+        }
+        if self.staged.contains(id) || self.committed.contains(id) {
+            return Ok(false);
+        }
+        self.form.write(self.staging, id, data, deflate)?;
+        self.staged.insert(*id);
+        Ok(true)
+    }
 }
 
 /// True when an unfinished backup of `partial` kind can be resumed by a
@@ -281,6 +693,16 @@ enum Change {
     Changed,
     /// Copied anyway by a complete backup.
     Unchanged,
+}
+
+impl Change {
+    fn action(self) -> FileAction {
+        match self {
+            Self::New => FileAction::New,
+            Self::Changed => FileAction::Changed,
+            Self::Unchanged => FileAction::Unchanged,
+        }
+    }
 }
 
 /// Result of walking the sources.
@@ -346,6 +768,7 @@ impl<'a> Scan<'a> {
                 }
             };
             if ft.is_dir() {
+                scanning.folder();
                 self.entries.push(Entry {
                     key,
                     kind: EntryKind::Dir,
@@ -354,6 +777,7 @@ impl<'a> Scan<'a> {
                     hash: None,
                     stored: false,
                     blob: None,
+                    chunks: None,
                 });
                 continue;
             }
@@ -372,22 +796,26 @@ impl<'a> Scan<'a> {
                 hash: None,
                 stored: false,
                 blob: None,
+                chunks: None,
             };
             let idx = self.entries.len();
             match self.previous.get(entry.key.as_str()) {
                 Some(old) if entry.unchanged_from(old) => {
                     entry.hash.clone_from(&old.hash);
                     self.unchanged += 1;
+                    scanning.count(FileAction::Unchanged);
                     if self.copy_all {
                         self.to_copy.push((idx, item.path().to_path_buf(), Change::Unchanged));
                     }
                 }
                 Some(_) => {
                     report.files_changed += 1;
+                    scanning.count(FileAction::Changed);
                     self.to_copy.push((idx, item.path().to_path_buf(), Change::Changed));
                 }
                 None => {
                     report.files_new += 1;
+                    scanning.count(FileAction::New);
                     self.to_copy.push((idx, item.path().to_path_buf(), Change::New));
                 }
             }
@@ -518,6 +946,15 @@ mod tests {
         assert!(can_resume(I, I, BackupMode::Incremental, false));
         assert!(!can_resume(C, I, BackupMode::Incremental, false));
         assert!(!can_resume(I, C, BackupMode::Complete, false));
+    }
+
+    #[test]
+    fn the_space_estimate_counts_growth_and_one_chunk() {
+        assert_eq!(chunk_estimate(1000, None, 100), 1000, "a new file is all new");
+        assert_eq!(chunk_estimate(1000, Some(1000), 100), 100, "an edit: one chunk");
+        assert_eq!(chunk_estimate(1500, Some(1000), 100), 600, "growth and one chunk");
+        assert_eq!(chunk_estimate(50, Some(50), 100), 50, "never more than the file");
+        assert_eq!(chunk_estimate(500, Some(1000), 100), 100, "shrunk");
     }
 
     #[test]

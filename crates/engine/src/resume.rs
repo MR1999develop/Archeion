@@ -7,6 +7,12 @@
 //! has the same size and modification time and whose stored copy is
 //! complete; only the rest is copied.
 //!
+//! Files saved as chunks only are not journalled: the next run reads them
+//! again and reuses every chunk file the interrupted run left in the
+//! unfinished archive once it reads back whole (see `crate::backup`). A
+//! whole copy kept with its chunk list is journalled; its list is computed
+//! again from the source.
+//!
 //! A line is `{"id":…,"n":…,"note":…}`: `id` names the stored file (its
 //! path, or its opaque name in an encrypted destination), `note` holds
 //! "size mtime hash", sealed with the destination's keys when it is

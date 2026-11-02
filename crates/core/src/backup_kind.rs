@@ -34,13 +34,18 @@ pub enum BackupMode {
 }
 
 /// Kind of the next archive. `archives` must be sorted oldest first; the
-/// first backup of a destination is always complete.
+/// first backup of a destination is always complete. `new_chain` asks an
+/// automatic backup to be complete whatever the rule says: the newest
+/// chain was written before files could be chunked (see
+/// [`crate::large_files::needs_new_chain`]); the user's explicit choice
+/// still wins.
 #[must_use]
 pub fn next_kind(
     archives: &[ArchiveName],
     rule: FullBackupRule,
     mode: BackupMode,
     now: DateTime,
+    new_chain: bool,
 ) -> ArchiveKind {
     if archives.is_empty() {
         return ArchiveKind::Complete;
@@ -48,7 +53,7 @@ pub fn next_kind(
     let complete = match mode {
         BackupMode::Complete => true,
         BackupMode::Incremental => false,
-        BackupMode::Auto => rule_due(archives, rule, now),
+        BackupMode::Auto => new_chain || rule_due(archives, rule, now),
     };
     if complete { ArchiveKind::Complete } else { ArchiveKind::Incremental }
 }
@@ -92,7 +97,7 @@ mod tests {
     #[test]
     fn first_backup_is_always_complete() {
         for mode in [BackupMode::Auto, BackupMode::Incremental, BackupMode::Complete] {
-            assert_eq!(next_kind(&[], FullBackupRule::Never, mode, at(1)), ArchiveKind::Complete);
+            assert_eq!(next_kind(&[], FullBackupRule::Never, mode, at(1), false), ArchiveKind::Complete);
         }
     }
 
@@ -100,36 +105,48 @@ mod tests {
     fn the_users_choice_wins_over_the_rule() {
         let a = chain("CIIIIII");
         let rule = FullBackupRule::Backups { count: 3 };
-        assert_eq!(next_kind(&a, rule, BackupMode::Incremental, at(9)), ArchiveKind::Incremental);
+        assert_eq!(next_kind(&a, rule, BackupMode::Incremental, at(9), false), ArchiveKind::Incremental);
         let rule = FullBackupRule::Never;
-        assert_eq!(next_kind(&a, rule, BackupMode::Complete, at(9)), ArchiveKind::Complete);
+        assert_eq!(next_kind(&a, rule, BackupMode::Complete, at(9), false), ArchiveKind::Complete);
     }
 
     #[test]
     fn every_n_backups_counts_the_complete_one() {
         let rule = FullBackupRule::Backups { count: 3 };
-        assert_eq!(next_kind(&chain("C"), rule, BackupMode::Auto, at(9)), ArchiveKind::Incremental);
-        assert_eq!(next_kind(&chain("CI"), rule, BackupMode::Auto, at(9)), ArchiveKind::Incremental);
-        assert_eq!(next_kind(&chain("CII"), rule, BackupMode::Auto, at(9)), ArchiveKind::Complete);
-        assert_eq!(next_kind(&chain("CIICI"), rule, BackupMode::Auto, at(9)), ArchiveKind::Incremental);
+        assert_eq!(next_kind(&chain("C"), rule, BackupMode::Auto, at(9), false), ArchiveKind::Incremental);
+        assert_eq!(next_kind(&chain("CI"), rule, BackupMode::Auto, at(9), false), ArchiveKind::Incremental);
+        assert_eq!(next_kind(&chain("CII"), rule, BackupMode::Auto, at(9), false), ArchiveKind::Complete);
+        assert_eq!(
+            next_kind(&chain("CIICI"), rule, BackupMode::Auto, at(9), false),
+            ArchiveKind::Incremental
+        );
         let always = FullBackupRule::Backups { count: 1 };
-        assert_eq!(next_kind(&chain("C"), always, BackupMode::Auto, at(9)), ArchiveKind::Complete);
+        assert_eq!(next_kind(&chain("C"), always, BackupMode::Auto, at(9), false), ArchiveKind::Complete);
     }
 
     #[test]
     fn every_n_days_looks_at_the_newest_complete() {
         let rule = FullBackupRule::Days { count: 7 };
         let a = chain("CIIC"); // newest complete on 4 March
-        assert_eq!(next_kind(&a, rule, BackupMode::Auto, at(10)), ArchiveKind::Incremental);
-        assert_eq!(next_kind(&a, rule, BackupMode::Auto, at(11)), ArchiveKind::Complete);
+        assert_eq!(next_kind(&a, rule, BackupMode::Auto, at(10), false), ArchiveKind::Incremental);
+        assert_eq!(next_kind(&a, rule, BackupMode::Auto, at(11), false), ArchiveKind::Complete);
     }
 
     #[test]
     fn never_keeps_incrementals() {
         assert_eq!(
-            next_kind(&chain("CIIIIIIIII"), FullBackupRule::Never, BackupMode::Auto, at(28)),
+            next_kind(&chain("CIIIIIIIII"), FullBackupRule::Never, BackupMode::Auto, at(28), false),
             ArchiveKind::Incremental
         );
+    }
+
+    #[test]
+    fn an_old_chain_makes_the_next_automatic_backup_complete() {
+        let a = chain("CI");
+        let never = FullBackupRule::Never;
+        assert_eq!(next_kind(&a, never, BackupMode::Auto, at(9), true), ArchiveKind::Complete);
+        assert_eq!(next_kind(&a, never, BackupMode::Incremental, at(9), true), ArchiveKind::Incremental);
+        assert_eq!(next_kind(&a, never, BackupMode::Auto, at(9), false), ArchiveKind::Incremental);
     }
 
     #[test]

@@ -20,7 +20,8 @@ use std::{
 };
 
 enum Msg {
-    Event(RunEvent),
+    /// Boxed: a progress event carries the recent files and is large.
+    Event(Box<RunEvent>),
     StreamClosed,
 }
 
@@ -68,7 +69,7 @@ impl Job {
                 let Ok(line) = line else { break };
                 match RunEvent::from_line(&line) {
                     Ok(ev) => {
-                        if tx.send(Msg::Event(ev)).is_err() {
+                        if tx.send(Msg::Event(Box::new(ev))).is_err() {
                             return;
                         }
                         ctx.request_repaint();
@@ -80,11 +81,18 @@ impl Job {
             ctx.request_repaint();
         })?;
 
-        Ok(Self { activity: Activity::new(profile, op, Instant::now()), log, child, rx })
+        let mut activity = Activity::new(profile, op, Instant::now());
+        activity.log_file = Some(log.clone());
+        Ok(Self { activity, log, child, rx })
     }
 
     pub fn profile(&self) -> ProfileId {
         self.activity.profile
+    }
+
+    /// The run's log file.
+    pub fn log_path(&self) -> &std::path::Path {
+        &self.log
     }
 
     /// Applies the events received so far; returns true once the run is
@@ -92,7 +100,7 @@ impl Job {
     pub fn poll(&mut self) -> bool {
         while let Ok(msg) = self.rx.try_recv() {
             match msg {
-                Msg::Event(ev) => self.activity.apply(ev, Instant::now()),
+                Msg::Event(ev) => self.activity.apply(*ev, Instant::now()),
                 Msg::StreamClosed => {
                     let status = self.child.wait();
                     self.activity.set_outcome(Outcome::Failed(match status {

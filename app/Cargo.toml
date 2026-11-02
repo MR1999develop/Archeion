@@ -33,6 +33,12 @@ toml = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+[target.'cfg(windows)'.dependencies]
+# Notification-area icon and its menu.
+tray-icon = { version = "0.26", default-features = false }
+# Start with Windows (HKCU Run key).
+winreg = "0.56"
+
 [dev-dependencies]
 tempfile = { workspace = true }
 

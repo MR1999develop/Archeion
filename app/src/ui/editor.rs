@@ -4,14 +4,17 @@
 use super::theme;
 use crate::i18n::{Tr, arg};
 use archeion_core::{
-    Container, Destination, Exclusion, FullBackupRule, Profile, ProfileError, Retention, Schedule, TimeOfDay,
-    Weekday, profile::Verification,
+    Alerts, Container, Destination, Exclusion, FullBackupRule, LargeFiles, Profile, ProfileError, ProfileId,
+    Retention, Schedule, TimeOfDay, Weekday,
+    password_policy::{self as policy, Rule, Strength},
+    profile::Verification,
 };
 use archeion_engine::Password;
-use eframe::egui::{self, RichText, Ui};
+use eframe::egui::{self, Color32, RichText, Ui};
 
-/// Shortest password accepted for a new encrypted destination.
-const MIN_PASSWORD_CHARS: usize = 12;
+const DELETE_DIALOG_ID: &str = "delete-profile-dialog";
+/// Width of the "Delete profile" warning: lines stay readable.
+const DELETE_DIALOG_WIDTH: f32 = 440.0;
 
 /// What the form asks the window to do after this frame.
 #[derive(Debug, Default)]
@@ -52,11 +55,21 @@ pub enum RunChoice {
 pub struct Drafts {
     pub extension: String,
     pub pattern: String,
+    /// The pattern field is shown ("Exclude patterns" pressed).
+    pub pattern_open: bool,
     pub run: RunChoice,
+    /// The "Delete profile" warning, while open.
+    delete: Option<DeleteDialog>,
     pub password: String,
     pub password_again: String,
     /// "I understand" that a lost password means lost backups.
     pub password_ack: bool,
+    /// The current password, asked before changing it.
+    pub current_password: String,
+    /// The current password field of the recovery key is shown.
+    pub recovery_open: bool,
+    /// The current password, asked before showing the recovery key.
+    pub recovery_password: String,
 }
 
 impl Drafts {
@@ -65,7 +78,20 @@ impl Drafts {
         self.password.clear();
         self.password_again.clear();
         self.password_ack = false;
+        self.current_password.clear();
+        self.recovery_open = false;
+        self.recovery_password.clear();
     }
+}
+
+/// The "Delete profile" warning, while open.
+#[derive(Debug)]
+struct DeleteDialog {
+    /// The profile it asks about: on another profile it closes.
+    profile: ProfileId,
+    /// Cancel takes the keyboard focus on the first frame, so Enter
+    /// cannot delete.
+    focus_cancel: bool,
 }
 
 /// The saved password of an encrypted profile, as the window knows it.
@@ -75,10 +101,30 @@ pub struct PasswordStatus {
     pub saved: Option<bool>,
     /// A typed password is being checked and saved.
     pub working: bool,
-    /// Why the last save failed.
+    /// Why the last save or change failed.
     pub error: Option<String>,
     /// The recovery key, while shown.
     pub recovery: Option<String>,
+    /// Why the recovery key could not be read.
+    pub recovery_error: Option<String>,
+}
+
+/// Which password form an encrypted profile shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PasswordForm {
+    /// No backups yet: a new password, typed twice.
+    Choose,
+    /// Backups exist but this computer has no saved password: typed once.
+    Reenter,
+    /// A password is saved: the current one, then the new one twice.
+    Change,
+}
+
+impl PasswordForm {
+    /// A new password, typed twice and with the warning acknowledged.
+    fn confirm(self) -> bool {
+        self != Self::Reenter
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -87,21 +133,55 @@ pub enum Command {
     Delete,
     /// Check the password against the destination, then save it.
     SavePassword(Password),
-    /// Re-wrap the destination's key with this new password, then save it.
-    ChangePassword(Password),
-    ShowRecoveryKey,
+    /// Save the typed password as [`Command::SavePassword`], then run: the
+    /// "Run" button of an encrypted profile whose password is typed but
+    /// not saved yet.
+    SavePasswordAndRun(Password, RunChoice),
+    /// Re-wrap the destination's key, opened with the typed current
+    /// password, with the new one, then save the new one.
+    ChangePassword {
+        current: Password,
+        new: Password,
+    },
+    /// Read the recovery key with this typed current password.
+    ShowRecoveryKey(Password),
+    /// Hide the recovery key, or stop asking the password for it.
     HideRecoveryKey,
     /// Integrity check of every stored file, or a restore test of this
     /// many files.
     Verify(Option<usize>),
+    /// Give the backups of a deleted profile, found at the destination, to
+    /// this profile.
+    AdoptDestination,
 }
 
-/// Draws the form. `busy` disables the run buttons while a job runs.
+/// What the window knows about the destination folder of the profile.
+#[derive(Debug, Clone, Default)]
+pub struct DestinationInfo {
+    /// Free bytes on its drive, when known.
+    pub free: Option<u64>,
+    /// The folder holds the backups of another profile.
+    pub foreign: Option<Foreign>,
+}
+
+/// Owner of a destination that belongs to another profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Foreign {
+    /// A profile that still exists, by name: the folder cannot be shared.
+    Profile(String),
+    /// A profile deleted since: its backups can be taken over.
+    Deleted,
+}
+
+/// Draws the form, one collapsible section per topic (each remembers
+/// whether it is open). `busy` disables the run buttons while a job runs.
+#[expect(clippy::too_many_arguments, reason = "one call site, all parts of the form")]
 pub fn show(
     ui: &mut Ui,
     tr: &Tr,
     p: &mut Profile,
     format: FormatLock,
+    dest: &DestinationInfo,
     password: &PasswordStatus,
     drafts: &mut Drafts,
     busy: bool,
@@ -109,39 +189,44 @@ pub fn show(
     let mut out = Outcome::default();
     ui.set_max_width(theme::FORM_MAX_WIDTH);
 
-    section(ui, &tr.t("profile-name"));
-    out.changed |= ui.text_edit_singleline(&mut p.name).changed();
-
-    section(ui, &tr.t("folders"));
-    folders(ui, tr, p, &mut out);
-
-    section(ui, &tr.t("exclusions"));
-    exclusions(ui, tr, p, drafts, &mut out);
-
-    section(ui, &tr.t("destination"));
-    destination(ui, tr, &mut p.destination, &mut out);
-
-    section(ui, &tr.t("container"));
-    container(ui, tr, p, format, &mut out);
-    encryption(ui, tr, p, format, password, drafts, &mut out);
-
-    section(ui, &tr.t("schedule"));
-    schedule(ui, tr, "backup", &mut p.schedule, &mut out);
-    if p.schedule.is_automatic() {
-        ui.weak(tr.t("schedule-hint"));
-        full_backup(ui, tr, &mut p.full_backup, &mut out);
-    }
-
-    section(ui, &tr.t("merge"));
-    ui.weak(tr.t("merge-hint"));
-    schedule(ui, tr, "merge", &mut p.merge.schedule, &mut out);
-    retention(ui, tr, &mut p.merge.rules, &mut out);
-
-    section(ui, &tr.t("verify-section"));
-    verification(ui, tr, p, format, &mut out, busy);
+    section(ui, "name", &tr.t("profile-name"), true, false, |ui| {
+        out.changed |= ui.text_edit_singleline(&mut p.name).changed();
+    });
+    section(ui, "folders", &tr.t("folders"), true, false, |ui| folders(ui, tr, p, &mut out));
+    section(ui, "exclusions", &tr.t("exclusions"), false, false, |ui| {
+        exclusions(ui, tr, p, drafts, &mut out)
+    });
+    // A destination of another profile must be seen: kept open.
+    section(ui, "destination", &tr.t("destination"), true, dest.foreign.is_some(), |ui| {
+        destination(ui, tr, &mut p.destination, dest, &mut out);
+    });
+    // The password form must be seen while the password is missing.
+    let needs_password = p.encrypted && password.saved == Some(false);
+    section(ui, "container", &tr.t("container"), false, needs_password, |ui| {
+        container(ui, tr, p, format, &mut out);
+        encryption(ui, tr, p, format, password, drafts, &mut out);
+        large_files(ui, tr, p, format, &mut out);
+    });
+    section(ui, "schedule", &tr.t("schedule"), true, false, |ui| {
+        schedule(ui, tr, "backup", &mut p.schedule, &mut out);
+        if p.schedule.is_automatic() {
+            ui.weak(tr.t("schedule-hint"));
+            full_backup(ui, tr, &mut p.full_backup, &mut out);
+        }
+    });
+    section(ui, "merge", &tr.t("merge"), false, false, |ui| {
+        ui.weak(tr.t("merge-hint"));
+        ui.weak(tr.t("merge-automatic-hint"));
+        retention(ui, tr, &mut p.merge.rules, &mut out);
+    });
+    section(ui, "checks", &tr.t("verify-section"), false, false, |ui| {
+        verification(ui, tr, p, format, &mut out, busy);
+    });
+    section(ui, "alerts", &tr.t("alerts"), false, false, |ui| alerts(ui, tr, p, &mut out));
 
     ui.add_space(theme::SPACE_L);
-    run_now(ui, tr, p, format, password, drafts, busy, &mut out);
+    run_now(ui, tr, p, format, password, drafts, busy, dest.foreign.is_some(), &mut out);
+    delete_dialog(ui, tr, p, drafts, busy, &mut out);
     out
 }
 
@@ -202,6 +287,7 @@ fn run_now(
     password: &PasswordStatus,
     drafts: &mut Drafts,
     busy: bool,
+    foreign: bool,
     out: &mut Outcome,
 ) {
     let errors = p.validate().err().unwrap_or_default();
@@ -210,14 +296,26 @@ fn run_now(
     }
     let encrypted = p.encrypted || matches!(format, FormatLock::Locked { encrypted: true, .. });
     let no_password = encrypted && password.saved == Some(false);
-    let ready = errors.is_empty() && !busy && !no_password;
+    // A password typed in the form above is saved by the Run button itself:
+    // for a new destination it must be valid and confirmed, for existing
+    // backups it is checked when saved.
+    let existing = matches!(format, FormatLock::Locked { encrypted: true, .. });
+    let form = if existing { PasswordForm::Reenter } else { PasswordForm::Choose };
+    let typed = no_password && password_problem(tr, drafts, form, &p.name).is_none();
+    let password_blocks = no_password && !typed;
+    let ready = errors.is_empty() && !busy && !password_blocks && !password.working && !foreign;
     let why = if busy {
         tr.t("busy-hint")
-    } else if no_password {
+    } else if foreign {
+        tr.t("dest-foreign-hint")
+    } else if password_blocks {
         tr.t("password-first-hint")
     } else {
         tr.t("fix-profile-hint")
     };
+    if password_blocks && errors.is_empty() {
+        ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("password-first-hint")));
+    }
 
     let started = format != FormatLock::Free;
     if started {
@@ -242,13 +340,76 @@ fn run_now(
         let primary = egui::Button::new(RichText::new(label).strong()).fill(ui.visuals().selection.bg_fill);
         if ui.add_enabled(ready, primary).on_disabled_hover_text(&why).clicked() {
             let choice = if started { drafts.run } else { RunChoice::Complete };
-            out.command = Some(Command::Run(choice));
+            out.command = Some(match Password::new(drafts.password.clone()) {
+                Some(pw) if typed => Command::SavePasswordAndRun(pw, choice),
+                _ => Command::Run(choice),
+            });
         }
         ui.add_space(theme::SPACE_L);
-        if ui.link(tr.t("delete-profile")).on_hover_text(tr.t("delete-profile-hint")).clicked() {
-            out.command = Some(Command::Delete);
-        }
+        // At the far end of the row, away from Run; it only opens the
+        // warning.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let text = RichText::new(tr.t("delete-profile")).color(ui.visuals().error_fg_color);
+            if ui
+                .add_enabled(!busy, egui::Button::new(text))
+                .on_hover_text(tr.t("delete-profile-hint"))
+                .on_disabled_hover_text(tr.t("busy-hint"))
+                .clicked()
+            {
+                drafts.delete = Some(DeleteDialog { profile: p.id, focus_cancel: true });
+            }
+        });
     });
+}
+
+/// The warning opened by "Delete profile": what goes, what stays, and
+/// [`Command::Delete`] once confirmed. Cancel, Esc and a click outside
+/// close it; Enter does not delete. Deleting waits while a job runs.
+fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool, out: &mut Outcome) {
+    let Some(dialog) = &mut drafts.delete else { return };
+    if dialog.profile != p.id {
+        drafts.delete = None;
+        return;
+    }
+    let focus_cancel = std::mem::take(&mut dialog.focus_cancel);
+    let (mut delete, mut cancel) = (false, false);
+    let response = egui::Modal::new(egui::Id::unique(DELETE_DIALOG_ID)).show(ui.ctx(), |ui| {
+        ui.set_max_width(DELETE_DIALOG_WIDTH);
+        ui.heading(tr.t_args("delete-profile-title", &[("name", arg(p.name.clone()))]));
+        ui.add_space(theme::SPACE_S);
+        ui.label(tr.t("delete-profile-body"));
+        if p.encrypted {
+            ui.label(tr.t("delete-profile-password"));
+        }
+        if !p.destination.is_empty() {
+            let path = p.destination.path().display().to_string();
+            ui.label(tr.t_args("delete-profile-backups", &[("path", arg(path))]));
+        }
+        if busy {
+            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("busy-hint")));
+        }
+        ui.add_space(theme::SPACE_S);
+        // Inside a row, so the right-aligned layout takes one line, not
+        // the whole height left. Windows order: action, then Cancel.
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let cancel_button = ui.button(tr.t("cancel"));
+                if focus_cancel {
+                    cancel_button.request_focus();
+                }
+                cancel = cancel_button.clicked();
+                let text = RichText::new(tr.t("delete-profile")).strong().color(Color32::WHITE);
+                let button = egui::Button::new(text).fill(ui.visuals().error_fg_color);
+                delete = ui.add_enabled(!busy, button).on_disabled_hover_text(tr.t("busy-hint")).clicked();
+            });
+        });
+    });
+    if delete {
+        drafts.delete = None;
+        out.command = Some(Command::Delete);
+    } else if cancel || response.should_close() {
+        drafts.delete = None;
+    }
 }
 
 /// Encryption switch and password, below the format.
@@ -300,7 +461,12 @@ fn encryption(
     // backups exist but this computer has no saved password), or change it.
     let existing = matches!(format, FormatLock::Locked { encrypted: true, .. });
     let change = existing && password.saved == Some(true);
-    let confirm = !existing || change;
+    let form = match (existing, change) {
+        (false, _) => PasswordForm::Choose,
+        (true, false) => PasswordForm::Reenter,
+        (true, true) => PasswordForm::Change,
+    };
+    let confirm = form.confirm();
     let open = password.saved == Some(false) || password.error.is_some();
     let title = match (existing, change) {
         (false, _) => tr.t("password-set"),
@@ -309,6 +475,15 @@ fn encryption(
     };
     egui::CollapsingHeader::new(title).id_salt("password").open(open.then_some(true)).show(ui, |ui| {
         egui::Grid::new("password-grid").num_columns(2).show(ui, |ui| {
+            if change {
+                ui.label(tr.t("password-current"));
+                ui.add(
+                    egui::TextEdit::singleline(&mut drafts.current_password)
+                        .password(true)
+                        .desired_width(240.0),
+                );
+                ui.end_row();
+            }
             ui.label(tr.t(if change { "password-new" } else { "password" }));
             ui.add(egui::TextEdit::singleline(&mut drafts.password).password(true).desired_width(240.0));
             ui.end_row();
@@ -322,8 +497,9 @@ fn encryption(
                 ui.end_row();
             }
         });
-        let problem = password_problem(tr, drafts, confirm);
+        let problem = password_problem(tr, drafts, form, &p.name);
         if confirm {
+            password_rules(ui, tr, drafts, &p.name);
             ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("password-loss-warning")));
             ui.checkbox(&mut drafts.password_ack, tr.t("merge-complete-ack"));
         }
@@ -338,11 +514,15 @@ fn encryption(
                 Some(why) => resp.on_disabled_hover_text(why),
                 None => resp,
             };
-            if resp.clicked()
-                && let Some(pw) = Password::new(drafts.password.clone())
+            if resp.clicked() {
+                out.command = password_command(drafts, form);
+            }
+            // What is still missing, in plain sight rather than only in the
+            // tooltip of the disabled button.
+            if let Some(why) = &problem
+                && !password.working
             {
-                out.command =
-                    Some(if change { Command::ChangePassword(pw) } else { Command::SavePassword(pw) });
+                ui.weak(why);
             }
             if password.working {
                 ui.spinner();
@@ -354,24 +534,74 @@ fn encryption(
     if !existing {
         ui.weak(tr.t("recovery-later"));
     } else if password.saved == Some(true) {
-        recovery_ui(ui, tr, password, out);
+        recovery_ui(ui, tr, password, drafts, out);
     }
 }
 
-/// The recovery key: hidden until asked for, then shown with Copy.
-fn recovery_ui(ui: &mut Ui, tr: &Tr, password: &PasswordStatus, out: &mut Outcome) {
+/// The command of the password form's button. The typed current password
+/// goes with the command and is not kept: a wrong one is typed again.
+fn password_command(d: &mut Drafts, form: PasswordForm) -> Option<Command> {
+    let new = Password::new(d.password.clone())?;
+    match form {
+        PasswordForm::Change => Password::new(std::mem::take(&mut d.current_password))
+            .map(|current| Command::ChangePassword { current, new }),
+        PasswordForm::Choose | PasswordForm::Reenter => Some(Command::SavePassword(new)),
+    }
+}
+
+/// The recovery key: hidden until asked for, then read with the current
+/// password typed by the user (never the saved one) and shown with Copy.
+fn recovery_ui(ui: &mut Ui, tr: &Tr, password: &PasswordStatus, drafts: &mut Drafts, out: &mut Outcome) {
     ui.add_space(theme::SPACE_S);
+    let field_id = egui::Id::unique("recovery-password");
     match &password.recovery {
-        None => {
+        None if !drafts.recovery_open => {
             if ui
                 .add_enabled(!password.working, egui::Button::new(tr.t("recovery-show")))
                 .on_hover_text(tr.t("recovery-hint"))
                 .clicked()
             {
-                out.command = Some(Command::ShowRecoveryKey);
+                drafts.recovery_open = true;
+                ui.ctx().memory_mut(|m| m.request_focus(field_id));
+            }
+        }
+        None => {
+            ui.label(tr.t("recovery-ask"));
+            ui.horizontal(|ui| {
+                ui.label(tr.t("password-current"));
+                let field = ui.add(
+                    egui::TextEdit::singleline(&mut drafts.recovery_password)
+                        .id(field_id)
+                        .password(true)
+                        .desired_width(240.0),
+                );
+                let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+                let ready = !drafts.recovery_password.is_empty() && !password.working;
+                let show = ui
+                    .add_enabled(ready, egui::Button::new(tr.t("recovery-show-button")))
+                    .on_disabled_hover_text(tr.t("password-current-hint"))
+                    .clicked();
+                if (show || (entered && ready))
+                    && let Some(pw) = Password::new(std::mem::take(&mut drafts.recovery_password))
+                {
+                    out.command = Some(Command::ShowRecoveryKey(pw));
+                }
+                if ui.add_enabled(!password.working, egui::Button::new(tr.t("cancel"))).clicked() {
+                    drafts.recovery_open = false;
+                    drafts.recovery_password.clear();
+                    out.command = Some(Command::HideRecoveryKey);
+                }
+                if password.working {
+                    ui.spinner();
+                    ui.weak(tr.t("password-checking"));
+                }
+            });
+            if let Some(e) = &password.recovery_error {
+                ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {e}"));
             }
         }
         Some(key) => {
+            drafts.recovery_open = false;
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 ui.strong(tr.t("recovery-title"));
                 ui.label(RichText::new(key).monospace().size(16.0));
@@ -390,17 +620,93 @@ fn recovery_ui(ui: &mut Ui, tr: &Tr, password: &PasswordStatus, out: &mut Outcom
     }
 }
 
-/// Why the typed password cannot be saved yet, if anything. `confirm`: a
-/// new password, typed twice and with the warning acknowledged.
-fn password_problem(tr: &Tr, d: &Drafts, confirm: bool) -> Option<String> {
+/// The requirements of a new password, ticked as they are met while typing
+/// (a mark and a text, never colour alone), and the estimated strength.
+fn password_rules(ui: &mut Ui, tr: &Tr, d: &Drafts, profile_name: &str) {
+    let a = policy::assess(&d.password, profile_name);
+    let matched = !d.password.is_empty() && d.password == d.password_again;
+    let lines = a.checks.iter().map(|c| (c.met, rule_text(tr, c.rule, a.chars)));
+    for (met, text) in lines.chain([(matched, tr.t("password-rule-match"))]) {
+        if met {
+            ui.label(format!("✔ {text}"));
+        } else {
+            ui.weak(format!("○ {text}"));
+        }
+    }
+    if !d.password.is_empty() {
+        // The level is written next to the bar: the bar's colour only repeats it.
+        let fill = match a.strength {
+            Strength::Weak => Some(ui.visuals().error_fg_color),
+            Strength::Fair => Some(ui.visuals().warn_fg_color),
+            Strength::Strong | Strength::VeryStrong => None,
+        };
+        ui.horizontal(|ui| {
+            let bar = egui::ProgressBar::new(a.fraction()).desired_width(160.0);
+            ui.add(match fill {
+                Some(color) => bar.fill(color),
+                None => bar,
+            });
+            ui.label(tr.t_args("password-strength", &[("level", arg(strength_text(tr, a.strength)))]));
+        });
+    }
+    ui.weak(tr.t_args("password-rule-tip", &[("passphrase", arg(policy::PASSPHRASE_CHARS))]));
+}
+
+/// The checklist line of a requirement; `typed` is the length so far.
+fn rule_text(tr: &Tr, rule: Rule, typed: usize) -> String {
+    match rule {
+        Rule::Length => {
+            tr.t_args("password-rule-length", &[("count", arg(policy::MIN_CHARS)), ("typed", arg(typed))])
+        }
+        Rule::Variety => tr.t_args(
+            "password-rule-variety",
+            &[("kinds", arg(policy::MIN_KINDS)), ("passphrase", arg(policy::PASSPHRASE_CHARS))],
+        ),
+        Rule::NotCommon => tr.t("password-rule-common"),
+        Rule::NoRuns => tr.t_args("password-rule-runs", &[("count", arg(policy::MAX_RUN + 1))]),
+        Rule::NotName => tr.t("password-rule-name"),
+        Rule::Strength => {
+            tr.t_args("password-rule-strength", &[("level", arg(strength_text(tr, policy::MIN_STRENGTH)))])
+        }
+    }
+}
+
+/// What to do about an unmet requirement, shown next to the Save button.
+fn rule_hint(tr: &Tr, rule: Rule) -> String {
+    match rule {
+        Rule::Length => tr.t_args("password-short-hint", &[("count", arg(policy::MIN_CHARS))]),
+        Rule::Variety => tr.t_args("password-variety-hint", &[("passphrase", arg(policy::PASSPHRASE_CHARS))]),
+        Rule::NotCommon => tr.t("password-common-hint"),
+        Rule::NoRuns => tr.t("password-runs-hint"),
+        Rule::NotName => tr.t("password-name-hint"),
+        Rule::Strength => tr.t("password-weak-hint"),
+    }
+}
+
+fn strength_text(tr: &Tr, s: Strength) -> String {
+    tr.t(match s {
+        Strength::Weak => "password-strength-weak",
+        Strength::Fair => "password-strength-fair",
+        Strength::Strong => "password-strength-strong",
+        Strength::VeryStrong => "password-strength-very-strong",
+    })
+}
+
+/// Why the typed password cannot be saved yet, if anything. The
+/// requirements of [`policy`] apply only to a new password (typed twice),
+/// never to the password of existing backups.
+fn password_problem(tr: &Tr, d: &Drafts, form: PasswordForm, profile_name: &str) -> Option<String> {
+    if form == PasswordForm::Change && d.current_password.is_empty() {
+        return Some(tr.t("password-current-hint"));
+    }
     if d.password.is_empty() {
         return Some(tr.t("password-empty-hint"));
     }
-    if !confirm {
+    if !form.confirm() {
         return None;
     }
-    if d.password.chars().count() < MIN_PASSWORD_CHARS {
-        return Some(tr.t_args("password-short-hint", &[("count", arg(MIN_PASSWORD_CHARS))]));
+    if let Some(rule) = policy::assess(&d.password, profile_name).first_unmet() {
+        return Some(rule_hint(tr, rule));
     }
     if d.password != d.password_again {
         return Some(tr.t("password-mismatch-hint"));
@@ -501,6 +807,34 @@ fn container(ui: &mut Ui, tr: &Tr, p: &mut Profile, format: FormatLock, out: &mu
     }
 }
 
+/// From which size files are saved as chunks, so a changed file stores
+/// only its changed parts. On an encrypted destination every file is, and
+/// only a note says so. Can change at any time, unlike the format.
+fn large_files(ui: &mut Ui, tr: &Tr, p: &mut Profile, format: FormatLock, out: &mut Outcome) {
+    ui.add_space(theme::SPACE_S);
+    let encrypted = p.encrypted || matches!(format, FormatLock::Locked { encrypted: true, .. });
+    if encrypted {
+        ui.weak(tr.t("large-files-encrypted"));
+        return;
+    }
+    let mut on = p.large_files.threshold_mb > 0;
+    ui.horizontal(|ui| {
+        if ui.checkbox(&mut on, tr.t("large-files")).on_hover_text(tr.t("large-files-hint")).changed() {
+            p.large_files.threshold_mb = if on { LargeFiles::default().threshold_mb } else { 0 };
+            out.changed = true;
+        }
+        if on {
+            let value = egui::DragValue::new(&mut p.large_files.threshold_mb)
+                .range(LargeFiles::THRESHOLD_RANGE_MB)
+                .speed(10);
+            out.changed |= ui.add(value).on_hover_text(tr.t("large-files-hint")).changed();
+            ui.label(tr.t("large-files-unit"));
+        }
+    });
+    ui.weak(tr.t("large-files-hint"));
+    ui.weak(tr.t("large-files-change-hint"));
+}
+
 fn exclusions(ui: &mut Ui, tr: &Tr, p: &mut Profile, drafts: &mut Drafts, out: &mut Outcome) {
     if p.excludes.is_empty() {
         ui.weak(tr.t("no-exclusions"));
@@ -550,7 +884,33 @@ fn exclusions(ui: &mut Ui, tr: &Tr, p: &mut Profile, drafts: &mut Drafts, out: &
                 }
             }
         }
+        if ui
+            .selectable_label(drafts.pattern_open, tr.t("exclude-pattern"))
+            .on_hover_text(tr.t("exclusions-hint"))
+            .clicked()
+        {
+            drafts.pattern_open = !drafts.pattern_open;
+        }
     });
+    if drafts.pattern_open {
+        ui.horizontal(|ui| {
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut drafts.pattern)
+                    .hint_text("**/node_modules")
+                    .desired_width(220.0),
+            );
+            let entered = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let ready = !drafts.pattern.trim().is_empty();
+            if (ui.add_enabled(ready, egui::Button::new(tr.t("exclude-pattern-add"))).clicked() || entered)
+                && ready
+            {
+                let glob = drafts.pattern.trim().to_owned();
+                out.changed |= add_rule(p, Exclusion::Pattern { glob });
+                drafts.pattern.clear();
+            }
+        });
+        ui.weak(tr.t("exclusions-hint"));
+    }
     ui.horizontal(|ui| {
         let resp = ui.add(
             egui::TextEdit::singleline(&mut drafts.extension)
@@ -577,22 +937,6 @@ fn exclusions(ui: &mut Ui, tr: &Tr, p: &mut Profile, drafts: &mut Drafts, out: &
             }
         }
     });
-    egui::CollapsingHeader::new(tr.t("advanced")).id_salt("exclusions-advanced").show(ui, |ui| {
-        ui.weak(tr.t("exclusions-hint"));
-        ui.horizontal(|ui| {
-            ui.add(
-                egui::TextEdit::singleline(&mut drafts.pattern)
-                    .hint_text("**/node_modules")
-                    .desired_width(220.0),
-            );
-            let ready = !drafts.pattern.trim().is_empty();
-            if ui.add_enabled(ready, egui::Button::new(tr.t("exclude-pattern"))).clicked() {
-                let glob = drafts.pattern.trim().to_owned();
-                out.changed |= add_rule(p, Exclusion::Pattern { glob });
-                drafts.pattern.clear();
-            }
-        });
-    });
 }
 
 /// Adds `rule` unless it is already there; true when added.
@@ -605,9 +949,18 @@ fn add_rule(p: &mut Profile, rule: Exclusion) -> bool {
     }
 }
 
-fn section(ui: &mut Ui, title: &str) {
-    ui.add_space(theme::SPACE_M);
-    ui.strong(title);
+/// A collapsible section with a bold title. `open` is its state the first
+/// time it is shown; `force_open` keeps it open while it shows something
+/// that must be seen (a problem to fix).
+fn section(ui: &mut Ui, id: &str, title: &str, open: bool, force_open: bool, add: impl FnOnce(&mut Ui)) {
+    ui.add_space(theme::SPACE_S);
+    let mut header = egui::CollapsingHeader::new(RichText::new(title).strong())
+        .id_salt(("section", id))
+        .default_open(open);
+    if force_open {
+        header = header.open(Some(true));
+    }
+    header.show(ui, add);
 }
 
 fn folders(ui: &mut Ui, tr: &Tr, p: &mut Profile, out: &mut Outcome) {
@@ -639,7 +992,7 @@ fn folders(ui: &mut Ui, tr: &Tr, p: &mut Profile, out: &mut Outcome) {
     }
 }
 
-fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, out: &mut Outcome) {
+fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, info: &DestinationInfo, out: &mut Outcome) {
     let local = matches!(d, Destination::Local { .. });
     ui.horizontal(|ui| {
         if ui.radio(local, tr.t("dest-local")).clicked() && !local {
@@ -671,61 +1024,203 @@ fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, out: &mut Outcome) {
             out.changed |= ui.add(egui::TextEdit::singleline(unc).hint_text(r"\\server\backup\pc")).changed();
         }
     }
+    match &info.foreign {
+        Some(Foreign::Profile(name)) => {
+            let text = tr.t_args("dest-foreign-profile", &[("name", arg(name.clone()))]);
+            ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {text}"));
+        }
+        Some(Foreign::Deleted) => {
+            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("dest-foreign-deleted")));
+            if ui.button(tr.t("dest-adopt")).on_hover_text(tr.t("dest-adopt-hint")).clicked() {
+                out.command = Some(Command::AdoptDestination);
+            }
+        }
+        None => {}
+    }
+    if let Some(free) = info.free {
+        let text = tr.t_args("dest-free", &[("free", arg(tr.bytes(free)))]);
+        if free < LOW_SPACE_BYTES {
+            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {text}"));
+        } else {
+            ui.label(text);
+        }
+    }
     ui.weak(tr.t("dest-hint"));
 }
+
+/// Below this, the free space of the destination is shown as a warning.
+const LOW_SPACE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Every {
     Manual,
-    Daily,
-    Weekly,
+    Days,
+    Hours,
+    Monthly,
 }
 
+/// Editor of a clock schedule: on chosen days at chosen times, every few
+/// hours, or monthly. A schedule saved in an older form is shown as the
+/// equivalent "days" one and written in that form only when changed.
 fn schedule(ui: &mut Ui, tr: &Tr, id: &str, s: &mut Schedule, out: &mut Outcome) {
-    let (every, day, at) = match *s {
-        Schedule::Manual => (Every::Manual, Weekday::Sunday, TimeOfDay::default()),
-        Schedule::Daily { at } => (Every::Daily, Weekday::Sunday, at),
-        Schedule::Weekly { day, at } => (Every::Weekly, day, at),
+    let current = match &*s {
+        Schedule::Daily { .. } | Schedule::Weekly { .. } => s.normalized(),
+        other => other.clone(),
     };
-    let (mut every2, mut day2) = (every, day);
-    let (mut hour, mut minute) = (at.hour(), at.minute());
-    ui.horizontal(|ui| {
-        let label = |e: Every| match e {
-            Every::Manual => tr.t("schedule-manual"),
-            Every::Daily => tr.t("schedule-daily"),
-            Every::Weekly => tr.t("schedule-weekly"),
-        };
-        egui::ComboBox::from_id_salt(("every", id)).selected_text(label(every)).show_ui(ui, |ui| {
-            for e in [Every::Manual, Every::Daily, Every::Weekly] {
-                ui.selectable_value(&mut every2, e, label(e));
-            }
-        });
-        if every2 == Every::Weekly {
-            egui::ComboBox::from_id_salt(("weekday", id)).selected_text(day_name(tr, day2)).show_ui(
-                ui,
-                |ui| {
-                    for d in Weekday::ALL {
-                        ui.selectable_value(&mut day2, d, day_name(tr, d));
-                    }
-                },
-            );
-        }
-        if every2 != Every::Manual {
-            ui.label(tr.t("at"));
-            ui.add(egui::DragValue::new(&mut hour).range(0..=23));
-            ui.label(":");
-            ui.add(egui::DragValue::new(&mut minute).range(0..=59));
+    let every = match current {
+        Schedule::Manual => Every::Manual,
+        Schedule::Hours { .. } => Every::Hours,
+        Schedule::Monthly { .. } => Every::Monthly,
+        Schedule::Days { .. } | Schedule::Daily { .. } | Schedule::Weekly { .. } => Every::Days,
+    };
+    let mut chosen = every;
+    let label = |e: Every| match e {
+        Every::Manual => tr.t("schedule-manual"),
+        Every::Days => tr.t("schedule-days"),
+        Every::Hours => tr.t("schedule-hours"),
+        Every::Monthly => tr.t("schedule-monthly"),
+    };
+    egui::ComboBox::from_id_salt(("every", id)).selected_text(label(every)).show_ui(ui, |ui| {
+        for e in [Every::Manual, Every::Days, Every::Hours, Every::Monthly] {
+            ui.selectable_value(&mut chosen, e, label(e));
         }
     });
-    let at = TimeOfDay::new(hour, minute).unwrap_or(at);
-    let new = match every2 {
-        Every::Manual => Schedule::Manual,
-        Every::Daily => Schedule::Daily { at },
-        Every::Weekly => Schedule::Weekly { day: day2, at },
-    };
-    if new != *s {
+    let mut new = if chosen == every { current.clone() } else { first_of(chosen, &current) };
+    match &mut new {
+        Schedule::Manual | Schedule::Daily { .. } | Schedule::Weekly { .. } => {}
+        Schedule::Days { days, times } => {
+            weekdays(ui, tr, days);
+            day_times(ui, tr, id, times);
+        }
+        Schedule::Hours { hours, from, until } => {
+            ui.horizontal(|ui| {
+                ui.label(tr.t("schedule-every"));
+                ui.add(egui::DragValue::new(hours).range(archeion_core::schedule::HOURS_RANGE));
+                ui.label(tr.t("hours-unit"));
+                ui.label(tr.t("schedule-from"));
+                time_edit(ui, from);
+                ui.label(tr.t("schedule-until"));
+                time_edit(ui, until);
+            });
+            ui.weak(tr.t("schedule-hours-hint"));
+        }
+        Schedule::Monthly { day, at } => {
+            ui.horizontal(|ui| {
+                ui.label(tr.t("schedule-month-day"));
+                ui.add(egui::DragValue::new(day).range(archeion_core::schedule::MONTH_DAY_RANGE));
+                ui.label(tr.t("at"));
+                time_edit(ui, at);
+            });
+            ui.weak(tr.t("schedule-month-hint"));
+        }
+    }
+    if new != current {
         *s = new;
         out.changed = true;
+        out.schedule_changed = true;
+    }
+}
+
+/// The schedule shown when the user switches to `every`, keeping the time
+/// of `previous` where there is one.
+fn first_of(every: Every, previous: &Schedule) -> Schedule {
+    let at = match previous {
+        Schedule::Days { times, .. } => times.first().copied().unwrap_or_default(),
+        Schedule::Hours { from, .. } => *from,
+        Schedule::Monthly { at, .. } | Schedule::Daily { at } | Schedule::Weekly { at, .. } => *at,
+        Schedule::Manual => TimeOfDay::default(),
+    };
+    match every {
+        Every::Manual => Schedule::Manual,
+        Every::Days => Schedule::Days { days: Weekday::ALL.to_vec(), times: vec![at] },
+        Every::Hours => Schedule::Hours {
+            hours: 2,
+            from: TimeOfDay::new(8, 0).unwrap_or_default(),
+            until: TimeOfDay::new(20, 0).unwrap_or_default(),
+        },
+        Every::Monthly => Schedule::Monthly { day: 1, at },
+    }
+}
+
+/// Seven toggles, Monday first, plus "every day".
+/// The last chosen day cannot be switched off.
+fn weekdays(ui: &mut Ui, tr: &Tr, days: &mut Vec<Weekday>) {
+    ui.horizontal_wrapped(|ui| {
+        for d in Weekday::ALL {
+            let mut on = days.contains(&d);
+            let short: String = day_name(tr, d).chars().take(3).collect();
+            let response = ui.toggle_value(&mut on, short).on_hover_text(day_name(tr, d));
+            if response.changed() {
+                if on {
+                    days.push(d);
+                    days.sort_unstable();
+                } else if days.len() > 1 {
+                    days.retain(|x| *x != d);
+                }
+            }
+        }
+        ui.add_space(theme::SPACE_S);
+        if ui.small_button(tr.t("schedule-all-days")).clicked() {
+            *days = Weekday::ALL.to_vec();
+        }
+    });
+}
+
+/// The times of a "days" schedule: each editable and removable (but not
+/// the last one), and a button to add one more.
+fn day_times(ui: &mut Ui, tr: &Tr, id: &str, times: &mut Vec<TimeOfDay>) {
+    let mut remove = None;
+    let can_remove = times.len() > 1;
+    for (i, t) in times.iter_mut().enumerate() {
+        ui.push_id((id, "time", i), |ui| {
+            ui.horizontal(|ui| {
+                ui.label(tr.t("at"));
+                time_edit(ui, t);
+                if can_remove && ui.small_button("✕").on_hover_text(tr.t("schedule-remove-time")).clicked()
+                {
+                    remove = Some(i);
+                }
+            });
+        });
+    }
+    if let Some(i) = remove {
+        times.remove(i);
+    }
+    if times.len() < archeion_core::schedule::MAX_TIMES_A_DAY
+        && ui.small_button(tr.t("schedule-add-time")).clicked()
+    {
+        // One hour after the last time, as a starting point.
+        let last = times.last().copied().unwrap_or_default();
+        let next = TimeOfDay::new((last.hour() + 1) % 24, last.minute()).unwrap_or(last);
+        times.push(next);
+    }
+}
+
+/// Hour and minute of `t`.
+fn time_edit(ui: &mut Ui, t: &mut TimeOfDay) {
+    let (mut hour, mut minute) = (t.hour(), t.minute());
+    ui.add(egui::DragValue::new(&mut hour).range(0..=23));
+    ui.label(":");
+    ui.add(egui::DragValue::new(&mut minute).range(0..=59).custom_formatter(|v, _| format!("{v:02}")));
+    if let Some(new) = TimeOfDay::new(hour, minute) {
+        *t = new;
+    }
+}
+
+/// Windows notifications about automatic backups.
+fn alerts(ui: &mut Ui, tr: &Tr, p: &mut Profile, out: &mut Outcome) {
+    let before = p.alerts;
+    let a: &mut Alerts = &mut p.alerts;
+    ui.checkbox(&mut a.on_failure, tr.t("alert-on-failure"));
+    ui.horizontal(|ui| {
+        ui.label(tr.t("alert-stale"));
+        ui.add(egui::DragValue::new(&mut a.stale_days).range(0..=365));
+        ui.label(tr.t("full-days-unit"));
+    });
+    ui.weak(tr.t(if p.backs_up_automatically() { "alert-hint" } else { "alert-manual-hint" }));
+    if p.alerts != before {
+        out.changed = true;
+        // The daily check task exists only while a profile needs it.
         out.schedule_changed = true;
     }
 }
@@ -734,6 +1229,7 @@ fn retention(ui: &mut Ui, tr: &Tr, r: &mut Retention, out: &mut Outcome) {
     ui.add_space(theme::SPACE_S);
     egui::Grid::new("retention").num_columns(2).show(ui, |ui| {
         for (key, value) in [
+            ("keep-within", &mut r.keep_within_days),
             ("keep-last", &mut r.keep_last),
             ("keep-daily", &mut r.keep_daily),
             ("keep-weekly", &mut r.keep_weekly),
@@ -768,4 +1264,101 @@ fn error_text(tr: &Tr, e: ProfileError) -> String {
         ProfileError::DestinationInsideSource => "error-destination-in-source",
         ProfileError::EncryptionNeedsZip => "encrypt-needs-zip",
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use archeion_core::Language;
+
+    /// A change form filled in completely: current password, new one twice,
+    /// warning acknowledged.
+    fn change_drafts() -> Drafts {
+        Drafts {
+            current_password: "old secret".into(),
+            password: "a much longer new passphrase".into(),
+            password_again: "a much longer new passphrase".into(),
+            password_ack: true,
+            ..Drafts::default()
+        }
+    }
+
+    #[test]
+    fn change_needs_the_current_password() {
+        let tr = Tr::new(Language::English);
+        let d = Drafts { current_password: String::new(), ..change_drafts() };
+        assert_eq!(password_problem(&tr, &d, PasswordForm::Change, ""), Some(tr.t("password-current-hint")));
+        assert_eq!(password_problem(&tr, &change_drafts(), PasswordForm::Change, ""), None);
+    }
+
+    #[test]
+    fn change_still_checks_the_new_password() {
+        let tr = Tr::new(Language::English);
+        let d = Drafts { password_again: "something else".into(), ..change_drafts() };
+        assert_eq!(password_problem(&tr, &d, PasswordForm::Change, ""), Some(tr.t("password-mismatch-hint")));
+    }
+
+    #[test]
+    fn other_forms_ignore_the_current_password() {
+        let tr = Tr::new(Language::English);
+        let d = Drafts { current_password: String::new(), ..change_drafts() };
+        assert_eq!(password_problem(&tr, &d, PasswordForm::Choose, ""), None);
+        let typed_once = Drafts { password: "short".into(), ..Drafts::default() };
+        assert_eq!(password_problem(&tr, &typed_once, PasswordForm::Reenter, ""), None);
+    }
+
+    #[test]
+    fn a_new_password_reports_the_first_unmet_requirement() {
+        let tr = Tr::new(Language::English);
+        let typed = |pw: &str| Drafts { password: pw.into(), password_again: pw.into(), ..change_drafts() };
+        let short = tr.t_args("password-short-hint", &[("count", arg(policy::MIN_CHARS))]);
+        assert_eq!(password_problem(&tr, &typed("Kx7#mQ2!vR9"), PasswordForm::Choose, ""), Some(short));
+        let common = Some(tr.t("password-common-hint"));
+        assert_eq!(password_problem(&tr, &typed("Password2024!"), PasswordForm::Choose, ""), common);
+        let name = Some(tr.t("password-name-hint"));
+        assert_eq!(password_problem(&tr, &typed("My Photos 2024!"), PasswordForm::Change, "Photos"), name);
+        assert_eq!(password_problem(&tr, &typed("Kx7#mQ2!vR9z"), PasswordForm::Choose, "Photos"), None);
+    }
+
+    #[test]
+    fn existing_backups_take_their_password_as_it_is() {
+        let tr = Tr::new(Language::English);
+        let d = Drafts { password: "password".into(), ..Drafts::default() };
+        assert_eq!(password_problem(&tr, &d, PasswordForm::Reenter, "Photos"), None);
+    }
+
+    #[test]
+    fn change_command_carries_and_forgets_the_current_password() {
+        let mut d = change_drafts();
+        let cmd = password_command(&mut d, PasswordForm::Change);
+        assert!(matches!(
+            &cmd,
+            Some(Command::ChangePassword { current, new })
+                if current.as_str() == "old secret" && new.as_str() == "a much longer new passphrase"
+        ));
+        assert!(d.current_password.is_empty());
+    }
+
+    #[test]
+    fn change_command_needs_both_passwords() {
+        let mut d = Drafts { current_password: String::new(), ..change_drafts() };
+        assert!(password_command(&mut d, PasswordForm::Change).is_none());
+        let mut d = Drafts { password: String::new(), ..change_drafts() };
+        assert!(password_command(&mut d, PasswordForm::Change).is_none());
+    }
+
+    #[test]
+    fn save_command_uses_the_typed_password() {
+        let mut d = Drafts { password: "typed".into(), ..Drafts::default() };
+        let cmd = password_command(&mut d, PasswordForm::Reenter);
+        assert!(matches!(&cmd, Some(Command::SavePassword(pw)) if pw.as_str() == "typed"));
+    }
+
+    #[test]
+    fn clearing_forgets_every_typed_password() {
+        let mut d = Drafts { recovery_open: true, recovery_password: "secret".into(), ..change_drafts() };
+        d.clear_password();
+        assert!(d.password.is_empty() && d.password_again.is_empty() && d.current_password.is_empty());
+        assert!(d.recovery_password.is_empty() && !d.recovery_open && !d.password_ack);
+    }
 }
