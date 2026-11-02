@@ -1,6 +1,7 @@
 //! A query of the Backups tab run on a background thread: reading the
 //! manifests never blocks the window.
 
+use super::symbol;
 use crate::i18n::Tr;
 use archeion_engine::EngineError;
 use eframe::egui::{Context, Ui};
@@ -86,7 +87,7 @@ impl<T: Send + 'static> Load<T> {
                     Problem::WrongPassword => tr.t("run-wrong-password"),
                     Problem::Other(e) => e.clone(),
                 };
-                ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {text}"));
+                ui.colored_label(ui.visuals().error_fg_color, symbol::with(symbol::WARNING, text));
             }
             Self::Ready(_) => {}
         }

@@ -26,6 +26,14 @@ All notable changes to Archeion are listed here. The format follows
   and About open centred, with window margins. Text, links and field
   borders keep the WCAG contrasts in both themes (tested). Fields and
   menus without a label beside them have an accessible name.
+- Icons come from the Windows icon font (Segoe MDL2 Assets) instead of
+  emoji, so they match the system and each other. Ticked boxes are filled
+  with the accent; a partly ticked folder shows an accent square. Lists
+  (profiles, operations in Activity) highlight the whole item with an
+  accent mark, and each operation shows its date and profile on a second
+  line of the same item. Remove, close and refresh are quiet icon buttons.
+  In Activity the log links sit beside the "Log" title instead of
+  wrapping under the buttons, and the log rows no longer have stripes.
 - Encrypted destinations use new key derivation contexts (key format 3):
   those created before cannot be opened any more and must be created
   again. Settings, saved passwords and scheduled tasks of earlier test

@@ -102,10 +102,11 @@ fn language_section(ui: &mut egui::Ui, tr: &Tr, language: &mut Language, tray: b
 /// The two window options, with their hints.
 fn window_section(ui: &mut egui::Ui, tr: &Tr, window: &mut WindowOptions, tray: bool) {
     widgets::section_title(ui, tr.t("preferences-window"));
-    ui.add_enabled(tray, egui::Checkbox::new(&mut window.close_to_tray, tr.t("option-tray")))
+    ui.add_enabled_ui(tray, |ui| widgets::checkbox(ui, &mut window.close_to_tray, tr.t("option-tray")))
+        .inner
         .on_hover_text(tr.t("option-tray-hint"))
         .on_disabled_hover_text(tr.t("option-tray-unavailable"));
-    ui.checkbox(&mut window.start_with_windows, tr.t("option-autostart"))
+    widgets::checkbox(ui, &mut window.start_with_windows, tr.t("option-autostart"))
         .on_hover_text(tr.t("option-autostart-hint"));
 }
 

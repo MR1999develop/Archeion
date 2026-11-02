@@ -23,7 +23,7 @@
 use super::{
     backups::BackupsView,
     load::{Load, Problem},
-    theme,
+    symbol, theme,
     tree::{Node, Tick, Ticked, Tree},
     widgets,
 };
@@ -324,7 +324,7 @@ impl RestoreView {
     fn tree_ui(&mut self, ui: &mut Ui, tr: &Tr, profile: &Profile) {
         let mut refresh = false;
         ui.horizontal(|ui| {
-            refresh = ui.small_button("⟳").on_hover_text(tr.t("refresh")).clicked();
+            refresh = widgets::icon_button(ui, symbol::REFRESH, tr.t("refresh")).clicked();
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.query)
                     .hint_text(tr.t("search-hint"))
@@ -444,7 +444,7 @@ impl RestoreView {
                         if plan.conflicts.contains(&card) {
                             ui.colored_label(
                                 ui.visuals().error_fg_color,
-                                format!("⚠ {}", tr.t("restore-conflict")),
+                                symbol::with(symbol::WARNING, tr.t("restore-conflict")),
                             );
                         }
                     });
@@ -534,7 +534,7 @@ fn tree_list_ui(ui: &mut Ui, tr: &Tr, tree: &Tree, ticked: &[Ticked<'_>], toggle
     ui.weak(
         tr.t_args("restore-tree-count", &[("files", arg(tree.files)), ("deleted", arg(tree.deleted_files))]),
     );
-    ui.weak(tr.t("restore-tree-hint"));
+    ui.weak(tr.t_args("restore-tree-hint", &symbol::args()));
     egui::ScrollArea::vertical().id_salt("tree").auto_shrink(false).show(ui, |ui| {
         for &r in &tree.roots {
             node_ui(ui, tr, tree, r, ticked, toggled);
@@ -561,7 +561,7 @@ fn hits_ui(
         for &idx in hits {
             let Some(n) = tree.node(idx) else { continue };
             let path = keys::path_for(n.key()).display().to_string();
-            let text = node_text(ui, tr, n, format!("📄 {path}   {}", tr.bytes(n.entry.size)));
+            let text = node_text(ui, tr, n, format!("{}  {path}   {}", symbol::FILE, tr.bytes(n.entry.size)));
             if tick_box(ui, tr, tree, n, tree.tick(n, ticked), text) {
                 toggled.push(idx);
             }
@@ -579,7 +579,7 @@ fn node_ui(ui: &mut Ui, tr: &Tr, tree: &Tree, idx: usize, ticked: &[Ticked<'_>],
         let open = tree.roots.contains(&idx);
         CollapsingState::load_with_default_open(ui.ctx(), id, open)
             .show_header(ui, |ui| {
-                let text = node_text(ui, tr, n, format!("📁 {}", n.label));
+                let text = node_text(ui, tr, n, symbol::with(symbol::FOLDER, &n.label));
                 if tick_box(ui, tr, tree, n, tick, text) {
                     toggled.push(idx);
                 }
@@ -590,7 +590,8 @@ fn node_ui(ui: &mut Ui, tr: &Tr, tree: &Tree, idx: usize, ticked: &[Ticked<'_>],
                 }
             });
     } else {
-        let text = node_text(ui, tr, n, format!("📄 {}   {}", n.label, tr.bytes(n.entry.size)));
+        let text =
+            node_text(ui, tr, n, format!("{}  {}   {}", symbol::FILE, n.label, tr.bytes(n.entry.size)));
         if tick_box(ui, tr, tree, n, tick, text) {
             toggled.push(idx);
         }
@@ -617,33 +618,24 @@ fn tick_box(ui: &mut Ui, tr: &Tr, tree: &Tree, n: &Node, tick: Tick, text: RichT
             let mut on = matches!(tick, Tick::InFolder { .. });
             let id = if on { "tick-in-folder" } else { "tick-left-out" };
             let hint = tr.t_args(id, &[("folder", folder_path(folder))]);
-            ui.checkbox(&mut on, text).on_hover_text(hint).changed()
+            widgets::checkbox(ui, &mut on, text).on_hover_text(hint).changed()
         }
         Tick::Partial => {
-            let mut on = false;
-            let resp = ui.add(egui::Checkbox::new(&mut on, text).indeterminate(true));
-            fill_box(ui, &resp);
+            let resp = widgets::partial_checkbox(ui, text);
             resp.on_hover_text(format!("{}\n{}", tr.t("tick-partial"), node_hint(tr, n))).changed()
         }
         Tick::On | Tick::Off => {
             let mut on = tick == Tick::On;
-            ui.checkbox(&mut on, text).on_hover_text(node_hint(tr, n)).changed()
+            widgets::checkbox(ui, &mut on, text).on_hover_text(node_hint(tr, n)).changed()
         }
     }
-}
-
-/// Fills the box of a checkbox, over egui's dash for "indeterminate".
-fn fill_box(ui: &Ui, resp: &egui::Response) {
-    let s = ui.spacing();
-    let center = egui::pos2(resp.rect.left() + s.icon_width * 0.5, resp.rect.center().y);
-    let rect = egui::Rect::from_center_size(center, egui::Vec2::splat(s.icon_width_inner));
-    ui.painter().rect_filled(rect, 2.0, ui.style().interact(resp).fg_stroke.color);
 }
 
 /// A deleted node says so in words and with an icon, and is greyed.
 fn node_text(ui: &Ui, tr: &Tr, n: &Node, base: String) -> RichText {
     if n.deleted {
-        RichText::new(format!("{base}   🗑 {}", tr.t("deleted-label"))).color(ui.visuals().weak_text_color())
+        RichText::new(format!("{base}   {}  {}", symbol::DELETED, tr.t("deleted-label")))
+            .color(ui.visuals().weak_text_color())
     } else {
         RichText::new(base)
     }
@@ -673,7 +665,7 @@ fn card_header(ui: &mut Ui, tr: &Tr, key: &str, node: Option<&Node>, focused: Op
     let path = keys::path_for(key);
     let mut click = HeaderClick::None;
     ui.horizontal(|ui| {
-        let icon = if dir { "📁" } else { "📄" };
+        let icon = if dir { symbol::FOLDER } else { symbol::FILE };
         let title = RichText::new(format!("{icon} {name}")).strong();
         let hover = path.display().to_string();
         match focused {
@@ -689,8 +681,7 @@ fn card_header(ui: &mut Ui, tr: &Tr, key: &str, node: Option<&Node>, focused: Op
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let label = tr.t("remove-from-selection");
-            let resp = ui.small_button("✕").on_hover_text(&label);
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
+            let resp = widgets::icon_button(ui, symbol::REMOVE, label);
             if resp.clicked() {
                 click = HeaderClick::Remove;
             }
@@ -700,7 +691,7 @@ fn card_header(ui: &mut Ui, tr: &Tr, key: &str, node: Option<&Node>, focused: Op
         ui.weak(parent.display().to_string());
     }
     if node.is_some_and(|n| n.deleted) {
-        ui.weak(format!("🗑 {}", tr.t("deleted-since")));
+        ui.weak(symbol::with(symbol::DELETED, tr.t("deleted-since")));
     }
     click
 }
@@ -750,7 +741,7 @@ fn card_summary(
 ) -> String {
     let dest_of = |dest: Option<&Dest>| match dest {
         None => default_text(tr, default),
-        Some(d) => format!("✎ {}", dest_text(tr, d)),
+        Some(d) => symbol::with(symbol::EDITED, dest_text(tr, d)),
     };
     match pick {
         Pick::File { versions, .. } => {
@@ -759,7 +750,7 @@ fn card_summary(
                 Some((first, rest)) if rest.iter().all(|v| v.dest == first.dest) => {
                     dest_of(first.dest.as_ref())
                 }
-                Some(_) => format!("✎ {}", tr.t("dest-several")),
+                Some(_) => symbol::with(symbol::EDITED, tr.t("dest-several")),
             };
             tr.t_args("card-summary-file", &[("versions", arg(versions.len())), ("dest", arg(dest))])
         }
@@ -800,7 +791,7 @@ fn file_card(
             &[("backup", arg(v.backup_label.clone())), ("size", arg(tr.bytes(v.size)))],
         );
         let hint = tr.t_args("version-modified", &[("date", arg(v.modified_label.clone()))]);
-        if ui.checkbox(&mut on, label).on_hover_text(hint).changed() {
+        if widgets::checkbox(ui, &mut on, label).on_hover_text(hint).changed() {
             edits.push(CardEdit::Version { card, index, on });
         }
         if let Some(n) = position
@@ -852,7 +843,7 @@ fn dest_ui(ui: &mut Ui, tr: &Tr, dest: &mut Option<Dest>, default: &DefaultDest,
     }
     let text = match dest {
         None => tr.t_args("dest-default", &[("dest", arg(default_text(tr, default)))]),
-        Some(d) => format!("✎ {}", dest_text(tr, d)),
+        Some(d) => symbol::with(symbol::EDITED, dest_text(tr, d)),
     };
     ui.menu_button(text, |ui| {
         if ui.button(tr.t("dest-follow-default")).clicked() {
@@ -875,9 +866,9 @@ fn dest_ui(ui: &mut Ui, tr: &Tr, dest: &mut Option<Dest>, default: &DefaultDest,
         }
     })
     .response
-    .on_hover_text(tr.t("dest-change-hint"));
+    .on_hover_text(tr.t_args("dest-change-hint", &symbol::args()));
     if dest.as_ref().is_some_and(Dest::overwrites_original) {
-        ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("replace-warning")));
+        ui.colored_label(ui.visuals().warn_fg_color, symbol::with(symbol::WARNING, tr.t("replace-warning")));
     }
 }
 
@@ -917,9 +908,12 @@ fn default_ui(ui: &mut Ui, tr: &Tr, default: &mut DefaultDest) {
         }
     });
     if default.kind != DestKind::Beside {
-        ui.checkbox(&mut default.replace, tr.t("replace-existing"));
+        widgets::checkbox(ui, &mut default.replace, tr.t("replace-existing"));
         if default.replace && default.kind == DestKind::Original {
-            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("replace-warning")));
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                symbol::with(symbol::WARNING, tr.t("replace-warning")),
+            );
         }
     }
     ui.add_space(theme::SPACE_S);

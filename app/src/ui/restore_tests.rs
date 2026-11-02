@@ -4,6 +4,7 @@
 
 use super::{Action, RestoreView};
 use crate::i18n::Tr;
+use crate::ui::symbol;
 use archeion_core::{BackupMode, Container, Destination, Language, Profile, RunEvent, keys};
 use archeion_engine::EventSink;
 use eframe::egui::{self, accesskit::Toggled};
@@ -46,14 +47,16 @@ fn backed_up() -> Fixture {
 
 type State = (RestoreView, Option<Action>);
 
-/// The system fonts, as eframe adds them to the window (`system_fonts`).
-fn system_fonts(ctx: &egui::Context) {
+/// The fonts of the window: the system fonts, as eframe adds them
+/// (`system_fonts`), and the theme's interface and icon fonts.
+fn fonts(ctx: &egui::Context) {
     ctx.add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
+    crate::ui::theme::apply(ctx);
 }
 
 fn harness(f: &Fixture) -> Harness<'static, State> {
     let (tr, profile) = (Tr::new(Language::English), f.profile.clone());
-    let builder = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).with_context_setup(system_fonts);
+    let builder = Harness::builder().with_size(egui::vec2(1200.0, 900.0)).with_context_setup(fonts);
     let mut h = builder.build_ui_state(
         move |ui, state: &mut State| {
             if let Some(a) = state.0.show(ui, &tr, &profile, false) {
@@ -64,7 +67,7 @@ fn harness(f: &Fixture) -> Harness<'static, State> {
     );
     // The tree is read on a background thread.
     let started = Instant::now();
-    while h.query_by_label_contains("📄 a.txt").is_none() {
+    while h.query_by_label_contains(&file("a.txt")).is_none() {
         assert!(started.elapsed() < Duration::from_secs(10), "the tree was not read");
         std::thread::sleep(Duration::from_millis(20));
         h.step();
@@ -80,6 +83,15 @@ fn settle(h: &mut Harness<'_, State>) {
 
 /// The tick box of the tree whose label contains `label` (the cards on
 /// the right repeat names, not boxes).
+/// The label of a file or folder row of the tree.
+fn file(name: &str) -> String {
+    symbol::with(symbol::FILE, name)
+}
+
+fn folder(name: &str) -> String {
+    symbol::with(symbol::FOLDER, name)
+}
+
 fn tick_box<'h>(h: &'h Harness<'_, State>, label: &'h str) -> egui_kittest::Node<'h> {
     h.get(By::new().role(egui::accesskit::Role::CheckBox).label_contains(label))
 }
@@ -120,21 +132,21 @@ fn request(h: &mut Harness<'_, State>) -> archeion_engine::RestoreRequest {
 fn ticking_a_folder_ticks_its_content_and_unticking_inside_leaves_it_out() {
     let f = backed_up();
     let mut h = harness(&f);
-    let root = format!("📁 {}", f.source.display());
+    let root = symbol::with(symbol::FOLDER, f.source.display());
     tick_box(&h, &root).click();
     settle(&mut h);
     assert_eq!(toggled(&h, &root), Some(Toggled::True));
-    assert_eq!(toggled(&h, "📄 a.txt"), Some(Toggled::True), "a file of the ticked folder");
-    assert_eq!(toggled(&h, "📁 sub"), Some(Toggled::True), "a subfolder of the ticked folder");
-    expand(&mut h, "📁 sub");
-    assert_eq!(toggled(&h, "📄 b.txt"), Some(Toggled::True), "a file of the subfolder");
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::True), "a file of the ticked folder");
+    assert_eq!(toggled(&h, &folder("sub")), Some(Toggled::True), "a subfolder of the ticked folder");
+    expand(&mut h, &folder("sub"));
+    assert_eq!(toggled(&h, &file("b.txt")), Some(Toggled::True), "a file of the subfolder");
 
-    tick_box(&h, "📄 b.txt").click();
+    tick_box(&h, &file("b.txt")).click();
     settle(&mut h);
-    assert_eq!(toggled(&h, "📄 b.txt"), Some(Toggled::False));
-    assert_ne!(toggled(&h, "📁 sub"), Some(Toggled::True), "the subfolder is partial");
+    assert_eq!(toggled(&h, &file("b.txt")), Some(Toggled::False));
+    assert_ne!(toggled(&h, &folder("sub")), Some(Toggled::True), "the subfolder is partial");
     assert_ne!(toggled(&h, &root), Some(Toggled::True), "the ticked folder is partial");
-    assert_eq!(toggled(&h, "📄 a.txt"), Some(Toggled::True), "the rest stays ticked");
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::True), "the rest stays ticked");
 
     let req = request(&mut h);
     assert_eq!(req.items.len(), 1);
@@ -147,16 +159,16 @@ fn ticking_a_folder_ticks_its_content_and_unticking_inside_leaves_it_out() {
 fn clicking_the_filled_box_ticks_the_whole_folder_again() {
     let f = backed_up();
     let mut h = harness(&f);
-    let root = format!("📁 {}", f.source.display());
+    let root = symbol::with(symbol::FOLDER, f.source.display());
     tick_box(&h, &root).click();
     settle(&mut h);
-    tick_box(&h, "📄 a.txt").click();
+    tick_box(&h, &file("a.txt")).click();
     settle(&mut h);
     assert_ne!(toggled(&h, &root), Some(Toggled::True));
     tick_box(&h, &root).click();
     settle(&mut h);
     assert_eq!(toggled(&h, &root), Some(Toggled::True));
-    assert_eq!(toggled(&h, "📄 a.txt"), Some(Toggled::True));
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::True));
     assert!(request(&mut h).items[0].exclude.is_empty());
 }
 
@@ -164,19 +176,19 @@ fn clicking_the_filled_box_ticks_the_whole_folder_again() {
 fn a_ticked_file_fills_the_folders_above_it() {
     let f = backed_up();
     let mut h = harness(&f);
-    let root = format!("📁 {}", f.source.display());
-    expand(&mut h, "📁 sub");
-    tick_box(&h, "📄 b.txt").click();
+    let root = symbol::with(symbol::FOLDER, f.source.display());
+    expand(&mut h, &folder("sub"));
+    tick_box(&h, &file("b.txt")).click();
     settle(&mut h);
-    assert_eq!(toggled(&h, "📄 b.txt"), Some(Toggled::True));
-    assert_ne!(toggled(&h, "📁 sub"), Some(Toggled::True));
+    assert_eq!(toggled(&h, &file("b.txt")), Some(Toggled::True));
+    assert_ne!(toggled(&h, &folder("sub")), Some(Toggled::True));
     assert_ne!(toggled(&h, &root), Some(Toggled::True));
-    assert_eq!(toggled(&h, "📄 a.txt"), Some(Toggled::False), "a file beside it stays unticked");
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::False), "a file beside it stays unticked");
 }
 
 /// Every character the interface draws (symbols in the code, texts of
-/// every language) has a glyph in the fonts eframe draws with: egui's own
-/// and the system fonts.
+/// every language, the icons) has a glyph in the fonts the window draws
+/// with: the theme's, egui's own and the system fonts.
 #[test]
 fn every_character_of_the_interface_can_be_drawn() {
     // Lines as written (whole sentences: fonts are chosen per run of text).
@@ -203,8 +215,9 @@ fn every_character_of_the_interface_can_be_drawn() {
             }
         }
     }
+    lines.extend(symbol::ALL.iter().map(|s| (*s).to_owned()));
     // The harness fails on the first character no font can draw.
-    let mut h = Harness::builder().with_context_setup(system_fonts).build_ui(move |ui| {
+    let mut h = Harness::builder().with_context_setup(fonts).build_ui(move |ui| {
         for l in &lines {
             ui.label(l.as_str());
         }

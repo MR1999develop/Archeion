@@ -12,6 +12,7 @@ mod platform;
 mod restore;
 mod settings;
 mod shell;
+mod symbol;
 mod theme;
 mod tray;
 mod tree;

@@ -3,7 +3,7 @@
 //! The guide is a resizable window that stays open beside the main window
 //! while the user tries what it describes; About is a small modal.
 
-use super::{shell, theme, widgets};
+use super::{shell, symbol, theme, widgets};
 use crate::{
     i18n::{Tr, arg},
     storage::Storage,
@@ -179,7 +179,7 @@ fn section_body(ui: &mut egui::Ui, tr: &Tr, section: &Section) {
     for block in section.blocks {
         match block {
             Text(key) => {
-                ui.label(tr.t(key));
+                ui.label(tr.t_args(key, &symbol::args()));
             }
             Cli(line, key) => {
                 ui.label(RichText::new(*line).monospace().strong());
@@ -197,7 +197,7 @@ fn about(ctx: &egui::Context, tr: &Tr, storage: &Storage) -> bool {
         ui.horizontal(|ui| {
             ui.heading("Archeion");
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                if ui.small_button("✕").on_hover_text(tr.t("close")).clicked() {
+                if widgets::icon_button(ui, symbol::REMOVE, tr.t("close")).clicked() {
                     close = true;
                 }
             });

@@ -19,16 +19,18 @@ trigger it. Remove an item when it is done or no longer applies.
   `feature/automatic-backup`, `tools\github_publish.bat` (pushes `main`
   and the feature branch), `tools\git_push.bat -PullRequest`; read the
   four `.log` files.
-- **Interface polish still open** (added 2 November; screenshots with
-  `cargo test -p archeion --bin archeion screens -- --ignored`, in
-  `target/ui-screens`): the icons are emoji (📁 📄 🗑 ⟳ ✕), drawn by the
-  system emoji font, not one icon set; ticked boxes are drawn with the
-  text colour, not filled with the accent as in Windows 11; the Activity
-  log rows (time, dot, text) are not aligned in columns and its links
-  wrap under the buttons; the remove buttons of folders and cards are
-  bordered "✕" buttons rather than quiet icon buttons. The screenshots are
-  not compared automatically (no stored references): add
+- **Screenshots not compared automatically** (2 November): the views are
+  rendered with `cargo test -p archeion --bin archeion screens -- --ignored`
+  into `target/ui-screens` and looked at, with no stored references: add
   `harness.snapshot()` with references if the look starts to drift.
+- **Icons on Windows 11** use Segoe MDL2 Assets, which Windows 11 still
+  ships, not the newer Segoe Fluent Icons: its glyphs differ at some code
+  points and could not be checked here (Windows 10). Switch once checked
+  on Windows 11 by drawing every `ui::symbol` constant.
+- **Checkboxes drawn by egui then painted over** (`widgets::checkbox`,
+  `partial_checkbox`): the accent fill covers egui's box. If egui's
+  checkbox layout changes, the fill can be misplaced: the screenshots
+  show it.
 - **Accessibility of the filled box**: egui exposes a partial tick box as
   neither ticked nor unticked (no "mixed" state in `WidgetInfo`), so a
   screen reader does not say "partly ticked". Add it to the hover text or

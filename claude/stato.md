@@ -4,14 +4,14 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con il nuovo aspetto dell'interfaccia (ramo `feature/ui-look`
-unito; `tools\check.bat` verde: fmt, clippy, 311 test, 1 ignorato: le
+`main` con i ritocchi dell'interfaccia (ramo `feature/ui-polish` unito;
+`tools\check.bat` verde: fmt, clippy, 311 test, 1 ignorato: le
 schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
 ## Lavoro in corso
 
-- Nessuno. Ritocchi dell'interfaccia rimasti in `TIDY.md`.
+- Nessuno.
 
 ## Punti aperti
 
@@ -57,3 +57,10 @@ schermate). La build di rilascio è stata controllata al commit GPLv3
   (Segoe UI letto da Windows, mai distribuito). Le schermate di tutte le
   viste si generano con il test ignorato `screens` (egui_kittest con wgpu)
   e passano il controllo di accessibilità di kittest.
+- Icone dal font di sistema Segoe MDL2 Assets (letto da `%WINDIR%\Fonts`,
+  mai incluso), costanti in `ui/symbol.rs` con i codici verificati
+  disegnandoli; i testi tradotti che nominano un'icona la ricevono come
+  variabile (`{ $deleted-icon }`, `{ $edited-icon }`, `{ $remove-icon }`).
+  Caselle spuntate riempite con l'accento, liste con l'elemento selezionato
+  intero e il segno d'accento, pulsanti-icona senza bordo
+  (`widgets::checkbox`, `partial_checkbox`, `list_item`, `icon_button`).

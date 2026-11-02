@@ -80,7 +80,9 @@ fn screens() {
             shot(&mut h, &out, &name("1-profile"));
             h.state_mut().tab = Tab::Backups;
             shot(&mut h, &out, &name("2-restore"));
-            if let Some(n) = h.query_all_by_label_contains("📁 Lavoro").next() {
+            if let Some(n) =
+                h.query_all_by_label_contains(&super::symbol::with(super::symbol::FOLDER, "Lavoro")).next()
+            {
                 n.click();
             }
             shot(&mut h, &out, &name("3-restore-ticked"));

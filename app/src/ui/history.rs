@@ -10,7 +10,7 @@
 
 use super::{
     activity::{self as activity_tab, SKIPPED_KEY, action_key, phase_text, problem_text, summary_text},
-    shell, theme, widgets,
+    shell, symbol, theme, widgets,
 };
 use crate::{
     activity::{Activity, Op, Outcome, format_duration},
@@ -313,21 +313,21 @@ impl HistoryView {
         ui.add_space(theme::SPACE_S);
         ui.horizontal(|ui| {
             widgets::section_title(ui, tr.t("log-runs"));
-            if ui.small_button("⟳").on_hover_text(tr.t("refresh")).clicked() {
+            if widgets::icon_button(ui, symbol::REFRESH, tr.t("refresh")).clicked() {
                 self.invalidate();
             }
         });
-        ui.checkbox(&mut self.only_profile, tr.t("log-only-profile"));
+        widgets::checkbox(ui, &mut self.only_profile, tr.t("log-only-profile"));
         ui.add_space(theme::SPACE_S);
 
         egui::ScrollArea::vertical().id_salt("history-runs").auto_shrink(false).show(ui, |ui| {
             if let Some(a) = running {
-                let text = format!("⟳  {}", tr.t("log-running"));
+                let text = symbol::with(symbol::RUNNING, tr.t("log-running"));
                 let on = self.selected == Selection::Current;
-                if ui.selectable_label(on, RichText::new(text).strong()).clicked() {
+                let detail = format!("{} · {}", op_title(tr, a.op, None, None), name(a.profile));
+                if widgets::list_item(ui, on, RichText::new(text).strong(), Some(&detail)).clicked() {
                     self.selected = Selection::Current;
                 }
-                ui.weak(format!("    {} · {}", op_title(tr, a.op, None, None), name(a.profile)));
                 ui.separator();
             }
             if self.loading.is_some() && self.runs.is_empty() {
@@ -345,19 +345,17 @@ impl HistoryView {
                 let (level, _) = end_text(tr, run);
                 let when = history::local_time(run.header.started_ms);
                 let title = op_title(tr, run.header.op, run.header.detail.as_deref(), run_summary(run));
-                let text =
-                    RichText::new(format!("{} {}  {title}", icon(level), when.get(..16).unwrap_or(&when)))
-                        .color(level_color(ui, level));
+                let text = RichText::new(symbol::with(icon(level), title)).color(level_color(ui, level));
                 let on = self.selected == Selection::Past(run.path.clone());
                 let profile_name = if run.header.profile_name.is_empty() {
                     name(run.header.profile)
                 } else {
                     run.header.profile_name.clone()
                 };
-                if ui.selectable_label(on, text).on_hover_text(&profile_name).clicked() {
+                let detail = format!("{} · {profile_name}", when.get(..16).unwrap_or(&when));
+                if widgets::list_item(ui, on, text, Some(&detail)).clicked() {
                     self.selected = Selection::Past(run.path.clone());
                 }
-                ui.weak(format!("    {profile_name}"));
             }
             if shown == 0 && self.loading.is_none() {
                 ui.weak(tr.t("log-empty"));
@@ -389,7 +387,7 @@ fn run_ui(
     ui.weak(facts(tr, run).join(" · "));
     ui.add_space(theme::SPACE_S);
     let (level, text) = end_text(tr, run);
-    ui.label(RichText::new(format!("{} {text}", icon(level))).strong().color(level_color(ui, level)));
+    ui.label(RichText::new(symbol::with(icon(level), text)).strong().color(level_color(ui, level)));
     let skipped = run.skipped();
     if skipped > 0 {
         ui.colored_label(ui.visuals().warn_fg_color, tr.t_args("skipped-count", &[("count", arg(skipped))]));
@@ -444,9 +442,23 @@ fn log_header_ui(
     preparing: Option<&Preparing>,
 ) -> Option<LogAction> {
     let mut action = None;
-    ui.horizontal_wrapped(|ui| {
+    // Title with the links to the program's own logs on the right, then
+    // the buttons for this run's log: they never wrap into each other.
+    ui.horizontal(|ui| {
         widgets::section_title(ui, tr.t("log-title"));
-        ui.add_space(theme::SPACE_S);
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let links = [
+                (LogAction::OpenLogsFolder, "log-open-folder", "log-open-folder-hint"),
+                (LogAction::OpenProgramLog, "log-open-program", "log-open-program-hint"),
+            ];
+            for (a, label, hint) in links {
+                if ui.link(tr.t(label)).on_hover_text(tr.t(hint)).clicked() {
+                    action = Some(a);
+                }
+            }
+        });
+    });
+    ui.horizontal_wrapped(|ui| {
         let buttons = [
             (LogAction::OpenReport, "log-open-full", "log-open-full-hint"),
             (LogAction::CopyReport, "log-copy", "log-copy-hint"),
@@ -457,16 +469,6 @@ fn log_header_ui(
                 .on_hover_text(tr.t(hint))
                 .on_disabled_hover_text(tr.t("log-preparing"));
             if button.clicked() {
-                action = Some(a);
-            }
-        }
-        ui.add_space(theme::SPACE_M);
-        let links = [
-            (LogAction::OpenProgramLog, "log-open-program", "log-open-program-hint"),
-            (LogAction::OpenLogsFolder, "log-open-folder", "log-open-folder-hint"),
-        ];
-        for (a, label, hint) in links {
-            if ui.link(tr.t(label)).on_hover_text(tr.t(hint)).clicked() {
                 action = Some(a);
             }
         }
@@ -734,7 +736,8 @@ fn lines_ui(ui: &mut Ui, tr: &Tr, op: Op, lines: &[Line]) {
         ui.weak(tr.t("log-no-lines"));
         return;
     }
-    egui::Grid::new("log-lines").num_columns(3).striped(true).spacing([theme::SPACE_S, 2.0]).show(ui, |ui| {
+    let grid = egui::Grid::new("log-lines").num_columns(3).min_col_width(0.0).spacing([theme::SPACE_S, 2.0]);
+    grid.show(ui, |ui| {
         for line in lines {
             let (level, text) = line_text(tr, op, line);
             let time = history::local_time(line.at_ms);
@@ -825,9 +828,9 @@ fn op_title(tr: &Tr, op: Op, detail: Option<&str>, summary: Option<&Summary>) ->
 fn icon(level: Level) -> &'static str {
     match level {
         Level::Info => "•",
-        Level::Done => "✔",
-        Level::Warning => "⚠",
-        Level::Error => "✖",
+        Level::Done => symbol::DONE,
+        Level::Warning => symbol::WARNING,
+        Level::Error => symbol::ERROR,
     }
 }
 
