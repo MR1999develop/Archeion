@@ -1,7 +1,7 @@
 //! Activity tab: what the running backup, merge or restore is doing. Once
 //! it ends, the tab shows its log like any past run.
 
-use super::{theme, widgets};
+use super::{symbol, theme, widgets};
 use crate::{
     activity::{Activity, Count, Handled, Op, Outcome, PhaseState, RecentFile, Step, format_duration},
     history,
@@ -69,9 +69,9 @@ fn steps_ui(ui: &mut Ui, tr: &Tr, a: &Activity, now: Instant) {
         let name = phase_text(tr, step.phase);
         ui.horizontal(|ui| {
             match step.state {
-                PhaseState::Done => ui.label(format!("✔ {name}")),
-                PhaseState::Current => ui.label(RichText::new(format!("● {name}")).strong()),
-                PhaseState::Pending => ui.weak(format!("○ {name}")),
+                PhaseState::Done => ui.label(symbol::with(symbol::DONE, name)),
+                PhaseState::Current => ui.label(RichText::new(symbol::with(symbol::CURRENT, name)).strong()),
+                PhaseState::Pending => ui.weak(symbol::with(symbol::PENDING, name)),
             };
             if let Some(timing) = step_timing(&step) {
                 ui.weak(timing);
@@ -262,7 +262,7 @@ pub fn problems_ui(ui: &mut Ui, tr: &Tr, problems: &[String]) {
         return;
     }
     ui.add_space(theme::SPACE_S);
-    ui.colored_label(ui.visuals().error_fg_color, format!("✖ {}", tr.t("verify-problems")));
+    ui.colored_label(ui.visuals().error_fg_color, symbol::with(symbol::ERROR, tr.t("verify-problems")));
     egui::ScrollArea::vertical().id_salt("verify-problems").max_height(220.0).show(ui, |ui| {
         for p in problems {
             ui.add(egui::Label::new(RichText::new(p).color(ui.visuals().error_fg_color)).wrap());
@@ -273,24 +273,26 @@ pub fn problems_ui(ui: &mut Ui, tr: &Tr, problems: &[String]) {
 
 fn skipped_ui(ui: &mut Ui, tr: &Tr, a: &Activity) {
     let title = tr.t_args("skipped-count", &[("count", arg(a.skipped_count))]);
-    egui::CollapsingHeader::new(RichText::new(format!("⚠ {title}")).color(ui.visuals().warn_fg_color))
-        .id_salt("activity-skipped")
-        .default_open(false)
-        .show(ui, |ui| {
-            ui.weak(tr.t("skipped-hint"));
-            egui::ScrollArea::vertical().id_salt("skipped-list").max_height(220.0).show(ui, |ui| {
-                egui::Grid::new("skipped-grid").num_columns(2).striped(true).show(ui, |ui| {
-                    for s in &a.skipped {
-                        ui.label(shorten(&s.path)).on_hover_text(&s.path);
-                        ui.weak(&s.reason);
-                        ui.end_row();
-                    }
-                });
-                if a.skipped_count > a.skipped.len() {
-                    ui.weak(tr.t_args("skipped-more", &[("count", arg(a.skipped_count - a.skipped.len()))]));
+    egui::CollapsingHeader::new(
+        RichText::new(symbol::with(symbol::WARNING, title)).color(ui.visuals().warn_fg_color),
+    )
+    .id_salt("activity-skipped")
+    .default_open(false)
+    .show(ui, |ui| {
+        ui.weak(tr.t("skipped-hint"));
+        egui::ScrollArea::vertical().id_salt("skipped-list").max_height(220.0).show(ui, |ui| {
+            egui::Grid::new("skipped-grid").num_columns(2).striped(true).show(ui, |ui| {
+                for s in &a.skipped {
+                    ui.label(shorten(&s.path)).on_hover_text(&s.path);
+                    ui.weak(&s.reason);
+                    ui.end_row();
                 }
             });
+            if a.skipped_count > a.skipped.len() {
+                ui.weak(tr.t_args("skipped-more", &[("count", arg(a.skipped_count - a.skipped.len()))]));
+            }
         });
+    });
 }
 
 /// What a finished run did, and whether it needs attention.

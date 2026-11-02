@@ -170,7 +170,11 @@ pub fn apply(ctx: &Context) {
         defs.font_data.insert("ui".into(), std::sync::Arc::new(egui::FontData::from_owned(fonts.regular)));
         defs.font_data
             .insert("ui-semibold".into(), std::sync::Arc::new(egui::FontData::from_owned(fonts.semibold)));
-        let fallbacks = defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+        let mut fallbacks = defs.families.get(&FontFamily::Proportional).cloned().unwrap_or_default();
+        if let Some(icons) = fonts.icons {
+            defs.font_data.insert("icons".into(), std::sync::Arc::new(egui::FontData::from_owned(icons)));
+            fallbacks.insert(0, "icons".into());
+        }
         let with = |first: &str| std::iter::once(first.to_owned()).chain(fallbacks.iter().cloned()).collect();
         defs.families.insert(FontFamily::Proportional, with("ui"));
         defs.families.insert(semibold(), with("ui-semibold"));

@@ -7,7 +7,7 @@ use super::{
     history::HistoryView,
     restore::{Action, RestoreView},
     settings::{self, Preferences},
-    theme,
+    symbol, theme,
     tray::{Tray, TrayCommand},
     widgets,
 };
@@ -575,16 +575,15 @@ impl ArcheionApp {
         ui.add_space(theme::SPACE_M);
         widgets::section_title(ui, self.tr.t("profiles"));
         let mut clicked = None;
-        ui.with_layout(egui::Layout::top_down_justified(egui::Align::LEFT), |ui| {
-            for p in &self.settings.profiles {
-                let name = if p.name.trim().is_empty() { self.tr.t("unnamed") } else { p.name.clone() };
-                let running = self.job.as_ref().is_some_and(|j| j.profile() == p.id);
-                let text = if running { format!("⟳ {name}") } else { name };
-                if ui.selectable_label(self.selected == Some(p.id), text).clicked() {
-                    clicked = Some(p.id);
-                }
+        for p in &self.settings.profiles {
+            let name = if p.name.trim().is_empty() { self.tr.t("unnamed") } else { p.name.clone() };
+            let running = self.job.as_ref().is_some_and(|j| j.profile() == p.id);
+            let text = if running { symbol::with(symbol::RUNNING, name) } else { name };
+            if widgets::list_item(ui, self.selected == Some(p.id), egui::RichText::new(text), None).clicked()
+            {
+                clicked = Some(p.id);
             }
-        });
+        }
         if let Some(id) = clicked {
             let ctx = ui.ctx().clone();
             self.select(&ctx, id);
@@ -605,7 +604,7 @@ impl ArcheionApp {
         ui.heading(if name.is_empty() { self.tr.t("unnamed") } else { name });
         ui.add_space(theme::SPACE_XS);
         let activity = if self.job.is_some() {
-            format!("⟳ {}", self.tr.t("tab-activity"))
+            symbol::with(symbol::RUNNING, self.tr.t("tab-activity"))
         } else {
             self.tr.t("tab-activity")
         };
@@ -803,7 +802,7 @@ impl ArcheionApp {
                 if ui.button(self.tr.t("undo")).clicked() {
                     self.undo_delete();
                 }
-                if ui.small_button("✕").clicked()
+                if widgets::icon_button(ui, symbol::REMOVE, self.tr.t("close")).clicked()
                     && let Some(p) = self.removed.take()
                 {
                     // No Undo any more: the saved password goes too.
@@ -1135,7 +1134,7 @@ impl eframe::App for ArcheionApp {
                 ui.horizontal_wrapped(|ui| {
                     ui.colored_label(
                         ui.visuals().warn_fg_color,
-                        format!("⏳ {}", self.tr.t("closing-after-run")),
+                        symbol::with(symbol::WAIT, self.tr.t("closing-after-run")),
                     );
                     if ui.button(self.tr.t("closing-cancel")).clicked() {
                         self.close_after_run = false;
@@ -1146,14 +1145,14 @@ impl eframe::App for ArcheionApp {
         }
         if let Some(text) = &self.banner {
             egui::Panel::top("banner").show(ui, |ui| {
-                ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {text}"));
+                ui.colored_label(ui.visuals().error_fg_color, symbol::with(symbol::WARNING, text));
             });
         }
         if let Some(text) = self.error.clone() {
             egui::Panel::top("error").show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {text}"));
-                    if ui.small_button("✕").clicked() {
+                    ui.colored_label(ui.visuals().error_fg_color, symbol::with(symbol::WARNING, text));
+                    if widgets::icon_button(ui, symbol::REMOVE, self.tr.t("close")).clicked() {
                         self.error = None;
                     }
                 });

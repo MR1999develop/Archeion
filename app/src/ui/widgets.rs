@@ -90,3 +90,97 @@ pub fn dialog(ctx: &egui::Context, title: impl Into<egui::WidgetText>) -> egui::
 pub fn modal(ctx: &egui::Context, id: egui::Id) -> egui::Modal {
     egui::Modal::new(id).frame(egui::Frame::window(&ctx.global_style()))
 }
+
+/// A checkbox whose ticked box is filled with the accent, as in Windows 11
+/// (egui only draws the tick).
+pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: impl Into<egui::WidgetText>) -> Response {
+    let resp = ui.checkbox(checked, text);
+    if *checked {
+        let t = Tokens::current(ui);
+        let rect = tick_box_rect(ui, &resp);
+        let fill = if ui.is_enabled() { t.accent } else { t.stroke };
+        ui.painter().rect_filled(rect, tick_box_radius(ui), fill);
+        let inner = rect.shrink(rect.width() * 0.25);
+        let points = vec![
+            egui::pos2(inner.left(), inner.center().y),
+            egui::pos2(inner.left() + inner.width() * 0.4, inner.bottom()),
+            egui::pos2(inner.right(), inner.top()),
+        ];
+        ui.painter().add(egui::Shape::line(points, Stroke::new(1.5, t.on_accent)));
+    }
+    resp
+}
+
+/// A checkbox for "some of it": a filled accent square in an empty box,
+/// distinct from the ticked box. Clicking it reports a change.
+pub fn partial_checkbox(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
+    let resp = ui.add(egui::Checkbox::new(&mut false, text).indeterminate(true));
+    let rect = tick_box_rect(ui, &resp);
+    // Covers egui's dash.
+    let inner = rect.shrink(1.0);
+    ui.painter().rect_filled(inner, tick_box_radius(ui), ui.style().interact(&resp).bg_fill);
+    let fill = if ui.is_enabled() { Tokens::current(ui).accent } else { Tokens::current(ui).stroke };
+    ui.painter().rect_filled(rect.shrink(rect.width() * 0.25), 1.0, fill);
+    resp
+}
+
+/// The box of a checkbox drawn by egui.
+fn tick_box_rect(ui: &Ui, resp: &Response) -> egui::Rect {
+    let size = ui.spacing().icon_width;
+    let center = egui::pos2(resp.rect.left() + size * 0.5, resp.rect.center().y);
+    egui::Rect::from_center_size(center, egui::Vec2::splat(size))
+}
+
+/// The corners of a checkbox box, as egui caps them.
+fn tick_box_radius(ui: &Ui) -> egui::CornerRadius {
+    let cap = (0.3 * ui.spacing().icon_width).round();
+    egui::CornerRadius::from(f32::from(theme::RADIUS).min(cap))
+}
+
+/// A quiet button with one icon (remove, refresh): no border or fill until
+/// hovered. `hint` names the action for the tooltip and screen readers.
+pub fn icon_button(ui: &mut Ui, icon: &str, hint: impl Into<String>) -> Response {
+    let hint = hint.into();
+    let button = Button::new(RichText::new(icon).size(theme::FONT_SMALL)).frame_when_inactive(false).small();
+    ui.add(button).on_hover_text(&hint).accessible_name(hint)
+}
+
+/// An item of a list as wide as the list, with its title and an optional
+/// weak second line, selected and hovered as one (egui's selectable label
+/// covers only its own text), with the accent mark of Windows 11 lists.
+pub fn list_item(ui: &mut Ui, selected: bool, title: RichText, detail: Option<&str>) -> Response {
+    let t = Tokens::current(ui);
+    let pad = egui::vec2(theme::SPACE_S, theme::SPACE_XS);
+    let width = ui.available_width() - 2.0 * pad.x;
+    let wrap = Some(egui::TextWrapMode::Truncate);
+    let title_galley =
+        egui::WidgetText::from(title.clone()).into_galley(ui, wrap, width, egui::TextStyle::Body);
+    let detail_galley = detail.map(|d| {
+        let text = RichText::new(d).size(theme::FONT_SMALL);
+        egui::WidgetText::from(text).into_galley(ui, wrap, width, egui::TextStyle::Small)
+    });
+    let text_height = title_galley.size().y + detail_galley.as_ref().map_or(0.0, |g| g.size().y);
+    let height = (text_height + 2.0 * pad.y).max(ui.spacing().interact_size.y);
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::click());
+    resp.widget_info(|| WidgetInfo::selected(Role::ListItem, true, selected, title.text()));
+    if ui.is_rect_visible(rect) {
+        let fill = if selected { Some(t.selected) } else { resp.hovered().then_some(t.control_hover) };
+        if let Some(fill) = fill {
+            ui.painter().rect_filled(rect, theme::RADIUS, fill);
+        }
+        if selected {
+            let mark = egui::Rect::from_center_size(
+                egui::pos2(rect.left() + 1.5, rect.center().y),
+                egui::vec2(3.0, (height * 0.5).min(16.0)),
+            );
+            ui.painter().rect_filled(mark, 1.5, t.accent);
+        }
+        let top = egui::pos2(rect.left() + pad.x, rect.center().y - text_height / 2.0);
+        let below = top + egui::vec2(0.0, title_galley.size().y);
+        ui.painter().galley(top, title_galley, t.text);
+        if let Some(g) = detail_galley {
+            ui.painter().galley(below, g, t.text_weak);
+        }
+    }
+    resp
+}

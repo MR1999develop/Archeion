@@ -5,7 +5,7 @@
 use super::{
     load::{Load, Problem},
     restore::Action,
-    theme, widgets,
+    symbol, theme, widgets,
 };
 use crate::{
     credentials,
@@ -59,7 +59,7 @@ impl BackupsView {
         ui.add_space(theme::SPACE_S);
         ui.horizontal(|ui| {
             widgets::section_title(ui, tr.t("dates"));
-            if ui.small_button("⟳").on_hover_text(tr.t("refresh")).clicked() {
+            if widgets::icon_button(ui, symbol::REFRESH, tr.t("refresh")).clicked() {
                 *refresh = true;
             }
         });
@@ -109,7 +109,8 @@ impl BackupsView {
                     ui.horizontal(|ui| {
                         if self.merge_mode {
                             let mut on = range.as_ref().is_some_and(|r| r.contains(&i));
-                            if ui.checkbox(&mut on, "").on_hover_text(tr.t("merge-tick")).changed() {
+                            if widgets::checkbox(ui, &mut on, "").on_hover_text(tr.t("merge-tick")).changed()
+                            {
                                 toggled = Some(a.name.clone());
                             }
                         }
@@ -189,8 +190,8 @@ impl BackupsView {
                     Deletion::Remove(_) => tr.t_args("delete-newest-warning", &[("date", date)]),
                     Deletion::MergeWithNext(_) => tr.t_args("delete-middle-warning", &[("date", date)]),
                 };
-                ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {text}"));
-                ui.checkbox(&mut self.delete_ack, tr.t("merge-complete-ack"));
+                ui.colored_label(ui.visuals().warn_fg_color, symbol::with(symbol::WARNING, text));
+                widgets::checkbox(ui, &mut self.delete_ack, tr.t("merge-complete-ack"));
                 ui.horizontal(|ui| {
                     let ready = self.delete_ack && !busy;
                     let why = if busy { tr.t("busy-hint") } else { tr.t("merge-ack-hint") };
@@ -258,8 +259,11 @@ impl BackupsView {
             );
         }
         if chosen >= 2 && replaces_complete {
-            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("merge-complete-warning")));
-            ui.checkbox(&mut self.merge_ack, tr.t("merge-complete-ack"));
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                symbol::with(symbol::WARNING, tr.t("merge-complete-warning")),
+            );
+            widgets::checkbox(ui, &mut self.merge_ack, tr.t("merge-complete-ack"));
         }
         ui.horizontal(|ui| {
             let ready = chosen >= 2 && !busy && (!replaces_complete || self.merge_ack);

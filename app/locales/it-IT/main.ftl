@@ -173,7 +173,7 @@ restore-tree-count = { $files ->
         [one] 1 file
        *[other] { $files } file
     } nei backup · eliminati dall'origine: { $deleted }
-restore-tree-hint = Spunta file o cartelle per ripristinarli; la ricerca trova un file per nome. I file segnati 🗑 eliminato non sono più nell'origine e si possono comunque ripristinare.
+restore-tree-hint = Spunta file o cartelle per ripristinarli; la ricerca trova un file per nome. I file segnati { $deleted-icon } eliminato non sono più nell'origine e si possono comunque ripristinare.
 deleted-label = eliminato
 deleted-since = Non è nel backup più recente: eliminato dall'origine.
 tree-deleted-file = Non è nel backup più recente: eliminato dall'origine. Spuntalo per ripristinarne una versione.
@@ -203,7 +203,7 @@ dest-follow-default = Usa la destinazione predefinita
 dest-overwrite = Sovrascrivi l'originale
 dest-folder = Un'altra cartella…
 dest-folder-missing = un'altra cartella, non ancora scelta
-dest-change-hint = Dove va. ✎ segna una destinazione diversa da quella predefinita.
+dest-change-hint = Dove va. { $edited-icon } segna una destinazione diversa da quella predefinita.
 restore-to-hint = Per tutto ciò che è spuntato, salvo modifiche su una versione o cartella qui sotto.
 restore-conflict = Un'altra versione sovrascrive lo stesso originale: lascia "Sovrascrivi l'originale" a una sola versione.
 restore-conflict-hint = Due versioni sovrascriverebbero lo stesso file originale: cambia la destinazione di una delle due.
@@ -533,9 +533,9 @@ doc-large-body = Un file grande che cambia di poco (una casella di posta, il dis
 doc-large-complete = I backup completi conservano comunque ogni file intero, come zip, copia semplice o zip cifrato, così si possono ripristinare con il solo 7-Zip; solo i backup incrementali che li seguono contengono pezzi. Il ripristino rimette insieme i pezzi e controlla ognuno; il controllo di integrità legge ogni pezzo.
 doc-large-upgrade = I backup fatti dalle versioni precedenti restano come sono e si leggono ancora. I pezzi iniziano con il backup completo successivo: in una destinazione così il prossimo backup automatico è completo.
 doc-restore-title = Ripristino dei file
-doc-restore-body = Apri la scheda Backup del profilo (o Backup > Ripristina file…): "Ripristina file" mostra un unico albero di tutti i file e le cartelle mai salvati dai backup; i file che non sono più nell'origine sono segnati 🗑 eliminato e si possono comunque ripristinare. Spunta file o cartelle nell'albero o nei risultati della ricerca (la casella di ricerca trova un file per nome). Ogni elemento spuntato compare a destra; ✕ lo toglie.
+doc-restore-body = Apri la scheda Backup del profilo (o Backup > Ripristina file…): "Ripristina file" mostra un unico albero di tutti i file e le cartelle mai salvati dai backup; i file che non sono più nell'origine sono segnati { $deleted-icon } eliminato e si possono comunque ripristinare. Spunta file o cartelle nell'albero o nei risultati della ricerca (la casella di ricerca trova un file per nome). Ogni elemento spuntato compare a destra; { $remove-icon } lo toglie.
 doc-restore-versions = Un file spuntato elenca le sue versioni, dalla più recente, ognuna con un contenuto diverso: la più recente è spuntata e puoi spuntarne altre. Una cartella spuntata torna per intero, com'era nella data scelta in "Com'era il" (la più recente, se non la cambi).
-doc-restore-where = In cima al pannello di destra scegli dove va tutto: accanto all'originale con la data nel nome (relazione.docx torna come "relazione (2026-11-02 21.30).docx" e il file attuale non viene toccato), nella posizione originale o in un'altra cartella; i file già presenti vengono sostituiti solo se spunti "Sostituisci i file già presenti". Una versione o una cartella può andare altrove con il suo menu, segnato ✎. Più versioni di un file mandate nella stessa cartella prendono ciascuna la propria data nel nome; solo una versione di un file può sovrascrivere l'originale. Ripristina poi riporta tutto in un'unica operazione.
+doc-restore-where = In cima al pannello di destra scegli dove va tutto: accanto all'originale con la data nel nome (relazione.docx torna come "relazione (2026-11-02 21.30).docx" e il file attuale non viene toccato), nella posizione originale o in un'altra cartella; i file già presenti vengono sostituiti solo se spunti "Sostituisci i file già presenti". Una versione o una cartella può andare altrove con il suo menu, segnato { $edited-icon }. Più versioni di un file mandate nella stessa cartella prendono ciascuna la propria data nel nome; solo una versione di un file può sovrascrivere l'originale. Ripristina poi riporta tutto in un'unica operazione.
 doc-verify-title = Controllo di integrità e prova di ripristino
 doc-verify-body = Il controllo completo rilegge ogni file salvato di ogni backup e lo confronta con la sua impronta; la prova di ripristino rilegge a caso alcuni file del backup più recente, come farebbe un ripristino, senza scriverli da nessuna parte. Avviali dalla sezione Controlli delle impostazioni del profilo (o da Backup > Controlla i backup ora), oppure falli eseguire ogni tot giorni dopo un backup pianificato. Se emergono problemi, fai un backup completo e controlla il disco di destinazione.
 doc-activity-title = Scheda Attività

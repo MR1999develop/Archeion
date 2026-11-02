@@ -173,7 +173,7 @@ restore-tree-count = { $files ->
         [one] 1 file
        *[other] { $files } files
     } in the backups · deleted at the source: { $deleted }
-restore-tree-hint = Tick files or folders to restore them; the search finds a file by name. Files marked 🗑 deleted are no longer at the source and can still be restored.
+restore-tree-hint = Tick files or folders to restore them; the search finds a file by name. Files marked { $deleted-icon } deleted are no longer at the source and can still be restored.
 deleted-label = deleted
 deleted-since = Not in the newest backup: deleted at the source.
 tree-deleted-file = Not in the newest backup: deleted at the source. Tick it to restore one of its versions.
@@ -203,7 +203,7 @@ dest-follow-default = Use the default destination
 dest-overwrite = Overwrite the original
 dest-folder = Another folder…
 dest-folder-missing = another folder, not chosen yet
-dest-change-hint = Where this goes. ✎ marks a destination changed from the default.
+dest-change-hint = Where this goes. { $edited-icon } marks a destination changed from the default.
 restore-to-hint = For everything ticked, unless changed on a version or folder below.
 restore-conflict = Another version overwrites the same original: keep "Overwrite the original" for one version only.
 restore-conflict-hint = Two versions would overwrite the same original file: change the destination of one of them.
@@ -533,9 +533,9 @@ doc-large-body = A large file that changes a little (a mailbox, a virtual machin
 doc-large-complete = Complete backups still keep every file whole, as a zip, a plain copy or an encrypted zip, so they can be restored with 7-Zip alone; only the incremental backups after them hold pieces. Restoring puts the pieces back together and checks each one; the integrity check reads every piece.
 doc-large-upgrade = Backups made by earlier versions stay as they are and remain readable. Pieces start with the next complete backup: on such a destination the next automatic backup is complete.
 doc-restore-title = Restoring files
-doc-restore-body = Open the Backups tab of the profile (or Backup > Restore files…): "Restore files" shows one tree of every file and folder the backups ever saved; files no longer at the source are marked 🗑 deleted and can still be restored. Tick files or folders in the tree or in the search results (the search box finds a file by name). Each ticked item appears on the right; ✕ removes it.
+doc-restore-body = Open the Backups tab of the profile (or Backup > Restore files…): "Restore files" shows one tree of every file and folder the backups ever saved; files no longer at the source are marked { $deleted-icon } deleted and can still be restored. Tick files or folders in the tree or in the search results (the search box finds a file by name). Each ticked item appears on the right; { $remove-icon } removes it.
 doc-restore-versions = A ticked file lists its versions, newest first, each a different content: the newest is ticked, and you can tick more. A ticked folder comes back whole, as it was on the date chosen in "As it was on" (the newest unless changed).
-doc-restore-where = At the top of the right panel choose where everything goes: next to the original with the date in the name (report.docx comes back as "report (2026-11-02 21.30).docx" and the current file is not touched), the original location, or another folder; existing files are replaced only if you tick "Replace files that already exist". A version or folder can go elsewhere with its own menu, marked ✎. Several versions of a file sent to the same folder each get their date in the name; only one version of a file can overwrite the original. Restore then brings everything back in one run.
+doc-restore-where = At the top of the right panel choose where everything goes: next to the original with the date in the name (report.docx comes back as "report (2026-11-02 21.30).docx" and the current file is not touched), the original location, or another folder; existing files are replaced only if you tick "Replace files that already exist". A version or folder can go elsewhere with its own menu, marked { $edited-icon }. Several versions of a file sent to the same folder each get their date in the name; only one version of a file can overwrite the original. Restore then brings everything back in one run.
 doc-verify-title = Integrity check and restore test
 doc-verify-body = The full check reads back every stored file of every backup and compares it with its fingerprint; the restore test reads back some files of the newest backup at random, as a restore would, without writing them anywhere. Start them from the Checks section of the profile settings (or Backup > Check backups now), or have them run every few days after a scheduled backup. If problems are found, make a complete backup and check the destination drive.
 doc-activity-title = Activity tab

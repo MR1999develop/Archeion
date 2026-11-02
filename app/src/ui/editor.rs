@@ -1,7 +1,7 @@
 //! Form for one profile. It edits the profile in place and reports what the
 //! window has to do next (save, update the scheduled tasks, start a job).
 
-use super::{theme, widgets};
+use super::{symbol, theme, widgets};
 use crate::i18n::{Tr, arg};
 use archeion_core::{
     Alerts, Container, Destination, Exclusion, FullBackupRule, LargeFiles, Profile, ProfileError, ProfileId,
@@ -293,7 +293,7 @@ fn run_now(
 ) {
     let errors = p.validate().err().unwrap_or_default();
     for e in &errors {
-        ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", error_text(tr, *e)));
+        ui.colored_label(ui.visuals().warn_fg_color, symbol::with(symbol::WARNING, error_text(tr, *e)));
     }
     let encrypted = p.encrypted || matches!(format, FormatLock::Locked { encrypted: true, .. });
     let no_password = encrypted && password.saved == Some(false);
@@ -315,7 +315,10 @@ fn run_now(
         tr.t("fix-profile-hint")
     };
     if password_blocks && errors.is_empty() {
-        ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("password-first-hint")));
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            symbol::with(symbol::WARNING, tr.t("password-first-hint")),
+        );
     }
 
     let started = format != FormatLock::Free;
@@ -387,7 +390,7 @@ fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool,
             ui.label(tr.t_args("delete-profile-backups", &[("path", arg(path))]));
         }
         if busy {
-            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("busy-hint")));
+            ui.colored_label(ui.visuals().warn_fg_color, symbol::with(symbol::WARNING, tr.t("busy-hint")));
         }
         ui.add_space(theme::SPACE_S);
         // Inside a row, so the right-aligned layout takes one line, not
@@ -435,7 +438,8 @@ fn encryption(
     let why =
         if p.container == Container::Folder { tr.t("encrypt-needs-zip") } else { tr.t("container-locked") };
     if ui
-        .add_enabled(free, egui::Checkbox::new(&mut on, tr.t("encrypt")))
+        .add_enabled_ui(free, |ui| widgets::checkbox(ui, &mut on, tr.t("encrypt")))
+        .inner
         .on_hover_text(tr.t("encrypt-hint"))
         .on_disabled_hover_text(why)
         .changed()
@@ -450,10 +454,13 @@ fn encryption(
 
     match password.saved {
         Some(true) => {
-            ui.label(format!("🔑 {}", tr.t("password-saved")));
+            ui.label(symbol::with(symbol::KEY, tr.t("password-saved")));
         }
         Some(false) => {
-            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("password-missing")));
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                symbol::with(symbol::WARNING, tr.t("password-missing")),
+            );
         }
         None => {}
     }
@@ -500,11 +507,14 @@ fn encryption(
         let problem = password_problem(tr, drafts, form, &p.name);
         if confirm {
             password_rules(ui, tr, drafts, &p.name);
-            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("password-loss-warning")));
-            ui.checkbox(&mut drafts.password_ack, tr.t("merge-complete-ack"));
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                symbol::with(symbol::WARNING, tr.t("password-loss-warning")),
+            );
+            widgets::checkbox(ui, &mut drafts.password_ack, tr.t("merge-complete-ack"));
         }
         if let Some(e) = &password.error {
-            ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {e}"));
+            ui.colored_label(ui.visuals().error_fg_color, symbol::with(symbol::WARNING, e));
         }
         ui.horizontal(|ui| {
             let ready = problem.is_none() && !password.working;
@@ -597,7 +607,7 @@ fn recovery_ui(ui: &mut Ui, tr: &Tr, password: &PasswordStatus, drafts: &mut Dra
                 }
             });
             if let Some(e) = &password.recovery_error {
-                ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {e}"));
+                ui.colored_label(ui.visuals().error_fg_color, symbol::with(symbol::WARNING, e));
             }
         }
         Some(key) => {
@@ -606,7 +616,10 @@ fn recovery_ui(ui: &mut Ui, tr: &Tr, password: &PasswordStatus, drafts: &mut Dra
                 widgets::section_title(ui, tr.t("recovery-title"));
                 ui.label(RichText::new(key).monospace().size(16.0));
                 ui.weak(tr.t("recovery-hint"));
-                ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("recovery-warning")));
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    symbol::with(symbol::WARNING, tr.t("recovery-warning")),
+                );
                 ui.horizontal(|ui| {
                     if ui.button(tr.t("recovery-copy")).on_hover_text(tr.t("recovery-copy-hint")).clicked() {
                         ui.ctx().copy_text(key.replace(' ', ""));
@@ -628,9 +641,9 @@ fn password_rules(ui: &mut Ui, tr: &Tr, d: &Drafts, profile_name: &str) {
     let lines = a.checks.iter().map(|c| (c.met, rule_text(tr, c.rule, a.chars)));
     for (met, text) in lines.chain([(matched, tr.t("password-rule-match"))]) {
         if met {
-            ui.label(format!("✔ {text}"));
+            ui.label(symbol::with(symbol::DONE, text));
         } else {
-            ui.weak(format!("○ {text}"));
+            ui.weak(symbol::with(symbol::PENDING, text));
         }
     }
     if !d.password.is_empty() {
@@ -807,7 +820,7 @@ fn container(ui: &mut Ui, tr: &Tr, p: &mut Profile, format: FormatLock, out: &mu
         Container::Folder => "container-folder-hint",
     }));
     if !free {
-        ui.weak(format!("🔒 {why}"));
+        ui.weak(symbol::with(symbol::LOCKED, why));
     }
 }
 
@@ -823,7 +836,10 @@ fn large_files(ui: &mut Ui, tr: &Tr, p: &mut Profile, format: FormatLock, out: &
     }
     let mut on = p.large_files.threshold_mb > 0;
     ui.horizontal(|ui| {
-        if ui.checkbox(&mut on, tr.t("large-files")).on_hover_text(tr.t("large-files-hint")).changed() {
+        if widgets::checkbox(ui, &mut on, tr.t("large-files"))
+            .on_hover_text(tr.t("large-files-hint"))
+            .changed()
+        {
             p.large_files.threshold_mb = if on { LargeFiles::default().threshold_mb } else { 0 };
             out.changed = true;
         }
@@ -846,14 +862,14 @@ fn exclusions(ui: &mut Ui, tr: &Tr, p: &mut Profile, drafts: &mut Drafts, out: &
     let mut remove = None;
     for (i, rule) in p.excludes.iter().enumerate() {
         ui.horizontal(|ui| {
-            if ui.small_button("✕").on_hover_text(tr.t("remove-exclusion")).clicked() {
+            if widgets::icon_button(ui, symbol::REMOVE, tr.t("remove-exclusion")).clicked() {
                 remove = Some(i);
             }
             let (icon, kind) = match rule {
-                Exclusion::Folder { .. } => ("📁", "exclusion-folder"),
-                Exclusion::File { .. } => ("📄", "exclusion-file"),
-                Exclusion::Extension { .. } => ("🏷", "exclusion-type"),
-                Exclusion::Pattern { .. } => ("✱", "exclusion-pattern"),
+                Exclusion::Folder { .. } => (symbol::FOLDER, "exclusion-folder"),
+                Exclusion::File { .. } => (symbol::FILE, "exclusion-file"),
+                Exclusion::Extension { .. } => (symbol::TAG, "exclusion-type"),
+                Exclusion::Pattern { .. } => (symbol::PATTERN, "exclusion-pattern"),
             };
             ui.label(format!("{icon} {rule}")).on_hover_text(tr.t(kind));
         });
@@ -973,7 +989,7 @@ fn folders(ui: &mut Ui, tr: &Tr, p: &mut Profile, out: &mut Outcome) {
     let mut remove = None;
     for (i, path) in p.sources.iter().enumerate() {
         ui.horizontal(|ui| {
-            if ui.small_button("✕").on_hover_text(tr.t("remove-folder")).clicked() {
+            if widgets::icon_button(ui, symbol::REMOVE, tr.t("remove-folder")).clicked() {
                 remove = Some(i);
             }
             ui.label(path.display().to_string());
@@ -1032,10 +1048,13 @@ fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, info: &DestinationInfo
     match &info.foreign {
         Some(Foreign::Profile(name)) => {
             let text = tr.t_args("dest-foreign-profile", &[("name", arg(name.clone()))]);
-            ui.colored_label(ui.visuals().error_fg_color, format!("⚠ {text}"));
+            ui.colored_label(ui.visuals().error_fg_color, symbol::with(symbol::WARNING, text));
         }
         Some(Foreign::Deleted) => {
-            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {}", tr.t("dest-foreign-deleted")));
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                symbol::with(symbol::WARNING, tr.t("dest-foreign-deleted")),
+            );
             if ui.button(tr.t("dest-adopt")).on_hover_text(tr.t("dest-adopt-hint")).clicked() {
                 out.command = Some(Command::AdoptDestination);
             }
@@ -1045,7 +1064,7 @@ fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, info: &DestinationInfo
     if let Some(free) = info.free {
         let text = tr.t_args("dest-free", &[("free", arg(tr.bytes(free)))]);
         if free < LOW_SPACE_BYTES {
-            ui.colored_label(ui.visuals().warn_fg_color, format!("⚠ {text}"));
+            ui.colored_label(ui.visuals().warn_fg_color, symbol::with(symbol::WARNING, text));
         } else {
             ui.label(text);
         }
@@ -1185,7 +1204,8 @@ fn day_times(ui: &mut Ui, tr: &Tr, id: &str, times: &mut Vec<TimeOfDay>) {
             ui.horizontal(|ui| {
                 ui.label(tr.t("at"));
                 time_edit(ui, t);
-                if can_remove && ui.small_button("✕").on_hover_text(tr.t("schedule-remove-time")).clicked()
+                if can_remove
+                    && widgets::icon_button(ui, symbol::REMOVE, tr.t("schedule-remove-time")).clicked()
                 {
                     remove = Some(i);
                 }
@@ -1220,7 +1240,7 @@ fn time_edit(ui: &mut Ui, t: &mut TimeOfDay) {
 fn alerts(ui: &mut Ui, tr: &Tr, p: &mut Profile, out: &mut Outcome) {
     let before = p.alerts;
     let a: &mut Alerts = &mut p.alerts;
-    ui.checkbox(&mut a.on_failure, tr.t("alert-on-failure"));
+    widgets::checkbox(ui, &mut a.on_failure, tr.t("alert-on-failure"));
     ui.horizontal(|ui| {
         ui.label(tr.t("alert-stale"));
         ui.add(egui::DragValue::new(&mut a.stale_days).range(0..=365));

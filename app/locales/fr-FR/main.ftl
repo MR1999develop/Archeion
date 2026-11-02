@@ -173,7 +173,7 @@ restore-tree-count = { $files ->
         [one] { $files } fichier
        *[other] { $files } fichiers
     } dans les sauvegardes · supprimés à la source : { $deleted }
-restore-tree-hint = Cochez des fichiers ou des dossiers pour les restaurer ; la recherche trouve un fichier par son nom. Les fichiers marqués 🗑 supprimé ne sont plus à la source et peuvent encore être restaurés.
+restore-tree-hint = Cochez des fichiers ou des dossiers pour les restaurer ; la recherche trouve un fichier par son nom. Les fichiers marqués { $deleted-icon } supprimé ne sont plus à la source et peuvent encore être restaurés.
 deleted-label = supprimé
 deleted-since = Absent de la sauvegarde la plus récente : supprimé à la source.
 tree-deleted-file = Absent de la sauvegarde la plus récente : supprimé à la source. Cochez-le pour restaurer l'une de ses versions.
@@ -203,7 +203,7 @@ dest-follow-default = Utiliser la destination par défaut
 dest-overwrite = Écraser l'original
 dest-folder = Un autre dossier…
 dest-folder-missing = un autre dossier, pas encore choisi
-dest-change-hint = Où cela va. ✎ marque une destination différente de celle par défaut.
+dest-change-hint = Où cela va. { $edited-icon } marque une destination différente de celle par défaut.
 restore-to-hint = Pour tout ce qui est coché, sauf changement sur une version ou un dossier ci-dessous.
 restore-conflict = Une autre version écrase le même original : gardez « Écraser l'original » pour une seule version.
 restore-conflict-hint = Deux versions écraseraient le même fichier d'origine : changez la destination de l'une d'elles.
@@ -533,9 +533,9 @@ doc-large-body = Un gros fichier qui change peu (une boîte aux lettres, le disq
 doc-large-complete = Les sauvegardes complètes conservent toujours chaque fichier entier, en zip, en copie simple ou en zip chiffré, et peuvent donc être restaurées avec 7-Zip seul ; seules les sauvegardes incrémentielles qui les suivent contiennent des morceaux. La restauration réassemble les morceaux et vérifie chacun ; la vérification d'intégrité lit tous les morceaux.
 doc-large-upgrade = Les sauvegardes faites par les versions précédentes restent telles quelles et toujours lisibles. Les morceaux commencent avec la prochaine sauvegarde complète : sur une telle destination, la prochaine sauvegarde automatique est complète.
 doc-restore-title = Restauration des fichiers
-doc-restore-body = Ouvrez l'onglet Sauvegardes du profil (ou Sauvegarde > Restaurer des fichiers…) : « Restaurer des fichiers » montre une seule arborescence de tous les fichiers et dossiers jamais sauvegardés ; les fichiers qui ne sont plus à la source sont marqués 🗑 supprimé et peuvent encore être restaurés. Cochez des fichiers ou des dossiers dans l'arborescence ou dans les résultats de recherche (le champ de recherche trouve un fichier par son nom). Chaque élément coché apparaît à droite ; ✕ le retire.
+doc-restore-body = Ouvrez l'onglet Sauvegardes du profil (ou Sauvegarde > Restaurer des fichiers…) : « Restaurer des fichiers » montre une seule arborescence de tous les fichiers et dossiers jamais sauvegardés ; les fichiers qui ne sont plus à la source sont marqués { $deleted-icon } supprimé et peuvent encore être restaurés. Cochez des fichiers ou des dossiers dans l'arborescence ou dans les résultats de recherche (le champ de recherche trouve un fichier par son nom). Chaque élément coché apparaît à droite ; { $remove-icon } le retire.
 doc-restore-versions = Un fichier coché affiche ses versions, de la plus récente à la plus ancienne, chacune avec un contenu différent : la plus récente est cochée et vous pouvez en cocher d'autres. Un dossier coché revient en entier, tel qu'il était à la date choisie dans « Tel qu'il était le » (la plus récente, sauf changement).
-doc-restore-where = En haut du panneau de droite, choisissez où tout va : à côté de l'original avec la date dans le nom (rapport.docx revient sous le nom « rapport (2026-11-02 21.30).docx » et le fichier actuel n'est pas modifié), à l'emplacement d'origine ou dans un autre dossier ; les fichiers existants ne sont remplacés que si vous cochez « Remplacer les fichiers qui existent déjà ». Une version ou un dossier peut aller ailleurs avec son propre menu, marqué ✎. Plusieurs versions d'un fichier envoyées dans le même dossier reçoivent chacune leur date dans le nom ; une seule version d'un fichier peut écraser l'original. Restaurer ramène ensuite tout en une seule opération.
+doc-restore-where = En haut du panneau de droite, choisissez où tout va : à côté de l'original avec la date dans le nom (rapport.docx revient sous le nom « rapport (2026-11-02 21.30).docx » et le fichier actuel n'est pas modifié), à l'emplacement d'origine ou dans un autre dossier ; les fichiers existants ne sont remplacés que si vous cochez « Remplacer les fichiers qui existent déjà ». Une version ou un dossier peut aller ailleurs avec son propre menu, marqué { $edited-icon }. Plusieurs versions d'un fichier envoyées dans le même dossier reçoivent chacune leur date dans le nom ; une seule version d'un fichier peut écraser l'original. Restaurer ramène ensuite tout en une seule opération.
 doc-verify-title = Contrôle d'intégrité et test de restauration
 doc-verify-body = La vérification complète relit chaque fichier stocké de chaque sauvegarde et le compare à son empreinte ; le test de restauration relit au hasard quelques fichiers de la sauvegarde la plus récente, comme le ferait une restauration, sans les écrire nulle part. Lancez-les depuis la section Vérifications des paramètres du profil (ou Sauvegarde > Vérifier les sauvegardes maintenant), ou faites-les exécuter tous les quelques jours après une sauvegarde planifiée. Si des problèmes sont détectés, faites une sauvegarde complète et vérifiez le disque de destination.
 doc-activity-title = Onglet Activité
