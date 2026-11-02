@@ -9,9 +9,13 @@ All notable changes to Archeion are listed here. The format follows
 ### Changed
 
 - Restore files: ticking a folder ticks everything it held at the date it
-  comes back as (greyed: the folder decides; files missing from that
-  backup stay unticked) and replaces what was ticked inside it. The
-  folders above a ticked file or folder show a filled box. With several
+  comes back as (files missing from that backup stay unticked and greyed)
+  and replaces what was ticked inside it. Unticking a file or folder
+  inside it leaves it out of the restore; the ticked folder and the
+  folders between then show a filled box, and clicking a filled box ticks
+  the whole folder again. The folders above a ticked file or folder show
+  a filled box too. The folder's card shows how many items are left out
+  and its size without them. With several
   items in the selection, only the highlighted card (the last ticked, or
   the one clicked) shows its versions, date and destination; the others
   show one line with what goes where.

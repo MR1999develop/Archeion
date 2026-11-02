@@ -179,9 +179,14 @@ deleted-since = Not in the newest backup: deleted at the source.
 tree-deleted-file = Not in the newest backup: deleted at the source. Tick it to restore one of its versions.
 tree-deleted-folder = Not in the newest backup: deleted at the source. Tick it to restore it as it was on a date.
 remove-from-selection = Remove from the selection
-tick-in-folder = Restored with the ticked folder { $folder }. Untick that folder to choose files one by one.
+tick-in-folder = Restored with the ticked folder { $folder }. Untick it to leave it out.
 tick-not-in-folder-date = Not in the backup that the ticked folder { $folder } comes back as: it is not restored. Untick that folder to choose this item on its own.
-tick-partial = Something inside this folder is ticked. Tick the folder to restore it whole.
+tick-partial = Something inside is ticked, or left out of the ticked folder. Click to tick the whole folder.
+tick-left-out = Left out of the ticked folder { $folder }: not restored. Tick it to restore it with the folder.
+folder-left-out = { $count ->
+    [one] { $count } item unticked inside: not restored.
+   *[other] { $count } items unticked inside: not restored.
+}
 card-show-options = Click to see and change its versions, date and destination.
 card-summary-file = { $versions ->
     [one] 1 version → { $dest }

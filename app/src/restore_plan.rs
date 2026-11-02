@@ -108,6 +108,8 @@ pub enum Pick {
         dest: Option<Dest>,
         /// Bytes of its files at that date, once known.
         size: Option<u64>,
+        /// Keys unticked inside it, left out with what they hold.
+        exclude: Vec<String>,
     },
 }
 
@@ -176,6 +178,18 @@ struct Claim<'a> {
     card: usize,
     key: &'a str,
     archive: &'a str,
+    /// Left out of a folder: not claimed.
+    exclude: &'a [String],
+}
+
+impl Claim<'_> {
+    /// Both write the original of some file or folder.
+    fn overlaps(&self, other: &Self) -> bool {
+        let inside = |a: &Claim<'_>, b: &Claim<'_>| {
+            keys::is_within(a.key, b.key) && !b.exclude.iter().any(|x| keys::is_within(a.key, x))
+        };
+        inside(self, other) || inside(other, self)
+    }
 }
 
 /// Turns the selection into a request. Several versions of a file sent to
@@ -204,7 +218,7 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
                         continue;
                     };
                     if dest.overwrites_original() {
-                        claims.push(Claim { card, key, archive: &v.archive });
+                        claims.push(Claim { card, key, archive: &v.archive, exclude: &[] });
                     }
                     let (target, overwrite) = dest.target();
                     let tag = date_tag(&v.archive);
@@ -217,10 +231,11 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
                         key: Some(key.clone()),
                         target,
                         overwrite,
+                        exclude: Vec::new(),
                     });
                 }
             }
-            Pick::Folder { key, archive, dest, size } => {
+            Pick::Folder { key, archive, dest, size, exclude } => {
                 out.summary.folders += 1;
                 match size {
                     Some(b) => out.summary.bytes = out.summary.bytes.saturating_add(*b),
@@ -231,7 +246,7 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
                     continue;
                 };
                 if dest.overwrites_original() {
-                    claims.push(Claim { card, key, archive });
+                    claims.push(Claim { card, key, archive, exclude });
                 }
                 let (target, overwrite) = dest.target();
                 out.request.items.push(RestoreItem {
@@ -239,6 +254,7 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
                     key: Some(key.clone()),
                     target,
                     overwrite,
+                    exclude: exclude.clone(),
                 });
             }
         }
@@ -250,8 +266,7 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
 
     for (i, a) in claims.iter().enumerate() {
         for b in claims.iter().skip(i + 1) {
-            let overlap = keys::is_within(a.key, b.key) || keys::is_within(b.key, a.key);
-            if overlap && a.archive != b.archive {
+            if a.overlaps(b) && a.archive != b.archive {
                 out.conflicts.insert(a.card);
                 out.conflicts.insert(b.card);
             }
@@ -291,7 +306,20 @@ mod tests {
     }
 
     fn folder(key: &str, archive: &str, dest: Option<Dest>, size: Option<u64>) -> Pick {
-        Pick::Folder { key: key.into(), archive: archive.into(), dest, size }
+        Pick::Folder { key: key.into(), archive: archive.into(), dest, size, exclude: Vec::new() }
+    }
+
+    #[test]
+    fn a_file_left_out_of_a_folder_does_not_conflict_with_it() {
+        let overwrite = Some(Dest::Original { replace: true });
+        let mut docs = folder("C/Docs", OLD, overwrite.clone(), None);
+        if let Pick::Folder { exclude, .. } = &mut docs {
+            exclude.push(KEY.into());
+        }
+        let picks = [file(KEY, vec![version(NEW, overwrite)]), docs];
+        let p = plan(&picks, &DefaultDest::default(), false);
+        assert!(p.conflicts.is_empty());
+        assert_eq!(p.request.items[1].exclude, vec![KEY.to_owned()], "the exclusion reaches the engine");
     }
 
     fn to_folder(path: &str) -> DefaultDest {

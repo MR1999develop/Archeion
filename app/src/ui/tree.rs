@@ -39,19 +39,26 @@ pub struct Ticked<'a> {
     pub key: &'a str,
     /// For a folder, the backup it comes back as.
     pub folder_archive: Option<&'a str>,
+    /// For a folder, the keys unticked inside it.
+    pub exclude: &'a [String],
 }
 
 /// How the tick box of a node shows the selection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tick {
     Off,
-    /// Ticked itself.
+    /// Ticked itself, with nothing left out.
     On,
-    /// A folder with something ticked inside it.
+    /// A folder with something ticked inside it, or a ticked folder with
+    /// something unticked inside it.
     Partial,
     /// Inside a ticked folder, in the backup that folder comes back as:
     /// restored with it. `folder` is the nearest ticked folder.
     InFolder {
+        folder: usize,
+    },
+    /// Inside a ticked folder and unticked: left out of it.
+    LeftOut {
         folder: usize,
     },
     /// Inside a ticked folder but not in the backup it comes back as: the
@@ -123,30 +130,66 @@ impl Tree {
         node.entry.archives_newest_first().filter_map(|i| self.archives.get(i)).collect()
     }
 
-    /// How `node` shows `ticked`. Its own tick wins; then the nearest
-    /// ticked folder holding it; then, for a folder, anything ticked inside.
+    /// How `node` shows `ticked`. Its own tick wins (partial when something
+    /// inside is left out); then the nearest ticked folder holding it;
+    /// then, for a folder, anything ticked inside.
     pub fn tick(&self, node: &Node, ticked: &[Ticked<'_>]) -> Tick {
         let key = node.key();
-        if ticked.iter().any(|t| t.key == key) {
-            return Tick::On;
+        if let Some(own) = ticked.iter().find(|t| t.key == key) {
+            return if own.exclude.is_empty() { Tick::On } else { Tick::Partial };
         }
         let holder = ticked
             .iter()
-            .filter_map(|t| t.folder_archive.map(|a| (t.key, a)))
-            .filter(|(k, _)| keys::is_within(key, k))
-            .max_by_key(|(k, _)| k.len());
-        if let Some((folder_key, archive)) = holder
-            && let Ok(folder) = self.nodes.binary_search_by(|n| n.key().cmp(folder_key))
+            .filter(|t| t.folder_archive.is_some() && keys::is_within(key, t.key))
+            .max_by_key(|t| t.key.len());
+        if let Some(h) = holder
+            && let Ok(folder) = self.nodes.binary_search_by(|n| n.key().cmp(h.key))
         {
-            let listed = self.archives.iter().position(|a| a.name == archive).is_some_and(|pos| {
-                node.entry.present.iter().any(|&(first, last)| (first..=last).contains(&pos))
-            });
-            return if listed { Tick::InFolder { folder } } else { Tick::NotInFolderDate { folder } };
+            if h.exclude.iter().any(|x| keys::is_within(key, x)) {
+                return Tick::LeftOut { folder };
+            }
+            let listed =
+                self.archives.iter().position(|a| Some(a.name.as_str()) == h.folder_archive).is_some_and(
+                    |pos| node.entry.present.iter().any(|&(first, last)| (first..=last).contains(&pos)),
+                );
+            if !listed {
+                return Tick::NotInFolderDate { folder };
+            }
+            if node.is_dir() && h.exclude.iter().any(|x| keys::is_within(x, key)) {
+                return Tick::Partial;
+            }
+            return Tick::InFolder { folder };
         }
         if node.is_dir() && ticked.iter().any(|t| t.key != key && keys::is_within(t.key, key)) {
             return Tick::Partial;
         }
         Tick::Off
+    }
+
+    /// Ticks `key` again inside a folder whose exclusions are `exclude`:
+    /// when it is left out because a folder above it is, that folder's
+    /// exclusion becomes one for each other item on the way down, so only
+    /// the path to `key` comes back.
+    pub fn include(&self, exclude: &mut Vec<String>, key: &str) {
+        let Some(pos) = exclude.iter().position(|x| keys::is_within(key, x)) else { return };
+        let above = exclude.swap_remove(pos);
+        let Some(mut node) = self.find(&above) else { return };
+        while node.key() != key {
+            let next = node
+                .children
+                .iter()
+                .filter_map(|&c| self.nodes.get(c))
+                .find(|c| keys::is_within(key, c.key()));
+            for c in node.children.iter().filter_map(|&c| self.nodes.get(c)) {
+                if next.is_none_or(|n| n.key() != c.key()) {
+                    exclude.push(c.key().to_owned());
+                }
+            }
+            match next {
+                Some(n) => node = n,
+                None => break,
+            }
+        }
     }
 
     /// Files whose name contains `query` (case-insensitive), in key order,
@@ -235,11 +278,63 @@ mod tests {
     }
 
     fn folder<'a>(key: &'a str, archive: &'a str) -> Ticked<'a> {
-        Ticked { key, folder_archive: Some(archive) }
+        Ticked { key, folder_archive: Some(archive), exclude: &[] }
     }
 
     fn file(key: &str) -> Ticked<'_> {
-        Ticked { key, folder_archive: None }
+        Ticked { key, folder_archive: None, exclude: &[] }
+    }
+
+    fn idx(t: &Tree, key: &str) -> usize {
+        t.nodes.binary_search_by(|n| n.key().cmp(key)).unwrap()
+    }
+
+    fn docs_tree() -> Tree {
+        Tree::build(catalog(vec![
+            entry("C/Docs", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/a.txt", EntryKind::File, vec![(0, 2)]),
+            entry("C/Docs/sub", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/sub/b.txt", EntryKind::File, vec![(0, 2)]),
+            entry("C/Docs/sub/deep", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/sub/deep/c.txt", EntryKind::File, vec![(0, 2)]),
+            entry("C/Docs/sub/deep/d.txt", EntryKind::File, vec![(0, 2)]),
+        ]))
+    }
+
+    #[test]
+    fn an_unticked_file_inside_a_ticked_folder_is_left_out_and_the_folders_fill() {
+        let t = docs_tree();
+        let docs = idx(&t, "C/Docs");
+        let exclude = vec!["C/Docs/sub/b.txt".to_owned()];
+        let ticked = [Ticked { key: "C/Docs", folder_archive: Some("a2"), exclude: &exclude }];
+        assert_eq!(tick_of(&t, "C/Docs", &ticked), Tick::Partial, "the ticked folder itself");
+        assert_eq!(tick_of(&t, "C/Docs/sub", &ticked), Tick::Partial, "a folder holding it");
+        assert_eq!(tick_of(&t, "C/Docs/sub/b.txt", &ticked), Tick::LeftOut { folder: docs });
+        assert_eq!(tick_of(&t, "C/Docs/sub/deep", &ticked), Tick::InFolder { folder: docs });
+        assert_eq!(tick_of(&t, "C/Docs/a.txt", &ticked), Tick::InFolder { folder: docs });
+
+        // A left-out folder leaves out what it holds.
+        let exclude = vec!["C/Docs/sub".to_owned()];
+        let ticked = [Ticked { key: "C/Docs", folder_archive: Some("a2"), exclude: &exclude }];
+        assert_eq!(tick_of(&t, "C/Docs/sub/deep/c.txt", &ticked), Tick::LeftOut { folder: docs });
+    }
+
+    #[test]
+    fn ticking_again_inside_a_left_out_folder_brings_back_only_that_path() {
+        let t = docs_tree();
+        let mut exclude = vec!["C/Docs/a.txt".to_owned(), "C/Docs/sub".to_owned()];
+        t.include(&mut exclude, "C/Docs/sub/deep/c.txt");
+        exclude.sort();
+        assert_eq!(exclude, vec!["C/Docs/a.txt", "C/Docs/sub/b.txt", "C/Docs/sub/deep/d.txt"]);
+
+        // Left out on its own: the exclusion goes.
+        t.include(&mut exclude, "C/Docs/a.txt");
+        assert_eq!(exclude.len(), 2);
+        assert!(!exclude.contains(&"C/Docs/a.txt".to_owned()));
+
+        // Not left out: nothing changes.
+        t.include(&mut exclude, "C/Docs/sub/deep/c.txt");
+        assert_eq!(exclude.len(), 2);
     }
 
     #[test]

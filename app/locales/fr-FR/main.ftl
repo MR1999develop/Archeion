@@ -179,9 +179,14 @@ deleted-since = Absent de la sauvegarde la plus récente : supprimé à la sourc
 tree-deleted-file = Absent de la sauvegarde la plus récente : supprimé à la source. Cochez-le pour restaurer l'une de ses versions.
 tree-deleted-folder = Absent de la sauvegarde la plus récente : supprimé à la source. Cochez-le pour le restaurer tel qu'il était à une date.
 remove-from-selection = Retirer de la sélection
-tick-in-folder = Restauré avec le dossier coché { $folder }. Décochez ce dossier pour choisir les fichiers un par un.
+tick-in-folder = Restauré avec le dossier coché { $folder }. Décochez-le pour l'exclure.
 tick-not-in-folder-date = Absent de la sauvegarde avec laquelle revient le dossier coché { $folder } : il n'est pas restauré. Décochez ce dossier pour le choisir seul.
-tick-partial = Un élément de ce dossier est coché. Cochez le dossier pour le restaurer en entier.
+tick-partial = Un élément à l'intérieur est coché, ou exclu du dossier coché. Cliquez pour cocher tout le dossier.
+tick-left-out = Exclu du dossier coché { $folder } : il n'est pas restauré. Cochez-le pour le restaurer avec le dossier.
+folder-left-out = { $count ->
+    [one] { $count } élément décoché à l'intérieur : il n'est pas restauré.
+   *[other] { $count } éléments décochés à l'intérieur : ils ne sont pas restaurés.
+}
 card-show-options = Cliquez pour voir et modifier ses versions, sa date et sa destination.
 card-summary-file = { $versions ->
     [one] 1 version → { $dest }

@@ -432,7 +432,13 @@ fn versions_list_only_real_changes_and_each_restores_beside_the_original() {
 }
 
 fn item(archive: &str, key: &str, target: &RestoreTarget, overwrite: bool) -> RestoreItem {
-    RestoreItem { archive: archive.to_owned(), key: Some(key.to_owned()), target: target.clone(), overwrite }
+    RestoreItem {
+        archive: archive.to_owned(),
+        key: Some(key.to_owned()),
+        target: target.clone(),
+        overwrite,
+        exclude: Vec::new(),
+    }
 }
 
 fn key_of(f: &Fixture, relative: &str) -> String {
@@ -496,6 +502,27 @@ fn a_folder_comes_back_as_it_was_at_an_old_date_beside_a_newer_file() {
     assert_eq!(fs::read_to_string(restored(&f, "sub/ünicode è.txt")).unwrap(), "beta");
     assert!(!restored(&f, "sub/later.txt").exists(), "not there at that date");
     assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
+}
+
+#[test]
+fn a_folder_leaves_out_what_was_unticked_inside_it() {
+    let f = fixture(Container::Folder);
+    fs::create_dir_all(f.source.join("sub").join("deep")).unwrap();
+    fs::write(f.source.join("sub").join("deep").join("d.txt"), "delta").unwrap();
+    fs::write(f.source.join("sub").join("keep.txt"), "keep").unwrap();
+    run_backup(&f.profile);
+    let list = list_archives(&f.profile, None).unwrap();
+
+    let to = RestoreTarget::Folder { path: f.restore_to.clone() };
+    let mut folder = item(&list[0].name, &key_of(&f, "sub"), &to, false);
+    folder.exclude = vec![key_of(&f, "sub/deep"), key_of(&f, "sub/ünicode è.txt")];
+    let req = RestoreRequest { items: vec![folder] };
+    let r = restore(&f.profile, None, &req, &Recorder::default()).unwrap();
+    assert!(r.skipped.is_empty(), "{:?}", r.skipped);
+    assert_eq!(fs::read_to_string(restored(&f, "sub/keep.txt")).unwrap(), "keep");
+    assert!(!restored(&f, "sub/ünicode è.txt").exists(), "an unticked file");
+    assert!(!restored(&f, "sub/deep").exists(), "an unticked folder, with what it holds");
+    assert_eq!(r.files_restored, 1);
 }
 
 #[test]

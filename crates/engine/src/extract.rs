@@ -100,6 +100,7 @@ pub fn extract(request: &ExtractRequest, sink: &dyn EventSink) -> Result<Restore
             key,
             target: RestoreTarget::Folder { path: request.to.clone() },
             overwrite: request.overwrite,
+            exclude: Vec::new(),
         }],
     };
     restore_from(root, keys.as_ref(), &restore, sink)

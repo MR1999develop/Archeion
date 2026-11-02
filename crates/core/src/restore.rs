@@ -41,6 +41,19 @@ pub struct RestoreItem {
     /// Replace files that already exist.
     #[serde(default)]
     pub overwrite: bool,
+    /// Keys left out, with everything inside them: files and folders
+    /// unticked inside a ticked folder.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclude: Vec<String>,
+}
+
+impl RestoreItem {
+    /// Whether `key` is part of this item.
+    #[must_use]
+    pub fn wants(&self, key: &str) -> bool {
+        self.key.as_deref().is_none_or(|p| keys::is_within(key, p))
+            && !self.exclude.iter().any(|x| keys::is_within(key, x))
+    }
 }
 
 /// What to restore, in one run.
@@ -84,7 +97,13 @@ impl RestoreRequest {
     /// The `keys` of one archive (none = everything) to one target.
     #[must_use]
     pub fn single(archive: &str, keys: Vec<String>, target: &RestoreTarget, overwrite: bool) -> Self {
-        let item = |key| RestoreItem { archive: archive.to_owned(), key, target: target.clone(), overwrite };
+        let item = |key| RestoreItem {
+            archive: archive.to_owned(),
+            key,
+            target: target.clone(),
+            overwrite,
+            exclude: Vec::new(),
+        };
         let items =
             if keys.is_empty() { vec![item(None)] } else { keys.into_iter().map(Some).map(item).collect() };
         Self { items }
@@ -292,6 +311,26 @@ mod tests {
     }
 
     #[test]
+    fn an_item_wants_its_folder_minus_what_is_left_out() {
+        let mut item = RestoreItem {
+            archive: "a".into(),
+            key: Some("C/Docs".into()),
+            target: RestoreTarget::Original,
+            overwrite: false,
+            exclude: vec!["C/Docs/old".into(), "C/Docs/b.txt".into()],
+        };
+        assert!(item.wants("C/Docs"));
+        assert!(item.wants("C/Docs/a.txt"));
+        assert!(item.wants("C/Docs/oldest.txt"), "whole segments only");
+        assert!(!item.wants("C/Docs/old"));
+        assert!(!item.wants("C/Docs/old/x.txt"));
+        assert!(!item.wants("C/Docs/b.txt"));
+        assert!(!item.wants("C/Other/a.txt"));
+        item.key = None;
+        assert!(item.wants("D/x") && !item.wants("C/Docs/b.txt"), "the whole archive, minus the exclusions");
+    }
+
+    #[test]
     fn request_round_trips_through_json() {
         let r = RestoreRequest {
             items: vec![
@@ -300,12 +339,14 @@ mod tests {
                     key: Some("C/Users/a.txt".into()),
                     target: RestoreTarget::Folder { path: PathBuf::from("out") },
                     overwrite: false,
+                    exclude: vec!["C/Users/a.txt/x".into()],
                 },
                 RestoreItem {
                     archive: "2026-10-30_213000_I".into(),
                     key: None,
                     target: RestoreTarget::Original,
                     overwrite: true,
+                    exclude: Vec::new(),
                 },
             ],
         };

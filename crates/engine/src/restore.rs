@@ -17,7 +17,7 @@ use crate::{
 pub use archeion_core::restore::{RestoreItem, RestoreRequest, RestoreTarget};
 use archeion_core::{
     ArchiveName, Chunks, Entry, EntryKind, FileAction, Manifest, Phase, Profile, RestoreReport, RunEvent,
-    Skipped, Summary, keys,
+    Skipped, Summary,
     restore::{Output, date_tag, make_distinct, output_path, precise_date_tag},
 };
 use std::{
@@ -209,7 +209,7 @@ fn select<'a>(
         let Some(manifest) = chosen.get(&k) else { continue };
         let tag = archives.get(k).map(|a| date_tag(&a.to_string())).unwrap_or_default();
         let original = item.target == RestoreTarget::Original;
-        let wanted = |e: &&Entry| item.key.as_deref().is_none_or(|p| keys::is_within(&e.key, p));
+        let wanted = |e: &&Entry| item.wants(&e.key);
         for entry in manifest.entries.iter().filter(wanted) {
             let dest = output_path(&entry.key, entry.kind, &item.target, &tag);
             match seen.entry((k, entry.key.as_str(), dest.clone())) {

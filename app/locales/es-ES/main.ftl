@@ -179,9 +179,14 @@ deleted-since = No está en la copia más reciente: eliminado en el origen.
 tree-deleted-file = No está en la copia más reciente: eliminado en el origen. Márcalo para restaurar una de sus versiones.
 tree-deleted-folder = No está en la copia más reciente: eliminada en el origen. Márcala para restaurarla tal como estaba en una fecha.
 remove-from-selection = Quitar de la selección
-tick-in-folder = Se restaura con la carpeta marcada { $folder }. Desmarca esa carpeta para elegir los archivos uno a uno.
+tick-in-folder = Se restaura con la carpeta marcada { $folder }. Desmárcalo para dejarlo fuera.
 tick-not-in-folder-date = No está en la copia con la que vuelve la carpeta marcada { $folder }: no se restaura. Desmarca esa carpeta para elegirlo por separado.
-tick-partial = Hay algo marcado dentro de esta carpeta. Marca la carpeta para restaurarla entera.
+tick-partial = Hay algo marcado dentro, o excluido de la carpeta marcada. Haz clic para marcar toda la carpeta.
+tick-left-out = Excluido de la carpeta marcada { $folder }: no se restaura. Márcalo para restaurarlo con la carpeta.
+folder-left-out = { $count ->
+    [one] { $count } elemento desmarcado dentro: no se restaura.
+   *[other] { $count } elementos desmarcados dentro: no se restauran.
+}
 card-show-options = Haz clic para ver y cambiar sus versiones, fecha y destino.
 card-summary-file = { $versions ->
     [one] 1 versión → { $dest }

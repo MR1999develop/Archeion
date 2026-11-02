@@ -179,9 +179,14 @@ deleted-since = Non è nel backup più recente: eliminato dall'origine.
 tree-deleted-file = Non è nel backup più recente: eliminato dall'origine. Spuntalo per ripristinarne una versione.
 tree-deleted-folder = Non è nel backup più recente: eliminata dall'origine. Spuntala per ripristinarla com'era in una data.
 remove-from-selection = Togli dalla selezione
-tick-in-folder = Ripristinato con la cartella spuntata { $folder }. Togli la spunta a quella cartella per scegliere i file uno per uno.
+tick-in-folder = Ripristinato con la cartella spuntata { $folder }. Togli la spunta per escluderlo.
 tick-not-in-folder-date = Non è nel backup con cui torna la cartella spuntata { $folder }: non viene ripristinato. Togli la spunta a quella cartella per sceglierlo da solo.
-tick-partial = Dentro questa cartella c'è qualcosa di spuntato. Spunta la cartella per ripristinarla tutta.
+tick-partial = Dentro c'è qualcosa di spuntato, o di escluso dalla cartella spuntata. Fai clic per spuntare tutta la cartella.
+tick-left-out = Escluso dalla cartella spuntata { $folder }: non viene ripristinato. Spuntalo per ripristinarlo con la cartella.
+folder-left-out = { $count ->
+    [one] { $count } elemento escluso all'interno: non viene ripristinato.
+   *[other] { $count } elementi esclusi all'interno: non vengono ripristinati.
+}
 card-show-options = Fai clic per vedere e cambiare versioni, data e destinazione.
 card-summary-file = { $versions ->
     [one] 1 versione → { $dest }

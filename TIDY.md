@@ -20,13 +20,15 @@ trigger it. Remove an item when it is done or no longer applies.
   and the feature branch), `tools\git_push.bat -PullRequest`; read the
   four `.log` files.
 - **Try the restore tree by hand** (added 2 November): tick a folder
-  (its content ticked and greyed, files missing at its date unticked),
-  tick a file deep inside a folder (filled box on every folder above,
-  aligned with the box at every zoom), several items (only the
+  (its content ticked, files missing at its date unticked and greyed),
+  untick a file and a subfolder inside it (filled box on the folder and
+  the folders between, aligned with the box at every zoom; the card
+  counts the items left out and the size drops), tick again a file inside
+  an unticked subfolder (only that path comes back), click the filled box
+  (whole folder again), tick a file deep inside an unticked folder
+  (filled box on every folder above), several items (only the
   highlighted card shows its options; clicking another card's name or
-  line moves the highlight). Unticking one file inside a ticked folder is
-  not possible: it would need exclusions in the engine's restore items;
-  add them if the folder-then-untick habit turns out common.
+  line moves the highlight), then restore and compare.
 - **Try the window by hand**: the tests cover the engine, not the egui
   screens. Create a profile, back up, browse versions, merge, restore.
   Check also the Activity tab during a long backup, the exclusion list

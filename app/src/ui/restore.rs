@@ -46,6 +46,10 @@ const SEARCH_LIMIT: usize = 200;
 /// Starting width of the selection panel.
 const SELECTION_WIDTH: f32 = 380.0;
 
+/// Key and bytes of each file of a folder at one date: its size is the sum
+/// of those not unticked.
+type FolderFiles = Vec<(String, u64)>;
+
 /// What the tab asks the window to start.
 #[derive(Debug, Clone)]
 pub enum Action {
@@ -85,8 +89,8 @@ pub struct RestoreView {
     focused: Option<String>,
     /// Versions of the ticked files, by key.
     versions: HashMap<String, Load<Vec<FileVersion>>>,
-    /// Bytes of a ticked folder at a date, by key and archive.
-    folder_sizes: HashMap<(String, String), Load<u64>>,
+    /// Files of a ticked folder at a date, by key and archive.
+    folder_sizes: HashMap<(String, String), Load<FolderFiles>>,
     /// Kept when the archives change and across profiles, like a folder
     /// chosen in a file dialog.
     default: DefaultDest,
@@ -222,9 +226,14 @@ impl RestoreView {
                     Some(Load::Idle | Load::Loading(_)) => {}
                 },
                 Pick::File { .. } => {}
-                Pick::Folder { key, archive, size, .. } => {
+                Pick::Folder { key, archive, size, exclude, .. } => {
                     let read = self.folder_sizes.get(&(key.clone(), archive.clone()));
-                    *size = read.and_then(Load::ready).copied();
+                    *size = read.and_then(Load::ready).map(|files| {
+                        files
+                            .iter()
+                            .filter(|(k, _)| !exclude.iter().any(|x| keys::is_within(k, x)))
+                            .fold(0u64, |sum, (_, b)| sum.saturating_add(*b))
+                    });
                 }
             }
         }
@@ -245,17 +254,40 @@ impl RestoreView {
 
     /// Ticks or unticks the node `idx`. A ticked file reads its versions,
     /// a ticked folder comes back as it was in the newest backup listing it
-    /// and takes the place of what was ticked inside it. What is ticked
-    /// becomes the highlighted card.
+    /// and takes the place of what was ticked inside it. Inside a ticked
+    /// folder a click leaves the item out of it, or ticks it again; a
+    /// folder with something left out is ticked whole again first. What is
+    /// ticked becomes the highlighted card.
     fn toggle(&mut self, ctx: &Context, profile: &Profile, idx: usize) {
         let Some(tree) = self.trees.get(&profile.id).and_then(|(_, t)| t.ready()) else { return };
         let Some(node) = tree.node(idx) else { return };
         let key = node.key().to_owned();
         if let Some(pos) = self.picks.iter().position(|p| p.key() == key) {
-            self.picks.remove(pos);
-            if self.focused.as_deref() == Some(key.as_str()) {
-                self.focused = None;
+            match self.picks.get_mut(pos) {
+                Some(Pick::Folder { exclude, .. }) if !exclude.is_empty() => exclude.clear(),
+                _ => {
+                    self.picks.remove(pos);
+                    if self.focused.as_deref() == Some(key.as_str()) {
+                        self.focused = None;
+                    }
+                }
             }
+            return;
+        }
+        let holder = self
+            .picks
+            .iter_mut()
+            .filter(|p| matches!(p, Pick::Folder { .. }) && keys::is_within(&key, p.key()))
+            .max_by_key(|p| p.key().len());
+        if let Some(Pick::Folder { key: folder, exclude, .. }) = holder {
+            if exclude.iter().any(|x| keys::is_within(&key, x)) {
+                tree.include(exclude, &key);
+            } else if exclude.iter().any(|x| keys::is_within(x, &key)) {
+                exclude.retain(|x| !keys::is_within(x, &key));
+            } else {
+                exclude.push(key);
+            }
+            self.focused = Some(folder.clone());
             return;
         }
         self.focused = Some(key.clone());
@@ -263,7 +295,13 @@ impl RestoreView {
             let Some(newest) = tree.dates(node).first().map(|a| a.name.clone()) else { return };
             spawn_folder_size(&mut self.folder_sizes, ctx, profile, &key, &newest);
             self.picks.retain(|p| !keys::is_within(p.key(), &key));
-            self.picks.push(Pick::Folder { key, archive: newest, dest: None, size: None });
+            self.picks.push(Pick::Folder {
+                key,
+                archive: newest,
+                dest: None,
+                size: None,
+                exclude: Vec::new(),
+            });
         } else {
             if self.versions.get(&key).is_none_or(|l| matches!(l, Load::Failed(_))) {
                 let (p, k) = (profile.clone(), key.clone());
@@ -453,10 +491,10 @@ impl RestoreView {
     }
 }
 
-/// Reads the bytes of folder `key` as it was in `archive`, unless already
+/// Reads the files of folder `key` as it was in `archive`, unless already
 /// read or being read.
 fn spawn_folder_size(
-    sizes: &mut HashMap<(String, String), Load<u64>>,
+    sizes: &mut HashMap<(String, String), Load<FolderFiles>>,
     ctx: &Context,
     profile: &Profile,
     key: &str,
@@ -470,8 +508,9 @@ fn spawn_folder_size(
     let load = Load::spawn(ctx, move || {
         let pw = credentials::get_or_none(p.id);
         let m = archeion_engine::archive_manifest(&p, pw.as_ref(), &a).map_err(Problem::from)?;
-        let files = m.entries.iter().filter(|e| e.kind == EntryKind::File && keys::is_within(&e.key, &k));
-        Ok(files.fold(0u64, |sum, e| sum.saturating_add(e.size)))
+        let files =
+            m.entries.into_iter().filter(|e| e.kind == EntryKind::File && keys::is_within(&e.key, &k));
+        Ok(files.map(|e| (e.key, e.size)).collect())
     });
     sizes.insert(slot, load);
 }
@@ -479,8 +518,8 @@ fn spawn_folder_size(
 /// What the tree needs to know of a card.
 fn ticked(pick: &Pick) -> Ticked<'_> {
     match pick {
-        Pick::File { key, .. } => Ticked { key, folder_archive: None },
-        Pick::Folder { key, archive, .. } => Ticked { key, folder_archive: Some(archive) },
+        Pick::File { key, .. } => Ticked { key, folder_archive: None, exclude: &[] },
+        Pick::Folder { key, archive, exclude, .. } => Ticked { key, folder_archive: Some(archive), exclude },
     }
 }
 
@@ -552,19 +591,27 @@ fn node_ui(ui: &mut Ui, tr: &Tr, tree: &Tree, idx: usize, ticked: &[Ticked<'_>],
     }
 }
 
-/// The tick box of a node; true when clicked. Inside a ticked folder the
-/// folder decides: the box is ticked (or not, if the folder's date lacks
-/// the item) and greyed. A folder with something ticked inside shows a
-/// filled box; clicking it ticks the whole folder.
+/// The tick box of a node; true when clicked. Inside a ticked folder an
+/// item is ticked with it and can be unticked (left out); one the folder's
+/// date lacks is greyed. A folder with something ticked inside, or a
+/// ticked folder with something left out, shows a filled box; clicking it
+/// ticks the whole folder.
 fn tick_box(ui: &mut Ui, tr: &Tr, tree: &Tree, n: &Node, tick: Tick, text: RichText) -> bool {
+    let folder_path = |folder: usize| {
+        let path = tree.node(folder).map(|f| keys::path_for(f.key()).display().to_string());
+        arg(path.unwrap_or_default())
+    };
     match tick {
-        Tick::InFolder { folder } | Tick::NotInFolderDate { folder } => {
-            let mut on = matches!(tick, Tick::InFolder { .. });
-            let id = if on { "tick-in-folder" } else { "tick-not-in-folder-date" };
-            let path = tree.node(folder).map(|f| keys::path_for(f.key()).display().to_string());
-            let hint = tr.t_args(id, &[("folder", arg(path.unwrap_or_default()))]);
-            ui.add_enabled(false, egui::Checkbox::new(&mut on, text)).on_disabled_hover_text(hint);
+        Tick::NotInFolderDate { folder } => {
+            let hint = tr.t_args("tick-not-in-folder-date", &[("folder", folder_path(folder))]);
+            ui.add_enabled(false, egui::Checkbox::new(&mut false, text)).on_disabled_hover_text(hint);
             false
+        }
+        Tick::InFolder { folder } | Tick::LeftOut { folder } => {
+            let mut on = matches!(tick, Tick::InFolder { .. });
+            let id = if on { "tick-in-folder" } else { "tick-left-out" };
+            let hint = tr.t_args(id, &[("folder", folder_path(folder))]);
+            ui.checkbox(&mut on, text).on_hover_text(hint).changed()
         }
         Tick::Partial => {
             let mut on = false;
@@ -662,7 +709,7 @@ fn card_body(
     card: usize,
     pick: &mut Pick,
     versions: &HashMap<String, Load<Vec<FileVersion>>>,
-    folder_sizes: &HashMap<(String, String), Load<u64>>,
+    folder_sizes: &HashMap<(String, String), Load<FolderFiles>>,
     dates: &[&archeion_engine::CatalogArchive],
     edits: &mut Vec<CardEdit>,
 ) {
@@ -670,9 +717,20 @@ fn card_body(
         Pick::File { key, versions: ticked, .. } => {
             file_card(ui, tr, default, plan, card, versions.get(key.as_str()), ticked, edits);
         }
-        Pick::Folder { key, archive, dest, .. } => {
-            let size = folder_sizes.get(&(key.clone(), archive.clone()));
-            folder_card(ui, tr, default, card, archive, dest, dates, size, edits);
+        Pick::Folder { key, archive, dest, size, exclude } => {
+            folder_card(ui, tr, card, archive, dates, edits);
+            match folder_sizes.get(&(key.clone(), archive.clone())) {
+                Some(Load::Ready(_)) => {
+                    let bytes = tr.bytes(size.unwrap_or_default());
+                    ui.weak(tr.t_args("folder-size", &[("size", arg(bytes))]));
+                }
+                Some(other) => other.status_ui(ui, tr, &tr.t("reading-backups")),
+                None => {}
+            }
+            if !exclude.is_empty() {
+                ui.weak(tr.t_args("folder-left-out", &[("count", arg(exclude.len()))]));
+            }
+            dest_ui(ui, tr, dest, default, None);
         }
     }
 }
@@ -749,18 +807,13 @@ fn file_card(
     }
 }
 
-/// The date a ticked folder comes back as, its size then and its
-/// destination.
-#[expect(clippy::too_many_arguments, reason = "one card: its parts are drawn together")]
+/// The date a ticked folder comes back as.
 fn folder_card(
     ui: &mut Ui,
     tr: &Tr,
-    default: &DefaultDest,
     card: usize,
     archive: &str,
-    dest: &mut Option<Dest>,
     dates: &[&archeion_engine::CatalogArchive],
-    size: Option<&Load<u64>>,
     edits: &mut Vec<CardEdit>,
 ) {
     let current =
@@ -781,14 +834,6 @@ fn folder_card(
             edits.push(CardEdit::Date { card, archive: chosen });
         }
     });
-    match size {
-        Some(Load::Ready(bytes)) => {
-            ui.weak(tr.t_args("folder-size", &[("size", arg(tr.bytes(*bytes)))]));
-        }
-        Some(other) => other.status_ui(ui, tr, &tr.t("reading-backups")),
-        None => {}
-    }
-    dest_ui(ui, tr, dest, default, None);
 }
 
 /// Where a version or folder goes: the file name it takes (for a version)
