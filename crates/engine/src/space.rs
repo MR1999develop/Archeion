@@ -16,7 +16,7 @@ pub(crate) const MARGIN: u64 = 64 * 1024 * 1024;
 /// Free bytes for this user on the volume of `dir`; `None` when unknown
 /// (some network shares do not say).
 pub(crate) fn available(dir: &Path) -> Option<u64> {
-    match fs2::available_space(dir) {
+    match fs4::available_space(dir) {
         Ok(n) => Some(n),
         Err(e) => {
             tracing::warn!(error = %e, dir = %dir.display(), "free space unknown");

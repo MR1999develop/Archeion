@@ -22,6 +22,12 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Changed
 
+- Built with Rust 1.99.1, pinned in `rust-toolchain.toml` and in CI (the
+  minimum version is 1.99). Dependencies updated, including toml 1,
+  argon2 0.6 (same keys: checked against the reference implementation)
+  and getrandom 0.4; fs4 replaces the unmaintained fs2 for the free
+  space. CI actions updated to their Node 24 versions.
+
 - A cleaner, more uniform window: Segoe UI (regular and semibold) from
   Windows instead of egui's thin font; Windows 11 greys with one blue
   accent for what can be clicked, in light and dark; the profile name as
