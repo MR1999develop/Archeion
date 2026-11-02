@@ -4,9 +4,9 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con i ritocchi dell'interfaccia (ramo `feature/ui-polish` unito;
-`tools\check.bat` verde: fmt, clippy, 311 test, 1 ignorato: le
-schermate). La build di rilascio è stata controllata al commit GPLv3
+`main` con la dimensione della finestra ricordata (ramo
+`feature/window-size` unito; `tools\check.bat` verde: fmt, clippy, 313
+test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
 ## Lavoro in corso
@@ -64,3 +64,8 @@ schermate). La build di rilascio è stata controllata al commit GPLv3
   Caselle spuntate riempite con l'accento, liste con l'elemento selezionato
   intero e il segno d'accento, pulsanti-icona senza bordo
   (`widgets::checkbox`, `partial_checkbox`, `list_item`, `icon_button`).
+- Dimensione della finestra in `Settings::window_size` (pixel logici,
+  `u16`, più "ingrandita"): salvata dopo 1 s senza ridimensionamenti o
+  alla chiusura, applicata all'avvio mai sotto il minimo 760×480. La
+  posizione non si salva: Windows la sceglie (niente finestre fuori da
+  uno schermo staccato).

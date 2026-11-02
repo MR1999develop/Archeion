@@ -66,6 +66,19 @@ pub struct Settings {
     pub language: Language,
     pub profiles: Vec<Profile>,
     pub window: WindowOptions,
+    /// The size the window had when last resized, opened again at start;
+    /// `None` until the user resizes it.
+    pub window_size: Option<WindowSize>,
+}
+
+/// Size of the main window, in logical pixels (as Windows scales them).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WindowSize {
+    pub width: u16,
+    pub height: u16,
+    /// Maximized: `width` and `height` are the size it comes back to.
+    #[serde(default)]
+    pub maximized: bool,
 }
 
 /// How the window behaves, chosen in its Preferences window.
