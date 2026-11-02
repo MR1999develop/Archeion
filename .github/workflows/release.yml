@@ -16,8 +16,8 @@ jobs:
   release:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.99.1
       - uses: Swatinem/rust-cache@v2
       - name: Check that the tag matches the version
         shell: pwsh
@@ -41,7 +41,7 @@ jobs:
           # portable.txt keeps settings and logs in a data folder next to the exe.
           Set-Content "$dir/portable.txt" "Settings and logs are kept in the data folder next to archeion.exe."
           Compress-Archive -Path "$dir/*" -DestinationPath "dist/$name.zip"
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dist/*.zip
           generate_release_notes: true

@@ -1,0 +1,5 @@
+# The toolchain the project is built and checked with (and its minimum
+# version, `rust-version` in Cargo.toml): rustup installs it on demand.
+[toolchain]
+channel = "1.99.1"
+components = ["rustfmt", "clippy"]

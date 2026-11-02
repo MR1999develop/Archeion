@@ -369,6 +369,15 @@ mod tests {
         Password::new(s.to_owned()).unwrap()
     }
 
+    /// The key of a password never changes with the argon2 crate: key files
+    /// written before must still open. Expected value from the reference
+    /// implementation (argon2-cffi, Argon2id v1.3).
+    #[test]
+    fn argon2id_matches_the_reference_implementation() {
+        let key = derive(&pw("correct horse battery"), b"archeion-salt-01", 256, 2, 1).unwrap();
+        assert_eq!(to_hex(&key), "da531be59561517857e112303d1fcb39130eee7922990404ab47a25fd819ed52");
+    }
+
     #[test]
     fn single_entry_round_trips_and_wrong_password_fails() {
         let bytes = encrypt_single(b"secret text", "data", "correct horse").unwrap();

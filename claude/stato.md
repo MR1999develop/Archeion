@@ -4,9 +4,9 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con la prima dimensione più grande (ramo `feature/first-size`
-unito; `tools\check.bat` verde: fmt, clippy, 314 test, 1 ignorato: le
-schermate). La build di rilascio è stata controllata al commit GPLv3
+`main` su Rust 1.99.1 con le dipendenze aggiornate (ramo
+`feature/rust-1.99` unito; `tools\check.bat` verde: fmt, clippy, 315
+test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
 ## Lavoro in corso
@@ -73,3 +73,8 @@ schermate). La build di rilascio è stata controllata al commit GPLv3
   scorrere), ingrandita se lo schermo è più basso di 920 px logici;
   controlli alti 24 e righe a 6 px (`theme::CONTROL_HEIGHT`, `ROW_GAP`).
   Le schermate di prova usano la stessa prima dimensione.
+- Toolchain fissata a 1.99.1 (`rust-toolchain.toml`, CI, MSRV 1.99): il
+  canale "1.99" installato in locale ha la libreria standard incompleta.
+  `fs4` al posto di `fs2` (abbandonato) per lo spazio libero; un test con
+  un valore noto (argon2-cffi) garantisce che le chiavi derivate dalle
+  password non cambino aggiornando `argon2`.

@@ -112,7 +112,8 @@ in the data folder let a second launch bring the first one forward.
 
 ## Build
 
-Rust 1.95 or newer, MSVC toolchain.
+Rust 1.99.1, MSVC toolchain (`rust-toolchain.toml`: rustup installs it
+on demand).
 
 ```
 tools\check.bat      formats, lints and tests, step by step on screen and in
