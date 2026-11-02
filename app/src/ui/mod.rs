@@ -25,7 +25,7 @@ use archeion_core::WindowSize;
 const WINDOW_ICON: u32 = 64;
 /// First size of the window, enough for every setting of a profile without
 /// scrolling, and the smallest it can be made.
-const DEFAULT_SIZE: [f32; 2] = [1100.0, 820.0];
+const DEFAULT_SIZE: [f32; 2] = [1200.0, 1000.0];
 const MIN_SIZE: [f32; 2] = [760.0, 480.0];
 
 /// The size to open the window with: the saved one, never below the
@@ -124,8 +124,9 @@ mod tests {
     }
 
     #[test]
-    fn the_first_size_fits_a_full_hd_screen_at_100_but_not_at_125_percent() {
-        assert!(first_size_fits(vec2(1920.0, 1080.0)));
+    fn the_first_size_fits_a_1440p_screen_but_not_a_full_hd_one() {
+        assert!(first_size_fits(vec2(2560.0, 1440.0)));
+        assert!(!first_size_fits(vec2(1920.0, 1080.0)), "taskbar and title bar leave less than 1000");
         assert!(!first_size_fits(vec2(1536.0, 864.0)));
     }
 }
