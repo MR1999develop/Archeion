@@ -43,12 +43,16 @@ fn sandbox(root: &Path, language: Language) -> Storage {
 }
 
 fn harness(storage: Storage, theme: egui::Theme) -> Harness<'static, ArcheionApp> {
-    Harness::builder().with_size(egui::vec2(1100.0, 720.0)).with_theme(theme).wgpu().build_eframe(move |cc| {
-        super::theme::apply(&cc.egui_ctx);
-        cc.egui_ctx
-            .add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
-        ArcheionApp::state(storage)
-    })
+    Harness::builder()
+        .with_size(egui::Vec2::from(super::super::DEFAULT_SIZE))
+        .with_theme(theme)
+        .wgpu()
+        .build_eframe(move |cc| {
+            super::theme::apply(&cc.egui_ctx);
+            cc.egui_ctx
+                .add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
+            ArcheionApp::state(storage)
+        })
 }
 
 /// A few frames, with time for background reads (tree, sizes, logs).

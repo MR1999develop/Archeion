@@ -16,6 +16,10 @@ pub const SPACE_XS: f32 = 4.0;
 pub const SPACE_S: f32 = 8.0;
 pub const SPACE_M: f32 = 16.0;
 pub const SPACE_L: f32 = 24.0;
+/// Between rows of controls, and the height of a control: compact, so a
+/// profile's settings fit the window without scrolling.
+pub const ROW_GAP: f32 = 6.0;
+pub const CONTROL_HEIGHT: f32 = 24.0;
 /// Form width: long lines are hard to read.
 pub const FORM_MAX_WIDTH: f32 = 600.0;
 pub const SIDE_PANEL_WIDTH: f32 = 240.0;
@@ -195,9 +199,9 @@ pub fn apply(ctx: &Context) {
             (TextStyle::Monospace, FontId::new(13.0, FontFamily::Monospace)),
         ]
         .into();
-        s.spacing.item_spacing = vec2(SPACE_S, SPACE_S);
-        s.spacing.button_padding = vec2(12.0, 5.0);
-        s.spacing.interact_size.y = 28.0;
+        s.spacing.item_spacing = vec2(SPACE_S, ROW_GAP);
+        s.spacing.button_padding = vec2(12.0, 3.0);
+        s.spacing.interact_size.y = CONTROL_HEIGHT;
         s.spacing.window_margin = Margin::same(16);
         s.spacing.menu_margin = Margin::same(6);
         s.spacing.indent = 20.0;

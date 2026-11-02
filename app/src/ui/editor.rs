@@ -225,7 +225,7 @@ pub fn show(
     });
     section(ui, "alerts", &tr.t("alerts"), false, false, |ui| alerts(ui, tr, p, &mut out));
 
-    ui.add_space(theme::SPACE_L);
+    ui.add_space(theme::SPACE_M);
     run_now(ui, tr, p, format, password, drafts, busy, dest.foreign.is_some(), &mut out);
     delete_dialog(ui, tr, p, drafts, busy, &mut out);
     out
@@ -973,7 +973,7 @@ fn add_rule(p: &mut Profile, rule: Exclusion) -> bool {
 /// time it is shown; `force_open` keeps it open while it shows something
 /// that must be seen (a problem to fix).
 fn section(ui: &mut Ui, id: &str, title: &str, open: bool, force_open: bool, add: impl FnOnce(&mut Ui)) {
-    ui.add_space(theme::SPACE_S);
+    ui.add_space(theme::SPACE_XS);
     let mut header =
         egui::CollapsingHeader::new(widgets::section_text(title)).id_salt(("section", id)).default_open(open);
     if force_open {
