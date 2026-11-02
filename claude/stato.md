@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con la prima dimensione 1200×1000 (ramo `feature/size-1200`
-unito; `tools\check.bat` verde: fmt, clippy, 315
+`main` con le impostazioni del profilo più compatte (ramo
+`feature/compact-settings` unito; `tools\check.bat` verde: fmt, clippy, 315
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -79,3 +79,7 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   `fs4` al posto di `fs2` (abbandonato) per lo spazio libero; un test con
   un valore noto (argon2-cffi) garantisce che le chiavi derivate dalle
   password non cambino aggiornando `argon2`.
+- Impostazioni del profilo larghe `theme::SETTINGS_MAX_WIDTH` (760; la
+  Guida e gli altri moduli restano a `FORM_MAX_WIDTH` 600 per la lettura),
+  il nome come riga e non come sezione, spazio libero accanto alla
+  destinazione: con la finestra 1200×1000 finiscono a circa 655 px.

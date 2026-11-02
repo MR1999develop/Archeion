@@ -14,6 +14,10 @@ All notable changes to Archeion are listed here. The format follows
   profile without scrolling, or maximized on a screen too short for it
   (Full HD included). Controls
   and rows are a little closer together.
+- The profile settings are more compact: the name is a row ("Name" and
+  its field) instead of a section, sections sit closer, the free space
+  of the destination is beside its folder, and the form is wider so its
+  hints fit on one line.
 - `ARCHEION_DATA_DIR` names another data folder (settings and logs); the
   commands without a window read the password of an encrypted profile from
   `ARCHEION_PASSWORD` when none is saved. Both serve the end-to-end tests,

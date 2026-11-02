@@ -22,6 +22,9 @@ pub const ROW_GAP: f32 = 6.0;
 pub const CONTROL_HEIGHT: f32 = 24.0;
 /// Form width: long lines are hard to read.
 pub const FORM_MAX_WIDTH: f32 = 600.0;
+/// The profile settings: wider, so each hint fits on one line and the
+/// whole form fits the window's height.
+pub const SETTINGS_MAX_WIDTH: f32 = 760.0;
 pub const SIDE_PANEL_WIDTH: f32 = 240.0;
 /// Corners of controls, list items and highlighted cards.
 pub const RADIUS: u8 = 4;
