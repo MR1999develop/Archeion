@@ -8,6 +8,13 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Added
 
+- "Delete profile" can delete the profile's backups too: a tick in the
+  confirmation, a warning that they cannot be recovered and "I
+  understand" first. Only what Archeion wrote in the destination folder
+  goes (archives, chunks, key, descriptor, unfinished backups), and the
+  folder itself when nothing else is left; other files stay and the status
+  bar says how many. A folder of another profile is refused. It runs in
+  the background, and there is no Undo for it.
 - File > Export profile… saves every rule of the selected profile to a
   readable `.archeion-profile` file (never the password); File > Import
   profile… adds it, with its scheduled tasks. On another computer the

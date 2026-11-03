@@ -54,7 +54,10 @@ pub use chunker::ChunkParams;
 pub use crypto::Password;
 pub use extract::{ExtractRequest, Secret, extract};
 pub use merge::{delete_archive, merge, merge_pending, merge_range};
-pub use repo::{adopt_destination, destination_busy, destination_owner, list_archives};
+pub use repo::{
+    DestinationDeleted, adopt_destination, delete_destination, destination_busy, destination_owner,
+    list_archives,
+};
 pub use restore::{RestoreItem, RestoreRequest, RestoreTarget, restore};
 pub use verify::verify;
 

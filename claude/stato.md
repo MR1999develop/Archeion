@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con la ricerca anche delle cartelle (ramo `feature/search-folders`
-unito; `tools\check.bat` verde: fmt, clippy, 321
+`main` con l'eliminazione dei backup insieme al profilo (ramo
+`feature/delete-backups` unito; `tools\check.bat` verde: fmt, clippy, 326
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -106,3 +106,10 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   torna nella versione più recente, una cartella com'era nel backup più
   recente che la contiene. Una versione o una data più vecchia non si
   sceglie più dalla finestra.
+- Eliminare i backup con il profilo (`archeion_engine::delete_destination`):
+  solo se il descrittore della cartella è di quel profilo; si cancellano
+  i nomi scritti da Archeion (`archeion.*`, cartelle d'archivio, `chunks`,
+  `partial`, `merging`, `old`, `deleting`, `merge.journal`), il
+  descrittore per ultimo, poi la cartella se è vuota. Niente Annulla; la
+  password salvata si toglie subito. Test nel motore e nella finestra
+  (`app/src/ui/app_tests.rs`).

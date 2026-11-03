@@ -121,6 +121,104 @@ pub fn adopt_destination(profile: &Profile) -> Result<()> {
     retry(|| fs::rename(&tmp, &path)).map_err(EngineError::io(format!("replacing {}", path.display())))
 }
 
+/// What [`delete_destination`] did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DestinationDeleted {
+    /// The folder is gone: it held nothing else.
+    pub folder_removed: bool,
+    /// Names in the folder that Archeion did not write, left in place.
+    pub left: Vec<String>,
+}
+
+/// Deletes the backups of `profile`: everything Archeion wrote in its
+/// destination folder (archives, chunks, key, descriptor, unfinished
+/// backups), then the folder itself when nothing else is in it. Files
+/// Archeion did not write are left, and named. Cannot be undone.
+///
+/// The folder must hold this profile's backups: a folder of another
+/// profile is refused, one without backups is left alone.
+///
+/// # Errors
+/// [`EngineError::ForeignDestination`] for another profile's folder,
+/// [`EngineError::Busy`] while a run uses it, or
+/// [`EngineError::DestinationUnavailable`]; otherwise see [`EngineError`].
+pub fn delete_destination(profile: &Profile) -> Result<DestinationDeleted> {
+    let root = profile.destination.path();
+    if root.as_os_str().is_empty() {
+        return Ok(DestinationDeleted::default());
+    }
+    ensure_reachable(root)?;
+    if !root.exists() {
+        return Ok(DestinationDeleted { folder_removed: true, left: Vec::new() });
+    }
+    match read_descriptor(root)? {
+        Some(d) if d.profile == profile.id => {}
+        Some(_) => return Err(EngineError::ForeignDestination),
+        None => {
+            // No backups here: nothing of Archeion's to delete.
+            return Ok(DestinationDeleted { folder_removed: false, left: names_in(root)? });
+        }
+    }
+    let lock_path = root.join(LOCK);
+    let lock = File::options()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&lock_path)
+        .map_err(EngineError::io(format!("opening {}", lock_path.display())))?;
+    match lock.try_lock() {
+        Ok(()) => {}
+        Err(TryLockError::WouldBlock) => return Err(EngineError::Busy),
+        Err(TryLockError::Error(e)) => return Err(EngineError::io("locking the destination")(e)),
+    }
+    tracing::info!(profile = %profile.id, root = %root.display(), "deleting the backups");
+    let mut left = Vec::new();
+    for name in names_in(root)? {
+        if !written_by_archeion(&name) {
+            left.push(name);
+            continue;
+        }
+        // The descriptor last, so a deletion cut short can be done again;
+        // the lock once released.
+        if name == DESCRIPTOR || name == LOCK {
+            continue;
+        }
+        remove_entry(&root.join(&name))?;
+    }
+    remove_entry(&root.join(DESCRIPTOR))?;
+    drop(lock);
+    remove_entry(&lock_path)?;
+    let folder_removed = left.is_empty() && retry(|| fs::remove_dir(root)).is_ok();
+    Ok(DestinationDeleted { folder_removed, left })
+}
+
+/// Names Archeion writes at the root of a destination.
+fn written_by_archeion(name: &str) -> bool {
+    name.starts_with("archeion.")
+        || [JOURNAL, PARTIAL, MERGING, OLD, DELETING, crate::chunks::CHUNKS_DIR].contains(&name)
+        || name.parse::<ArchiveName>().is_ok()
+}
+
+/// The names in `dir`, sorted.
+fn names_in(dir: &Path) -> Result<Vec<String>> {
+    let read = fs::read_dir(dir).map_err(EngineError::io(format!("reading {}", dir.display())))?;
+    let mut names: Vec<String> =
+        read.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
+    names.sort_unstable();
+    Ok(names)
+}
+
+/// Removes a file or a folder with all it holds; a missing one is fine.
+fn remove_entry(path: &Path) -> Result<()> {
+    let result = retry(|| match fs::symlink_metadata(path) {
+        Ok(m) if m.is_dir() => fs::remove_dir_all(path),
+        Ok(_) => fs::remove_file(path),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e),
+    });
+    result.map_err(EngineError::io(format!("deleting {}", path.display())))
+}
+
 /// True while a backup, merge or other run holds the destination of
 /// `profile` (its lock file is locked). A snapshot: the run may start or
 /// end right after; runs still check the lock themselves.
