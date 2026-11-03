@@ -196,3 +196,38 @@ pub fn list_item(ui: &mut Ui, selected: bool, title: RichText, detail: Option<&s
     }
     resp
 }
+
+/// A name that can be chosen in place (a file of the restore tree): plain
+/// text that takes the look of a selected list item, with its accent mark,
+/// while `selected`, and a lighter fill when hovered. It does not keep the
+/// keyboard focus, so the arrow keys stay with the caller.
+pub fn chosen_name(ui: &mut Ui, selected: bool, text: impl Into<egui::WidgetText>) -> Response {
+    let t = Tokens::current(ui);
+    let text = text.into();
+    let name = text.text().to_owned();
+    let behind = ui.painter().add(egui::Shape::Noop);
+    // Room for the accent mark before the text.
+    ui.add_space(theme::SPACE_S);
+    let label = egui::Label::new(text).selectable(false).sense(Sense::click());
+    let resp = ui.add(label);
+    if resp.has_focus() {
+        resp.surrender_focus();
+    }
+    resp.widget_info(|| WidgetInfo::selected(Role::ListItem, true, selected, &name));
+    let rect = egui::Rect::from_min_max(
+        resp.rect.min - egui::vec2(theme::SPACE_S, 2.0),
+        resp.rect.max + egui::vec2(theme::SPACE_XS, 2.0),
+    );
+    let fill = if selected { Some(t.selected) } else { resp.hovered().then_some(t.control_hover) };
+    if let Some(fill) = fill {
+        ui.painter().set(behind, egui::Shape::rect_filled(rect, theme::RADIUS, fill));
+    }
+    if selected {
+        let mark = egui::Rect::from_center_size(
+            egui::pos2(rect.left() + 1.5, rect.center().y),
+            egui::vec2(3.0, (rect.height() * 0.6).min(16.0)),
+        );
+        ui.painter().rect_filled(mark, 1.5, t.accent);
+    }
+    resp
+}

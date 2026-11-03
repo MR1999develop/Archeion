@@ -94,13 +94,19 @@ fn screens() {
             let note = super::symbol::with(super::symbol::FILE, "note.txt");
             if let Some(n) = h
                 .query_all_by(|n| {
-                    n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.contains(&note))
+                    n.role() == egui::accesskit::Role::ListItem
+                        && n.label().is_some_and(|l| l.contains(&note))
                 })
                 .next()
             {
                 n.click();
             }
             shot(&mut h, &out, &name("3b-restore-versions"));
+            // The pointer elsewhere, after an arrow key: the file shown
+            // must still stand out.
+            h.input_mut().events.push(egui::Event::PointerMoved(egui::pos2(1000.0, 700.0)));
+            h.key_press(egui::Key::ArrowDown);
+            shot(&mut h, &out, &name("3c-restore-shown"));
             h.state_mut().restore.open_manage();
             shot(&mut h, &out, &name("4-manage"));
             h.state_mut().tab = Tab::Activity;

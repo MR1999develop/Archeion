@@ -260,8 +260,33 @@ impl RestoreView {
                 Some(Pick::Folder { exclude, .. }) if !exclude.is_empty() => exclude.clear(),
                 _ => {
                     self.picks.remove(pos);
+                    // A file the folder's date lacks was left out of it only
+                    // to be ticked alone: it goes back to how it was.
+                    if let Some(Pick::Folder { exclude, .. }) = holder_of(&mut self.picks, &key)
+                        && let Some(at) = exclude.iter().position(|x| *x == key)
+                    {
+                        exclude.swap_remove(at);
+                        let now: Vec<Ticked<'_>> = self.picks.iter().map(ticked).collect();
+                        if !matches!(tree.tick(node, &now), Tick::NotInFolderDate { .. })
+                            && let Some(Pick::Folder { exclude, .. }) = holder_of(&mut self.picks, &key)
+                        {
+                            exclude.push(key);
+                        }
+                    }
                 }
             }
+            return;
+        }
+        // A file the ticked folder's date lacks (deleted before it): ticked
+        // on its own, in its newest version or the one chosen.
+        // The folder leaves it out, so the two never claim the same file.
+        let now: Vec<Ticked<'_>> = self.picks.iter().map(ticked).collect();
+        if !node.is_dir() && matches!(tree.tick(node, &now), Tick::NotInFolderDate { .. }) {
+            if let Some(Pick::Folder { exclude, .. }) = holder_of(&mut self.picks, &key) {
+                exclude.push(key.clone());
+            }
+            self.load_versions(ctx, profile, &key);
+            self.picks.push(Pick::File { key, loading: true, versions: Vec::new() });
             return;
         }
         let holder = self
@@ -534,6 +559,14 @@ struct Rows {
     scroll: bool,
 }
 
+/// The nearest ticked folder holding `key`.
+fn holder_of<'a>(picks: &'a mut [Pick], key: &str) -> Option<&'a mut Pick> {
+    picks
+        .iter_mut()
+        .filter(|p| matches!(p, Pick::Folder { .. }) && keys::is_within(key, p.key()))
+        .max_by_key(|p| p.key().len())
+}
+
 /// A click in the tree, applied once it is drawn.
 #[derive(Debug, Clone, Copy)]
 enum RowClick {
@@ -685,7 +718,7 @@ fn row(
         } else {
             rows.files.push(idx);
             let on = shown == Some(n.key());
-            let resp = ui.add(egui::Button::selectable(on, text).frame_when_inactive(false));
+            let resp = widgets::chosen_name(ui, on, text);
             if on && rows.scroll {
                 resp.scroll_to_me(None);
             }
@@ -710,8 +743,14 @@ fn tick_box(ui: &mut Ui, tr: &Tr, tree: &Tree, n: &Node, tick: Tick, name: &str)
         arg(path.unwrap_or_default())
     };
     match tick {
-        Tick::NotInFolderDate { folder } => {
+        Tick::NotInFolderDate { folder } if !n.is_dir() => {
+            // Ticked on its own: its newest version comes back too.
             let hint = tr.t_args("tick-not-in-folder-date", &[("folder", folder_path(folder))]);
+            let mut on = false;
+            widgets::checkbox(ui, &mut on, text).accessible_name(name).on_hover_text(hint).changed()
+        }
+        Tick::NotInFolderDate { folder } => {
+            let hint = tr.t_args("tick-not-in-folder-date-folder", &[("folder", folder_path(folder))]);
             ui.add_enabled(false, egui::Checkbox::new(&mut false, text))
                 .accessible_name(name)
                 .on_disabled_hover_text(hint);

@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con le frecce tra i file e le versioni anche dentro le cartelle
-spuntate (ramo `feature/versions-keys` unito; `tools\check.bat` verde: fmt, clippy, 336
+`main` con il file mostrato evidenziato e i file eliminati spuntabili
+dentro una cartella spuntata (ramo `fix/shown-and-deleted` unito; `tools\check.bat` verde: fmt, clippy, 337
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -134,3 +134,9 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   che ha una scelta propria, così la cartella resta spuntata intera.
   Frecce su e giù: tra i file disegnati (albero o ricerca), solo quando
   nessun campo di testo ha la tastiera.
+- Nome di un file nell'albero: `widgets::chosen_name` (etichetta cliccabile
+  con lo sfondo e il segno d'accento della voce selezionata, cede il focus
+  così le frecce restano all'albero). File assente dalla data di una
+  cartella spuntata: spuntabile da solo; entra nelle esclusioni della
+  cartella (niente conflitto quando si sostituisce l'originale) e ne esce
+  quando lo si toglie.
