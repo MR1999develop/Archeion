@@ -182,6 +182,18 @@ pub fn free_space(profile: &Profile) -> Option<u64> {
     crate::space::available(crate::space::existing_ancestor(root)?)
 }
 
+/// File system of the drive or share of the destination (of its nearest
+/// existing parent when the folder is not created yet): "NTFS", "exFAT",
+/// "FAT32"…; `None` when it is not reachable or does not say.
+#[must_use]
+pub fn destination_file_system(profile: &Profile) -> Option<String> {
+    let root = profile.destination.path();
+    if root.as_os_str().is_empty() || ensure_reachable(root).is_err() {
+        return None;
+    }
+    archeion_win::file_system(crate::space::existing_ancestor(root)?)
+}
+
 /// The recovery key of an encrypted destination: 64 hex characters in
 /// groups of four, the password that opens every zip with 7-Zip.
 /// `Ok(None)` for a destination that is not encrypted or does not exist.

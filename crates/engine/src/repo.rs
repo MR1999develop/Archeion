@@ -60,11 +60,18 @@ impl EncryptionInfo {
     }
 }
 
+/// The swap of a merge, written before any archive is moved.
 #[derive(Serialize, Deserialize)]
 struct Journal {
+    /// [`JOURNAL_FORMAT`]; journals of earlier versions have none.
+    #[serde(default)]
+    format: u32,
     target: String,
     members: Vec<String>,
 }
+
+/// Format of [`Journal`]: a newer one is left alone.
+const JOURNAL_FORMAT: u32 = 1;
 
 /// An opened destination, locked for exclusive use until dropped.
 #[derive(Debug)]
@@ -118,7 +125,8 @@ pub fn adopt_destination(profile: &Profile) -> Result<()> {
         serde_json::to_string_pretty(&descriptor).expect("descriptor serializes").as_bytes(),
     )?;
     let path = root.join(DESCRIPTOR);
-    retry(|| fs::rename(&tmp, &path)).map_err(EngineError::io(format!("replacing {}", path.display())))
+    retry(|| archeion_win::rename_durably(&tmp, &path))
+        .map_err(EngineError::io(format!("replacing {}", path.display())))
 }
 
 /// What [`trash_destination`] did.
@@ -382,7 +390,27 @@ impl Repo {
     fn refresh_list_mac(&self) -> Result<()> {
         let Some(keys) = &self.keys else { return Ok(()) };
         let mac = keys.list_mac(&self.archives()?);
-        write_durably(&self.root.join(LIST_MAC_FILE), mac.as_bytes())
+        self.write_list_mac(&mac)
+    }
+
+    /// Signs both the current list and `future`, the list once the commit
+    /// about to happen is done: an interruption in between leaves a
+    /// signature that still matches.
+    fn expect_list(&self, future: &mut Vec<ArchiveName>) -> Result<()> {
+        let Some(keys) = &self.keys else { return Ok(()) };
+        future.sort_unstable();
+        future.dedup();
+        let text = format!("{}\n{}", keys.list_mac(&self.archives()?), keys.list_mac(future));
+        self.write_list_mac(&text)
+    }
+
+    /// Replaces the signature file whole: a temporary file, then a rename.
+    fn write_list_mac(&self, text: &str) -> Result<()> {
+        let path = self.root.join(LIST_MAC_FILE);
+        let tmp = self.root.join(format!("{LIST_MAC_FILE}.tmp"));
+        write_durably(&tmp, text.as_bytes())?;
+        retry(|| archeion_win::rename_durably(&tmp, &path))
+            .map_err(EngineError::io(format!("replacing {}", path.display())))
     }
 
     /// `Some(false)` when the signed list of archives does not match the
@@ -391,7 +419,8 @@ impl Repo {
         let Some(keys) = &self.keys else { return Ok(None) };
         let archives = self.archives()?;
         let saved = fs::read_to_string(self.root.join(LIST_MAC_FILE)).unwrap_or_default();
-        Ok(Some(archives.is_empty() && saved.is_empty() || saved.trim() == keys.list_mac(&archives)))
+        let mac = keys.list_mac(&archives);
+        Ok(Some(archives.is_empty() && saved.trim().is_empty() || saved.lines().any(|l| l.trim() == mac)))
     }
 
     /// Re-wraps the master key with a new password.
@@ -467,7 +496,9 @@ impl Repo {
     pub(crate) fn remove_archive(&self, name: &ArchiveName) -> Result<()> {
         let dir = self.dir(name);
         let doomed = self.root.join(format!("{name}.{DELETING}"));
-        retry(|| fs::rename(&dir, &doomed))
+        let mut future: Vec<ArchiveName> = self.archives()?.into_iter().filter(|a| a != name).collect();
+        self.expect_list(&mut future)?;
+        retry(|| archeion_win::rename_durably(&dir, &doomed))
             .map_err(EngineError::io(format!("deleting {}", dir.display())))?;
         self.refresh_list_mac()?;
         // The archive is gone already; a folder still in use is removed
@@ -540,15 +571,20 @@ impl Repo {
     /// Makes a finished backup archive visible.
     pub(crate) fn commit(&self, staging: &Path, name: &ArchiveName) -> Result<()> {
         let dir = self.dir(name);
-        retry(|| fs::rename(staging, &dir))
+        let mut future = self.archives()?;
+        future.push(*name);
+        self.expect_list(&mut future)?;
+        retry(|| archeion_win::rename_durably(staging, &dir))
             .map_err(EngineError::io(format!("committing {}", dir.display())))?;
         self.refresh_list_mac()
     }
 
-    /// Replaces `members` by the merged archive in `staging`.
+    /// Replaces `members` by the merged archive in `staging`, whose files
+    /// and manifest are on the disk already.
     ///
-    /// A journal is written first; [`Self::recover`] completes the swap if
-    /// the process stops in the middle.
+    /// A journal is written first (whole, under a temporary name, then
+    /// renamed); [`Self::recover`] completes the swap if the process stops
+    /// in the middle.
     pub(crate) fn commit_merge(
         &self,
         staging: &Path,
@@ -556,34 +592,52 @@ impl Repo {
         members: &[ArchiveName],
     ) -> Result<()> {
         let journal = Journal {
+            format: JOURNAL_FORMAT,
             target: target.to_string(),
             members: members.iter().map(ToString::to_string).collect(),
         };
-        write_durably(
-            &self.root.join(JOURNAL),
-            serde_json::to_string(&journal).expect("journal serializes").as_bytes(),
-        )?;
+        let mut future: Vec<ArchiveName> =
+            self.archives()?.into_iter().filter(|a| !members.contains(a)).collect();
+        future.push(*target);
+        self.expect_list(&mut future)?;
+        let jpath = self.root.join(JOURNAL);
+        let tmp = self.root.join(format!("{JOURNAL}.tmp"));
+        write_durably(&tmp, serde_json::to_string(&journal).expect("journal serializes").as_bytes())?;
+        retry(|| archeion_win::rename_durably(&tmp, &jpath))
+            .map_err(EngineError::io("writing the merge journal"))?;
         self.finish_merge(staging, &journal)?;
         self.refresh_list_mac()
     }
 
     /// Swaps the members for the merged archive, then removes them. Each
-    /// rename is retried while Windows reports a file in use. When an old
-    /// member cannot be removed yet, the merge is done all the same: the
-    /// journal stays, and the next run removes what is left.
+    /// rename is retried while Windows reports a file in use. The members
+    /// are removed only once the merged archive is in place with a
+    /// readable manifest; when it is not (its folder was lost), they are
+    /// put back and the merge counts as not done. When an old member
+    /// cannot be removed yet, the journal stays and the next run removes
+    /// what is left.
     fn finish_merge(&self, staging: &Path, journal: &Journal) -> Result<()> {
         for m in &journal.members {
             let dir = self.root.join(m);
-            if dir.exists() {
-                let old = self.root.join(format!("{m}.{OLD}"));
-                retry(|| fs::rename(&dir, &old))
+            let old = self.root.join(format!("{m}.{OLD}"));
+            // With `name.old` there, `name` is the merged archive (it takes
+            // the name of the newest member) or the move was done already.
+            if dir.exists() && !old.exists() {
+                retry(|| archeion_win::rename_durably(&dir, &old))
                     .map_err(EngineError::io(format!("moving {}", dir.display())))?;
             }
         }
         let target = self.root.join(&journal.target);
-        if staging.exists() {
-            retry(|| fs::rename(staging, &target))
+        if staging.exists() && !target.exists() {
+            retry(|| archeion_win::rename_durably(staging, &target))
                 .map_err(EngineError::io(format!("committing {}", target.display())))?;
+        }
+        if !self.merged_in_place(journal) {
+            tracing::warn!(target_archive = %journal.target, "the merged archive is missing: the merge is undone");
+            for m in &journal.members {
+                self.put_back(m)?;
+            }
+            return self.remove_journal();
         }
         let mut left = false;
         for m in &journal.members {
@@ -595,6 +649,29 @@ impl Repo {
         if left {
             return Ok(());
         }
+        self.remove_journal()
+    }
+
+    /// True when the merged archive of `journal` is in place and its
+    /// manifest reads.
+    fn merged_in_place(&self, journal: &Journal) -> bool {
+        let Ok(name) = journal.target.parse::<ArchiveName>() else { return false };
+        let dir = self.root.join(&journal.target);
+        dir.is_dir() && read_manifest(&dir, &name, self.keys()).is_ok()
+    }
+
+    /// `name.old` becomes `name` again, when there is no `name`.
+    fn put_back(&self, name: &str) -> Result<()> {
+        let old = self.root.join(format!("{name}.{OLD}"));
+        let dir = self.root.join(name);
+        if old.is_dir() && !dir.exists() {
+            retry(|| archeion_win::rename_durably(&old, &dir))
+                .map_err(EngineError::io(format!("putting back {}", dir.display())))?;
+        }
+        Ok(())
+    }
+
+    fn remove_journal(&self) -> Result<()> {
         let jpath = self.root.join(JOURNAL);
         retry(|| fs::remove_file(&jpath)).map_err(EngineError::io("removing the merge journal"))
     }
@@ -602,27 +679,64 @@ impl Repo {
     /// Completes an interrupted merge and removes abandoned merge and
     /// deletion folders. Unfinished backups are kept for the next backup to
     /// resume ([`Self::take_partial`]). Returns true when the list of
-    /// archives changed (a merge or a deletion was completed).
+    /// archives changed (a merge or a deletion was completed or undone).
+    ///
+    /// Nothing is removed that may be the only copy: an `.old` member whose
+    /// archive is not in place gets its name back, whatever the journal
+    /// says (on exFAT or a share the journal itself may have been lost).
     fn recover(&self) -> Result<bool> {
         let jpath = self.root.join(JOURNAL);
         let mut changed = jpath.exists();
         if changed {
             let text = fs::read_to_string(&jpath).map_err(EngineError::io("reading the merge journal"))?;
-            let journal: Journal = serde_json::from_str(&text)
-                .map_err(|e| EngineError::Damaged { archive: JOURNAL.to_owned(), message: e.to_string() })?;
-            tracing::warn!(target_archive = %journal.target, "completing an interrupted merge");
-            let staging = self.root.join(format!("{}.{MERGING}", journal.target));
-            self.finish_merge(&staging, &journal)?;
+            match serde_json::from_str::<Journal>(&text) {
+                Ok(journal) if journal.format > JOURNAL_FORMAT => {
+                    return Err(EngineError::Damaged {
+                        archive: JOURNAL.to_owned(),
+                        message: format!("format {} is newer than this version of Archeion", journal.format),
+                    });
+                }
+                Ok(journal) => {
+                    tracing::warn!(target_archive = %journal.target, "completing an interrupted merge");
+                    let staging = self.root.join(format!("{}.{MERGING}", journal.target));
+                    self.finish_merge(&staging, &journal)?;
+                }
+                // Not written whole, so nothing was moved after it: the
+                // loop below puts back whatever may have been.
+                Err(e) => {
+                    tracing::warn!(error = %e, "an unreadable merge journal: the merge counts as not done");
+                    self.remove_journal()?;
+                }
+            }
         }
-        let entries = fs::read_dir(&self.root).map_err(EngineError::io("listing the destination"))?;
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            // With the journal handled above, an `.old` folder is a leftover.
+        let folders: Vec<String> = fs::read_dir(&self.root)
+            .map_err(EngineError::io("listing the destination"))?
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        // A member moved aside whose archive is not back: its name again.
+        for name in &folders {
+            if let Some(member) = name.strip_suffix(&format!(".{OLD}"))
+                && !self.root.join(member).exists()
+            {
+                tracing::warn!(
+                    archive = member,
+                    "putting back an archive left aside by an interrupted merge"
+                );
+                self.put_back(member)?;
+                changed = true;
+            }
+        }
+        for name in &folders {
+            let path = self.root.join(name);
+            // With the journal handled above, an `.old` folder still there
+            // has its archive in place: a leftover.
             let abandoned = [MERGING, DELETING, OLD].iter().any(|s| name.ends_with(&format!(".{s}")));
-            if abandoned && entry.path().is_dir() {
+            if abandoned && path.is_dir() {
                 tracing::info!(folder = %name, "removing an interrupted run");
                 // Still in use: tried again next time; the run goes on.
-                remove_dir_best_effort(&entry.path());
+                remove_dir_best_effort(&path);
                 // An interrupted deletion had already removed an archive.
                 changed |= name.ends_with(&format!(".{DELETING}"));
             }

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/core", "crates/engine", "crates/scheduler", "app"]
+members = ["crates/core", "crates/engine", "crates/scheduler", "crates/win", "app"]
 
 [workspace.package]
 version = "0.1.0"
@@ -14,6 +14,7 @@ repository = "https://github.com/MR1999develop/archeion"
 archeion_core = { path = "crates/core" }
 archeion_engine = { path = "crates/engine" }
 archeion_scheduler = { path = "crates/scheduler" }
+archeion_win = { path = "crates/win" }
 
 anyhow = "1"
 blake3 = "1"

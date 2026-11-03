@@ -1004,7 +1004,7 @@ impl ArcheionApp {
 
 /// What one look at the destination found: the format lock, the free
 /// space, and the owner when it is another profile.
-type DestinationLook = (FormatLock, Option<u64>, Option<ProfileId>);
+type DestinationLook = (FormatLock, Option<u64>, Option<ProfileId>, Option<String>);
 
 /// Background look at a profile's destination: does it already hold backups,
 /// and in which format? Never blocks the window (a share may be slow).
@@ -1016,6 +1016,8 @@ struct FormatCheck {
     free: Option<u64>,
     /// Owner of the destination when it is another profile.
     foreign: Option<ProfileId>,
+    /// File system of the destination's drive, when known.
+    file_system: Option<String>,
     rx: Option<mpsc::Receiver<DestinationLook>>,
 }
 
@@ -1028,6 +1030,7 @@ impl FormatCheck {
         if profile.destination.is_empty() {
             self.free = None;
             self.foreign = None;
+            self.file_system = None;
             return FormatLock::Free;
         }
         let key = (profile.id, profile.destination.clone());
@@ -1036,6 +1039,7 @@ impl FormatCheck {
             self.state = None;
             self.free = None;
             self.foreign = None;
+            self.file_system = None;
             let (tx, rx) = mpsc::channel();
             let (p, ctx) = (profile.clone(), ctx.clone());
             let spawned = std::thread::Builder::new().name("format-check".into()).spawn(move || {
@@ -1046,7 +1050,8 @@ impl FormatCheck {
                 };
                 let free = archeion_engine::free_space(&p);
                 let foreign = archeion_engine::destination_owner(&p).ok().flatten().filter(|o| *o != p.id);
-                let _ = tx.send((lock, free, foreign));
+                let file_system = archeion_engine::destination_file_system(&p);
+                let _ = tx.send((lock, free, foreign, file_system));
                 ctx.request_repaint();
             });
             self.rx = spawned.ok().map(|_| rx);
@@ -1055,11 +1060,12 @@ impl FormatCheck {
             }
         }
         if let Some(rx) = &self.rx
-            && let Ok((lock, free, foreign)) = rx.try_recv()
+            && let Ok((lock, free, foreign, file_system)) = rx.try_recv()
         {
             self.state = Some(lock);
             self.free = free;
             self.foreign = foreign;
+            self.file_system = file_system;
             self.rx = None;
         }
         self.state.unwrap_or(FormatLock::Checking)
@@ -1072,7 +1078,7 @@ impl FormatCheck {
             Some(p) => editor::Foreign::Profile(p.name.clone()),
             None => editor::Foreign::Deleted,
         });
-        editor::DestinationInfo { free: self.free, foreign }
+        editor::DestinationInfo { free: self.free, foreign, file_system: self.file_system.clone() }
     }
 }
 

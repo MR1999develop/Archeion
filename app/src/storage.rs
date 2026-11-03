@@ -79,7 +79,7 @@ impl Storage {
         file.write_all(text.as_bytes()).context("writing settings")?;
         file.sync_all().context("flushing settings")?;
         drop(file);
-        fs::rename(&tmp, &path).with_context(|| format!("replacing {}", path.display()))
+        archeion_win::rename_durably(&tmp, &path).with_context(|| format!("replacing {}", path.display()))
     }
 
     /// Log file in append mode, restarted when it grew past the limit.

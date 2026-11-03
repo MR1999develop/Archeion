@@ -5,9 +5,9 @@ use archeion_core::{
     Retention, RunEvent, run::RECENT_FILES,
 };
 use archeion_engine::{
-    EngineError, EventSink, ExistingFormat, Password, RestoreItem, RestoreRequest, RestoreTarget, backup,
-    backup_stopping_after, check_password, delete_archive, file_versions, list_archives, merge, merge_range,
-    restore, search, verify,
+    EngineError, EventSink, ExistingFormat, Password, RestoreItem, RestoreRequest, RestoreTarget, Tuning,
+    backup, backup_stopping_after, backup_tuned, check_password, delete_archive, file_versions,
+    list_archives, merge, merge_range, restore, search, verify,
 };
 use std::{fs, path::PathBuf, sync::Mutex, thread::sleep, time::Duration};
 
@@ -1406,4 +1406,121 @@ fn a_merge_lists_the_files_it_carries_and_the_versions_it_drops() {
     let dropped: Vec<&FileDone> = files.iter().filter(|f| f.action == FileAction::Dropped).collect();
     assert_eq!(dropped.len(), 1, "{files:?}");
     assert!(dropped[0].path.ends_with("a.txt") && dropped[0].bytes == 5, "the first a.txt: {:?}", dropped[0]);
+}
+
+/// Three backups, their names oldest first, and the folder of each.
+fn three_backups_named() -> (Fixture, Vec<String>) {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    fs::write(f.source.join("a.txt"), "v2").unwrap();
+    run_backup(&f.profile);
+    fs::write(f.source.join("b.txt"), "b").unwrap();
+    run_backup(&f.profile);
+    let mut names: Vec<String> =
+        list_archives(&f.profile, None).unwrap().into_iter().map(|a| a.name).collect();
+    names.sort();
+    (f, names)
+}
+
+fn names_now(f: &Fixture) -> Vec<String> {
+    let mut names: Vec<String> =
+        list_archives(&f.profile, None).unwrap().into_iter().map(|a| a.name).collect();
+    names.sort();
+    names
+}
+
+/// Opens the destination as the next run would (verify), which recovers.
+fn next_run(f: &Fixture) {
+    let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+}
+
+#[test]
+fn a_merge_whose_journal_was_lost_puts_its_members_back() {
+    // On exFAT or a share the journal may not reach the disk while the
+    // members are already moved aside.
+    let (f, names) = three_backups_named();
+    let dest = f.profile.destination.path().to_path_buf();
+    for n in &names[1..] {
+        fs::rename(dest.join(n), dest.join(format!("{n}.old"))).unwrap();
+    }
+    next_run(&f);
+    assert_eq!(names_now(&f), names, "the only copies are back");
+}
+
+#[test]
+fn a_merge_whose_merged_archive_was_lost_is_undone() {
+    let (f, names) = three_backups_named();
+    let dest = f.profile.destination.path().to_path_buf();
+    let journal = serde_json::json!({ "format": 1, "target": names[2], "members": [names[1], names[2]] });
+    fs::write(dest.join("merge.journal"), journal.to_string()).unwrap();
+    for n in &names[1..] {
+        fs::rename(dest.join(n), dest.join(format!("{n}.old"))).unwrap();
+    }
+    next_run(&f);
+    assert_eq!(names_now(&f), names);
+    assert!(!dest.join("merge.journal").exists());
+}
+
+#[test]
+fn a_merge_journal_written_in_part_means_no_merge() {
+    let (f, names) = three_backups_named();
+    let dest = f.profile.destination.path().to_path_buf();
+    fs::write(dest.join("merge.journal"), r#"{"format":1,"target":"20"#).unwrap();
+    fs::rename(dest.join(&names[1]), dest.join(format!("{}.old", names[1]))).unwrap();
+    next_run(&f);
+    assert_eq!(names_now(&f), names);
+    assert!(!dest.join("merge.journal").exists());
+}
+
+#[test]
+fn an_interrupted_merge_with_its_archive_in_place_is_completed() {
+    let (f, names) = three_backups_named();
+    let dest = f.profile.destination.path().to_path_buf();
+    // The merged archive in place (a copy of the newest member, as a
+    // stand-in) and the members moved aside, journal still there.
+    let journal = serde_json::json!({ "target": names[2], "members": [names[1], names[2]] });
+    fs::write(dest.join("merge.journal"), journal.to_string()).unwrap();
+    for n in &names[1..] {
+        fs::rename(dest.join(n), dest.join(format!("{n}.old"))).unwrap();
+    }
+    copy_dir(&dest.join(format!("{}.old", names[2])), &dest.join(&names[2]));
+    next_run(&f);
+    assert_eq!(names_now(&f), vec![names[0].clone(), names[2].clone()]);
+    assert!(!dest.join(format!("{}.old", names[1])).exists());
+    assert!(!dest.join("merge.journal").exists());
+}
+
+fn copy_dir(from: &std::path::Path, to: &std::path::Path) {
+    for rel in walkdir_paths(from) {
+        let (src, dst) = (from.join(&rel), to.join(&rel));
+        if src.is_dir() {
+            fs::create_dir_all(&dst).unwrap();
+        } else {
+            fs::create_dir_all(dst.parent().unwrap()).unwrap();
+            fs::copy(&src, &dst).unwrap();
+        }
+    }
+}
+
+#[test]
+fn a_file_too_large_for_fat32_is_skipped_with_the_reason_and_its_last_version_kept() {
+    let f = fixture(Container::Folder);
+    fs::write(f.source.join("big.bin"), "small enough").unwrap();
+    run_backup(&f.profile);
+    sleep(Duration::from_millis(1100));
+    fs::write(f.source.join("big.bin"), "now too large for this drive").unwrap();
+    let fat = Tuning { file_system: Some("FAT32"), fat_max_file: Some(20), ..Tuning::default() };
+    let report = backup_tuned(&f.profile, None, BackupMode::Auto, &Recorder::default(), fat).unwrap();
+    assert_eq!(report.skipped.len(), 1, "{:?}", report.skipped);
+    assert!(report.skipped[0].reason.contains("FAT32"), "{}", report.skipped[0].reason);
+    let newest = list_archives(&f.profile, None).unwrap().remove(0).name;
+    restore_all(&f, &newest);
+    assert_eq!(fs::read_to_string(restored(&f, "big.bin")).unwrap(), "small enough");
+
+    // exFAT has no such limit.
+    sleep(Duration::from_millis(1100));
+    let exfat = Tuning { file_system: Some("exFAT"), fat_max_file: Some(20), ..Tuning::default() };
+    let report = backup_tuned(&f.profile, None, BackupMode::Auto, &Recorder::default(), exfat).unwrap();
+    assert!(report.skipped.is_empty(), "{:?}", report.skipped);
 }

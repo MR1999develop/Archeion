@@ -114,8 +114,9 @@ impl Form {
             Self::Plain => {
                 let mut out = BufWriter::new(file);
                 out.write_all(data).map_err(EngineError::io(ctx.to_owned()))?;
-                out.flush().map_err(EngineError::io(ctx.to_owned()))?;
-                return Ok(());
+                let file = out.into_inner().map_err(|e| EngineError::io(ctx.to_owned())(e.into_error()))?;
+                // On the disk before the archive listing it is committed.
+                return file.sync_all().map_err(EngineError::io(ctx.to_owned()));
             }
             Self::Zip => (id.to_string(), crate::crypto::Options::default().compression_method(method)),
             Self::Vault(keys) => (
@@ -128,7 +129,12 @@ impl Form {
         let mut zip = ZipWriter::new(BufWriter::new(file));
         zip.start_file(entry.as_str(), options).map_err(zip_error(ctx))?;
         zip.write_all(data).map_err(EngineError::io(ctx.to_owned()))?;
-        zip.finish().map_err(zip_error(ctx))?.flush().map_err(EngineError::io(ctx.to_owned()))
+        let file = zip
+            .finish()
+            .map_err(zip_error(ctx))?
+            .into_inner()
+            .map_err(|e| EngineError::io(ctx.to_owned())(e.into_error()))?;
+        file.sync_all().map_err(EngineError::io(ctx.to_owned()))
     }
 
     /// Reads the chunk file `id` of the archive at `archive_dir` and checks
