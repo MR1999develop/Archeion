@@ -139,8 +139,8 @@ unexpected-stop = 操作意外停止。
 # Restore browser
 dates = 备份日期
 archive-tooltip = { $files } 个文件，此备份保存了 { $stored } 个（{ $size }）
-search-hint = 在所有备份中按名称搜索文件…
-no-results = 没有该名称的文件。
+search-hint = 在所有备份中按名称搜索文件或文件夹…
+no-results = 没有该名称的文件或文件夹。
 results = { $count ->
    *[other] 找到 { $count } 个文件
 }
@@ -163,7 +163,7 @@ backups-restore-files-hint = 曾经保存过的所有文件：勾选要找回的
 backups-manage = 管理备份
 backups-manage-hint = 备份日期列表：将多个备份合并为一个，或删除其中一个。
 restore-tree-count = 备份中共 { $files } 个文件 · 已从源中删除：{ $deleted }
-restore-tree-hint = 勾选文件或文件夹即可还原；搜索可按名称查找文件。标有 { $deleted-icon } 已删除 的文件已不在源中，但仍可还原。
+restore-tree-hint = 勾选文件或文件夹即可还原；搜索可按名称查找文件或文件夹，不区分大小写。标有 { $deleted-icon } 已删除 的文件已不在源中，但仍可还原。
 deleted-label = 已删除
 tree-deleted-file = 不在最新的备份中：已从源中删除。勾选它以还原其某个版本。
 tree-deleted-folder = 不在最新的备份中：已从源中删除。勾选它以将其还原为某个日期时的状态。
@@ -493,7 +493,7 @@ doc-large-body = 变化不大的大文件（邮箱、虚拟机磁盘、数据库
 doc-large-complete = 完整备份仍以 zip、普通副本或加密 zip 的形式保存每个完整文件，因此只用 7-Zip 就能还原；只有其后的增量备份包含分块。还原时会重新拼合各块并逐块检查；完整性检查会读取所有块。
 doc-large-upgrade = 旧版本创建的备份保持原样，仍可读取。分块从下一次完整备份开始：在这样的目标上，下一次自动备份将是完整备份。
 doc-restore-title = 还原文件
-doc-restore-body = 打开配置的“备份”选项卡（或“备份 > 还原文件…”）：“还原文件”以一棵树显示备份曾保存过的所有文件和文件夹；已不在源中的文件标有 { $deleted-icon } 已删除，但仍可还原。在树中或搜索结果中勾选文件或文件夹（搜索框可按名称查找文件）。
+doc-restore-body = 打开配置的“备份”选项卡（或“备份 > 还原文件…”）：“还原文件”以一棵树显示备份曾保存过的所有文件和文件夹；已不在源中的文件标有 { $deleted-icon } 已删除，但仍可还原。在树中或搜索结果中勾选文件或文件夹（搜索框可按名称查找文件或文件夹，不区分大小写）。
 doc-restore-versions = 勾选的文件以其最新版本还原；勾选的文件夹整体还原，恢复为包含它的最新备份中的状态。
 doc-restore-where = 在右侧面板顶部选择所有内容的还原位置：原文件旁边，名称中附加日期（report.docx 将还原为“report (2026-11-02 21.30).docx”，当前文件不受影响）、原始位置，或其他文件夹；只有勾选“替换已存在的文件”时，现有文件才会被替换。单击“还原”即可在一次操作中全部还原。旁边的“清除选择”会取消所有勾选。
 doc-verify-title = 完整性检查和还原测试

@@ -142,8 +142,8 @@ unexpected-stop = La operación se ha detenido de forma inesperada.
 # Restore browser
 dates = Fechas de las copias
 archive-tooltip = { $files } archivos, { $stored } guardados en esta copia ({ $size })
-search-hint = Busca un archivo por nombre en todas las copias…
-no-results = Ningún archivo con ese nombre.
+search-hint = Busca un archivo o una carpeta por nombre en todas las copias…
+no-results = Ningún archivo ni carpeta con ese nombre.
 results = { $count ->
     [one] { $count } archivo encontrado
    *[other] { $count } archivos encontrados
@@ -170,7 +170,7 @@ restore-tree-count = { $files ->
         [one] 1 archivo
        *[other] { $files } archivos
     } en las copias · eliminados en el origen: { $deleted }
-restore-tree-hint = Marca archivos o carpetas para restaurarlos; la búsqueda encuentra un archivo por nombre. Los archivos marcados con { $deleted-icon } eliminado ya no están en el origen y aún se pueden restaurar.
+restore-tree-hint = Marca archivos o carpetas para restaurarlos; la búsqueda encuentra un archivo o una carpeta por nombre, con mayúsculas o minúsculas. Los archivos marcados con { $deleted-icon } eliminado ya no están en el origen y aún se pueden restaurar.
 deleted-label = eliminado
 tree-deleted-file = No está en la copia más reciente: eliminado en el origen. Márcalo para restaurar una de sus versiones.
 tree-deleted-folder = No está en la copia más reciente: eliminada en el origen. Márcala para restaurarla tal como estaba en una fecha.
@@ -506,7 +506,7 @@ doc-large-body = Un archivo grande que cambia poco (un buzón de correo, el disc
 doc-large-complete = Las copias completas siguen conservando cada archivo entero, como zip, copia simple o zip cifrado, así que se pueden restaurar solo con 7-Zip; solo las copias incrementales posteriores contienen partes. Al restaurar se vuelven a unir las partes y se comprueba cada una; la comprobación de integridad lee todas las partes.
 doc-large-upgrade = Las copias hechas por versiones anteriores se quedan como están y se siguen pudiendo leer. Las partes empiezan con la siguiente copia completa: en un destino así, la próxima copia automática es completa.
 doc-restore-title = Restaurar archivos
-doc-restore-body = Abre la pestaña Copias del perfil (o Copia de seguridad > Restaurar archivos…): "Restaurar archivos" muestra un único árbol con todos los archivos y carpetas que las copias han guardado alguna vez; los archivos que ya no están en el origen aparecen marcados con { $deleted-icon } eliminado y aún se pueden restaurar. Marca archivos o carpetas en el árbol o en los resultados de búsqueda (el cuadro de búsqueda encuentra un archivo por nombre).
+doc-restore-body = Abre la pestaña Copias del perfil (o Copia de seguridad > Restaurar archivos…): "Restaurar archivos" muestra un único árbol con todos los archivos y carpetas que las copias han guardado alguna vez; los archivos que ya no están en el origen aparecen marcados con { $deleted-icon } eliminado y aún se pueden restaurar. Marca archivos o carpetas en el árbol o en los resultados de búsqueda (el cuadro de búsqueda encuentra un archivo o una carpeta por nombre, con mayúsculas o minúsculas).
 doc-restore-versions = Un archivo marcado vuelve en su versión más reciente; una carpeta marcada vuelve entera, tal como estaba en la copia más reciente que la contiene.
 doc-restore-where = Arriba del panel derecho elige adónde va todo: junto al original con la fecha en el nombre (informe.docx vuelve como "informe (2026-11-02 21.30).docx" y el archivo actual no se toca), la ubicación original u otra carpeta; los archivos existentes solo se reemplazan si marcas "Reemplazar los archivos que ya existen". Restaurar lo recupera todo en una sola operación. "Borrar selección", a su lado, lo desmarca todo.
 doc-verify-title = Comprobación de integridad y prueba de restauración

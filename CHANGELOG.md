@@ -219,6 +219,9 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Fixed
 
+- Restore files: the search also finds folders by name (it found only
+  files, so a folder named "JPEG" seemed missed by a search for "jpeg");
+  capitals and accented letters still match either way.
 - Restore files: a folder whose files and subfolders were all ticked one
   by one kept the filled box of a partial selection; it now shows ticked,
   and clicking it unticks everything inside.

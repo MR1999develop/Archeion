@@ -419,7 +419,12 @@ fn hits_ui(
         for &idx in hits {
             let Some(n) = tree.node(idx) else { continue };
             let path = keys::path_for(n.key()).display().to_string();
-            let text = node_text(ui, tr, n, format!("{}  {path}   {}", symbol::FILE, tr.bytes(n.entry.size)));
+            let base = if n.is_dir() {
+                symbol::with(symbol::FOLDER, path)
+            } else {
+                format!("{}  {path}   {}", symbol::FILE, tr.bytes(n.entry.size))
+            };
+            let text = node_text(ui, tr, n, base);
             if tick_box(ui, tr, tree, n, tree.tick(n, ticked), text) {
                 toggled.push(idx);
             }

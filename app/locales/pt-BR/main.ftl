@@ -142,8 +142,8 @@ unexpected-stop = A operação parou inesperadamente.
 # Restore browser
 dates = Datas dos backups
 archive-tooltip = { $files } arquivos, { $stored } salvos neste backup ({ $size })
-search-hint = Pesquisar um arquivo pelo nome em todos os backups…
-no-results = Nenhum arquivo com esse nome.
+search-hint = Pesquisar um arquivo ou pasta pelo nome em todos os backups…
+no-results = Nenhum arquivo ou pasta com esse nome.
 results = { $count ->
     [one] { $count } arquivo encontrado
    *[other] { $count } arquivos encontrados
@@ -170,7 +170,7 @@ restore-tree-count = { $files ->
         [one] { $files } arquivo
        *[other] { $files } arquivos
     } nos backups · excluídos na origem: { $deleted }
-restore-tree-hint = Marque arquivos ou pastas para restaurá-los; a pesquisa encontra um arquivo pelo nome. Arquivos marcados com { $deleted-icon } excluído não estão mais na origem e ainda podem ser restaurados.
+restore-tree-hint = Marque arquivos ou pastas para restaurá-los; a pesquisa encontra um arquivo ou pasta pelo nome, com maiúsculas ou minúsculas. Arquivos marcados com { $deleted-icon } excluído não estão mais na origem e ainda podem ser restaurados.
 deleted-label = excluído
 tree-deleted-file = Não está no backup mais recente: excluído na origem. Marque-o para restaurar uma de suas versões.
 tree-deleted-folder = Não está no backup mais recente: excluída na origem. Marque-a para restaurá-la como estava em uma data.
@@ -506,7 +506,7 @@ doc-large-body = Um arquivo grande que muda pouco (uma caixa de correio, o disco
 doc-large-complete = Os backups completos continuam guardando cada arquivo inteiro, como zip, cópia simples ou zip criptografado, então podem ser restaurados só com o 7-Zip; apenas os backups incrementais seguintes contêm partes. A restauração junta as partes de novo e confere cada uma; a verificação de integridade lê todas as partes.
 doc-large-upgrade = Os backups feitos por versões anteriores ficam como estão e continuam legíveis. As partes começam com o próximo backup completo: num destino assim, o próximo backup automático é completo.
 doc-restore-title = Restauração de arquivos
-doc-restore-body = Abra a guia Backups do perfil (ou Backup > Restaurar arquivos…): "Restaurar arquivos" mostra uma única árvore com todos os arquivos e pastas que os backups já salvaram; arquivos que não estão mais na origem aparecem marcados com { $deleted-icon } excluído e ainda podem ser restaurados. Marque arquivos ou pastas na árvore ou nos resultados da pesquisa (a caixa de pesquisa encontra um arquivo pelo nome).
+doc-restore-body = Abra a guia Backups do perfil (ou Backup > Restaurar arquivos…): "Restaurar arquivos" mostra uma única árvore com todos os arquivos e pastas que os backups já salvaram; arquivos que não estão mais na origem aparecem marcados com { $deleted-icon } excluído e ainda podem ser restaurados. Marque arquivos ou pastas na árvore ou nos resultados da pesquisa (a caixa de pesquisa encontra um arquivo ou pasta pelo nome, com maiúsculas ou minúsculas).
 doc-restore-versions = Um arquivo marcado volta na versão mais recente; uma pasta marcada volta inteira, como estava no backup mais recente que a contém.
 doc-restore-where = No alto do painel direito escolha para onde vai tudo: ao lado do original, com a data no nome (relatorio.docx volta como "relatorio (2026-11-02 21.30).docx" e o arquivo atual não é alterado), o local original ou outra pasta; os arquivos existentes só são substituídos se você marcar "Substituir arquivos que já existem". Restaurar traz tudo de volta em uma única operação. "Limpar seleção", ao lado, desmarca tudo.
 doc-verify-title = Verificação de integridade e teste de restauração
