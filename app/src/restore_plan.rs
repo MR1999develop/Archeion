@@ -1,23 +1,17 @@
 //! What the "Restore files" view restores, decided without egui.
 //!
-//! The selection is a list of [`Pick`]s: ticked files, each with the
-//! versions ticked, and ticked folders, each with the date chosen. All of
-//! it goes to the one destination chosen at the top of the panel. [`plan`]
-//! turns that into one [`RestoreRequest`], with the name each
-//! version will take, the conflicts, the summary, and why the Restore
-//! button waits.
+//! The selection is a list of [`Pick`]s: ticked files, each coming back as
+//! its newest version, and ticked folders, each as it was in the newest
+//! backup listing it. All of it goes to the one destination chosen at the
+//! top of the panel. [`plan`] turns that into one [`RestoreRequest`], with
+//! the conflicts, the summary, and why the Restore button waits; the
+//! engine names the files it writes.
 
 use archeion_core::{
-    EntryKind, keys,
-    restore::{
-        Output, RestoreItem, RestoreRequest, RestoreTarget, date_tag, make_distinct, output_path,
-        precise_date_tag,
-    },
+    keys,
+    restore::{RestoreItem, RestoreRequest, RestoreTarget},
 };
-use std::{
-    collections::{BTreeMap, BTreeSet},
-    path::{Path, PathBuf},
-};
+use std::{collections::BTreeSet, path::PathBuf};
 
 /// Where the selection goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -94,7 +88,7 @@ pub enum Pick {
         key: String,
         /// Its versions are still being read.
         loading: bool,
-        /// The ticked versions, newest first.
+        /// Its newest version, once read (none when it has none).
         versions: Vec<Version>,
     },
     /// The folder as it was at one date, with everything in it.
@@ -150,22 +144,12 @@ pub enum Blocker {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Plan {
     pub request: RestoreRequest,
-    /// Path each ticked version will be written to, by (card, version).
-    outputs: BTreeMap<(usize, usize), PathBuf>,
-    /// Cards whose items overwrite an original that another card, or
+    /// Items overwrite an original that another card, or
     /// another version of the same file, overwrites too.
     pub conflicts: BTreeSet<usize>,
     pub summary: Summary,
     /// `None` when the restore can start.
     pub blocker: Option<Blocker>,
-}
-
-impl Plan {
-    /// Where version `version` of card `card` will be written.
-    #[must_use]
-    pub fn output(&self, card: usize, version: usize) -> Option<&Path> {
-        self.outputs.get(&(card, version)).map(PathBuf::as_path)
-    }
 }
 
 /// An item that replaces what is at its original place: card, key, date.
@@ -187,10 +171,9 @@ impl Claim<'_> {
     }
 }
 
-/// Turns the selection into a request. Several versions of a file sent to
-/// the same folder each take their date in the name; overwriting an
-/// original is allowed for one version only: a second one, of the file or
-/// of a ticked folder holding it, is a conflict.
+/// Turns the selection into a request. Replacing an original is allowed
+/// once: a ticked file and a ticked folder holding it, from two different
+/// backups, both replacing it, are a conflict.
 #[must_use]
 pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
     let dest = default.resolve();
@@ -198,14 +181,12 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
     let missing_folder = dest.is_none();
     let mut loading = false;
     let mut claims: Vec<Claim<'_>> = Vec::new();
-    // (card, version) and the file each version writes.
-    let mut files: Vec<((usize, usize), Output)> = Vec::new();
     for (card, pick) in picks.iter().enumerate() {
         match pick {
             Pick::File { key, loading: still, versions } => {
                 loading |= *still;
                 out.summary.files += usize::from(!versions.is_empty());
-                for (n, v) in versions.iter().enumerate() {
+                for v in versions {
                     out.summary.versions += 1;
                     out.summary.bytes = out.summary.bytes.saturating_add(v.size);
                     let Some(dest) = &dest else { continue };
@@ -213,11 +194,6 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
                         claims.push(Claim { card, key, archive: &v.archive, exclude: &[] });
                     }
                     let (target, overwrite) = dest.target();
-                    let tag = date_tag(&v.archive);
-                    let path = output_path(key, EntryKind::File, &target, &tag);
-                    let original = target == RestoreTarget::Original;
-                    let precise_tag = precise_date_tag(&v.archive);
-                    files.push(((card, n), Output { path, tag, precise_tag, original }));
                     out.request.items.push(RestoreItem {
                         archive: v.archive.clone(),
                         key: Some(key.clone()),
@@ -248,10 +224,6 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
             }
         }
     }
-
-    let (ids, mut outputs): (Vec<(usize, usize)>, Vec<Output>) = files.into_iter().unzip();
-    make_distinct(&mut outputs);
-    out.outputs = ids.into_iter().zip(outputs.into_iter().map(|o| o.path)).collect();
 
     for (i, a) in claims.iter().enumerate() {
         for b in claims.iter().skip(i + 1) {
@@ -319,10 +291,6 @@ mod tests {
         DefaultDest { kind: DestKind::Folder, folder: Some(PathBuf::from(path)), replace: false }
     }
 
-    fn name(p: Option<&Path>) -> String {
-        p.and_then(Path::file_name).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
-    }
-
     #[test]
     fn nothing_ticked_waits_for_a_tick() {
         let p = plan(&[], &DefaultDest::default(), false);
@@ -355,29 +323,12 @@ mod tests {
             Summary { files: 1, versions: 2, folders: 1, bytes: 1020, partial: false },
             "3 files, 5 versions, 1 folder — the size"
         );
-        assert_eq!(name(p.output(0, 0)), "report (2026-11-01 18.33).docx");
-        assert_eq!(name(p.output(0, 1)), "report (2026-10-20 09.00).docx");
-        assert_eq!(p.output(1, 0), None, "a folder's files are named by the engine");
-    }
-
-    #[test]
-    fn several_versions_to_one_folder_each_take_their_date() {
-        let picks = [file(KEY, vec![version(NEW), version(OLD)])];
-        let p = plan(&picks, &to_folder("out"), false);
-        assert_eq!(name(p.output(0, 0)), "report (2026-11-01 18.33).docx");
-        assert_eq!(name(p.output(0, 1)), "report (2026-10-20 09.00).docx");
-
-        // Alone, a version keeps the plain name.
-        let p = plan(&[file(KEY, vec![version(NEW)])], &to_folder("out"), false);
-        assert_eq!(name(p.output(0, 0)), "report.docx");
-        assert!(p.output(0, 0).unwrap().starts_with("out"));
     }
 
     #[test]
     fn one_version_may_overwrite_the_original_two_conflict() {
         let p = plan(&[file(KEY, vec![version(OLD)])], &overwrite(), false);
         assert_eq!(p.blocker, None);
-        assert_eq!(name(p.output(0, 0)), "report.docx", "the overwriting version keeps the name");
         assert!(p.request.items[0].overwrite);
 
         let two = [file(KEY, vec![version(NEW), version(OLD)])];

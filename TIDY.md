@@ -26,6 +26,14 @@ trigger it. Remove an item when it is done or no longer applies.
   it). Fix with `AttachConsole(ATTACH_PARENT_PROCESS)` at start, which
   needs a Windows API call (no `unsafe` in our crates: a small crate or a
   separate console helper).
+- **Older versions and dates cannot be chosen in the window** (3
+  November): the restore cards were removed on request, so a file comes
+  back as its newest version and a folder as in its newest backup. An
+  older one is still reachable with `archeion extract --archive`. If it
+  is missed, a simple way back is a date chooser for the whole selection.
+- **Unused translation keys** (`schedule-daily`, `schedule-weekly`,
+  `back-up-now`, `advanced`, `events-*`): left from removed features;
+  remove them in every language.
 - **Screenshots not compared automatically** (2 November): the views are
   rendered with `cargo test -p archeion --bin archeion screens -- --ignored`
   into `target/ui-screens` and looked at, with no stored references: add
