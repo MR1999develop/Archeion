@@ -167,9 +167,7 @@ changes at every commit, and `git add -A` would otherwise commit it.
 
 ### First publication
 
-1. `tools\git_init.bat`: creates the repository (`main`) and the first
-   commit; log in `tools\git_init.log`.
-2. `tools\github_publish.bat`: creates the private GitHub repository with
+1. `tools\github_publish.bat`: creates the private GitHub repository with
    the GitHub CLI (or links it if it exists) and pushes `main`, the current
    branch and the tags; log in `tools\github_publish.log`. Safe to run
    again.

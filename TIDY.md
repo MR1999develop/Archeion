@@ -5,12 +5,7 @@ trigger it. Remove an item when it is done or no longer applies.
 
 ## Before the first release
 
-- **Delete two obsolete files** left from the restic version, now one-line
-  placeholders: `app/src/secrets.rs` and
-  `crates/engine/tests/local_repository.rs`.
-- **Initialise git and publish on GitHub**: `tools\git_init.bat` (deletes
-  the two placeholders, creates `main`, first commit), then
-  `tools\github_publish.bat` (needs the GitHub CLI signed in; creates the
+- **Publish on GitHub**: `tools\github_publish.bat` (needs the GitHub CLI signed in; creates the
   private repository `MR1999develop/archeion` and pushes). Then on GitHub:
   protect `main` (require the CI check before merging) if pull requests
   are used.
@@ -31,9 +26,6 @@ trigger it. Remove an item when it is done or no longer applies.
   back as its newest version and a folder as in its newest backup. An
   older one is still reachable with `archeion extract --archive`. If it
   is missed, a simple way back is a date chooser for the whole selection.
-- **Unused translation keys** (`schedule-daily`, `schedule-weekly`,
-  `back-up-now`, `advanced`, `events-*`): left from removed features;
-  remove them in every language.
 - **A Recycle Bin too small for the backups** (3 November): Windows may
   delete outright an item larger than the Recycle Bin allows, and the
   engine finds out only afterwards (the item is not in the Recycle Bin)
@@ -229,8 +221,6 @@ trigger it. Remove an item when it is done or no longer applies.
 - **Release zip is portable only**; the installer is still to do (see
   "Features planned"). Code signing of `archeion.exe` is not set up, so
   SmartScreen warns on first run.
-- **`tools\probe.bat`** is a leftover of the restic experiments; delete it
-  together with its log when convenient.
 
 ## Name
 - **Trademark check** was only a web search (no software or backup product

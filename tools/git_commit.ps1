@@ -89,7 +89,7 @@ if ($operation) {
     Stop-Script 1
 }
 if (-not (Get-GitValue @('rev-parse', '--verify', '--quiet', 'HEAD'))) {
-    Write-Log 'The repository has no commit yet: run tools\git_init.bat for the first one.' 'Red'
+    Write-Log 'The repository has no commit yet: make the first one with git commit.' 'Red'
     Stop-Script 1
 }
 
