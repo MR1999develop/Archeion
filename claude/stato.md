@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con la scelta della versione dal nome del file (ramo
-`feature/restore-versions` unito; `tools\check.bat` verde: fmt, clippy, 334
+`main` con le frecce tra i file e le versioni anche dentro le cartelle
+spuntate (ramo `feature/versions-keys` unito; `tools\check.bat` verde: fmt, clippy, 336
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -128,3 +128,9 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   è in `RestoreView::chosen` e vale anche se fatta prima di spuntare. Nei
   test, un clic su un pulsante appena attivato va fatto un fotogramma
   dopo (egui verifica i clic sul fotogramma precedente).
+- Versione scelta per un file dentro una cartella spuntata: il file
+  entra nelle esclusioni della cartella e diventa una scelta a sé con
+  quella versione; `Tree::tick` non conta come mancante un'esclusione
+  che ha una scelta propria, così la cartella resta spuntata intera.
+  Frecce su e giù: tra i file disegnati (albero o ricerca), solo quando
+  nessun campo di testo ha la tastiera.

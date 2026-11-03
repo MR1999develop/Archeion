@@ -138,8 +138,11 @@ impl Tree {
     /// then, for a folder, what is ticked inside: all of it or some.
     pub fn tick(&self, node: &Node, ticked: &[Ticked<'_>]) -> Tick {
         let key = node.key();
+        // Left out of a folder, but ticked on its own (another version):
+        // nothing is missing there.
+        let missing = |x: &String| !ticked.iter().any(|t| t.key == x.as_str() && t.folder_archive.is_none());
         if let Some(own) = ticked.iter().find(|t| t.key == key) {
-            return if own.exclude.is_empty() { Tick::On } else { Tick::Partial };
+            return if own.exclude.iter().any(missing) { Tick::Partial } else { Tick::On };
         }
         let holder = ticked
             .iter()
@@ -158,7 +161,7 @@ impl Tree {
             if !listed {
                 return Tick::NotInFolderDate { folder };
             }
-            if node.is_dir() && h.exclude.iter().any(|x| keys::is_within(x, key)) {
+            if node.is_dir() && h.exclude.iter().filter(|x| missing(x)).any(|x| keys::is_within(x, key)) {
                 return Tick::Partial;
             }
             return Tick::InFolder { folder };

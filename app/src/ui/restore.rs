@@ -91,6 +91,8 @@ pub struct RestoreView {
     versions: HashMap<String, Load<Vec<FileVersion>>>,
     /// The file whose versions the right panel shows: its name was clicked.
     shown: Option<String>,
+    /// An arrow key moved to another file: the tree scrolls to it.
+    scroll_to_shown: bool,
     /// Version chosen for a file, by key: its archive. Without one, the
     /// newest.
     chosen: HashMap<String, String>,
@@ -268,6 +270,13 @@ impl RestoreView {
             .filter(|p| matches!(p, Pick::Folder { .. }) && keys::is_within(&key, p.key()))
             .max_by_key(|p| p.key().len());
         if let Some(Pick::Folder { exclude, .. }) = holder {
+            if !node.is_dir() && exclude.contains(&key) && self.chosen.contains_key(&key) {
+                // Left out with a version of its own chosen: back on its own,
+                // in that version.
+                self.load_versions(ctx, profile, &key);
+                self.picks.push(Pick::File { key, loading: true, versions: Vec::new() });
+                return;
+            }
             if exclude.iter().any(|x| keys::is_within(&key, x)) {
                 tree.include(exclude, &key);
             } else if exclude.iter().any(|x| keys::is_within(x, &key)) {
@@ -306,6 +315,24 @@ impl RestoreView {
         }
     }
 
+    /// The file above or below the one shown, among `files` as drawn, when
+    /// an arrow key was pressed (and no text field has the keyboard).
+    fn arrow_move(&self, ctx: &Context, profile: &Profile, files: &[usize]) -> Option<usize> {
+        let shown = self.shown.as_deref()?;
+        if ctx.egui_wants_keyboard_input() {
+            return None;
+        }
+        let up = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp));
+        let down = ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown));
+        if !up && !down {
+            return None;
+        }
+        let tree = self.trees.get(&profile.id).and_then(|(_, t)| t.ready())?;
+        let at = files.iter().position(|&i| tree.node(i).is_some_and(|n| n.key() == shown))?;
+        let next = if up { at.checked_sub(1)? } else { at + 1 };
+        files.get(next).copied()
+    }
+
     /// A file's name was clicked: its versions go on the right.
     fn show_versions(&mut self, ctx: &Context, profile: &Profile, idx: usize) {
         let Some(tree) = self.trees.get(&profile.id).and_then(|(_, t)| t.ready()) else { return };
@@ -315,17 +342,29 @@ impl RestoreView {
         self.shown = Some(key);
     }
 
-    /// Restore `archive` for the file `key`; a ticked file takes it now.
+    /// Restore `archive` for the file `key`. A ticked file takes it now; a
+    /// file restored with a ticked folder leaves the folder and comes back
+    /// on its own, in that version.
     fn choose_version(&mut self, key: &str, archive: &str) {
         self.chosen.insert(key.to_owned(), archive.to_owned());
         let Some(list) = self.versions.get(key).and_then(Load::ready) else { return };
         let Some(v) = list.iter().find(|v| v.archive == archive) else { return };
-        for pick in &mut self.picks {
-            if let Pick::File { key: k, loading: false, versions } = pick
-                && k == key
-            {
-                *versions = vec![Version { archive: v.archive.clone(), size: v.size }];
-            }
+        let version = Version { archive: v.archive.clone(), size: v.size };
+        if let Some(Pick::File { versions, loading, .. }) = self.picks.iter_mut().find(|p| p.key() == key) {
+            *versions = vec![version];
+            *loading = false;
+            return;
+        }
+        let holder = self
+            .picks
+            .iter_mut()
+            .filter(|p| matches!(p, Pick::Folder { .. }) && keys::is_within(key, p.key()))
+            .max_by_key(|p| p.key().len());
+        if let Some(Pick::Folder { exclude, .. }) = holder
+            && !exclude.iter().any(|x| keys::is_within(key, x))
+        {
+            exclude.push(key.to_owned());
+            self.picks.push(Pick::File { key: key.to_owned(), loading: false, versions: vec![version] });
         }
     }
 
@@ -352,23 +391,27 @@ impl RestoreView {
             return;
         }
         ui.add_space(theme::SPACE_S);
-        let mut clicks: Vec<RowClick> = Vec::new();
+        let mut rows = Rows { scroll: std::mem::take(&mut self.scroll_to_shown), ..Rows::default() };
         match self.trees.get(&profile.id).map(|(_, t)| t) {
             Some(Load::Ready(tree)) => {
                 let ticked: Vec<Ticked<'_>> = self.picks.iter().map(ticked).collect();
                 if tree.files == 0 {
                     ui.weak(tr.t("no-backups-yet"));
                 } else if self.query.trim().is_empty() {
-                    tree_list_ui(ui, tr, tree, &ticked, self.shown.as_deref(), &mut clicks);
+                    tree_list_ui(ui, tr, tree, &ticked, self.shown.as_deref(), &mut rows);
                 } else {
-                    hits_ui(ui, tr, tree, self.hits.as_deref(), &ticked, self.shown.as_deref(), &mut clicks);
+                    hits_ui(ui, tr, tree, self.hits.as_deref(), &ticked, self.shown.as_deref(), &mut rows);
                 }
             }
             Some(other) => other.status_ui(ui, tr, &tr.t("reading-backups")),
             None => {}
         }
         let ctx = ui.ctx().clone();
-        for click in clicks {
+        if let Some(next) = self.arrow_move(&ctx, profile, &rows.files) {
+            rows.clicks.push(RowClick::Name(next));
+            self.scroll_to_shown = true;
+        }
+        for click in rows.clicks {
             match click {
                 RowClick::Tick(idx) => self.toggle(&ctx, profile, idx),
                 RowClick::Name(idx) => self.show_versions(&ctx, profile, idx),
@@ -412,9 +455,9 @@ impl RestoreView {
     }
 
     /// The versions of the file whose name was clicked, newest first, one
-    /// of them chosen (the newest unless the user chose another). Inside a
-    /// ticked folder the file comes back with it: the versions are shown,
-    /// not chosen. Returns a new choice: key and archive.
+    /// of them chosen: the one the user chose, the one a ticked folder
+    /// holding the file brings back, or the newest. Returns a new choice:
+    /// key and archive.
     fn versions_ui(&self, ui: &mut Ui, tr: &Tr, profile: &Profile) -> Option<(String, String)> {
         let key = self.shown.as_deref()?;
         let tree = self.trees.get(&profile.id).and_then(|(_, t)| t.ready())?;
@@ -436,6 +479,13 @@ impl RestoreView {
             Tick::InFolder { folder } => tree.node(folder),
             _ => None,
         };
+        // The archive the holding folder comes back as.
+        let folder_archive = in_folder.and_then(|f| {
+            self.picks.iter().find_map(|p| match p {
+                Pick::Folder { key, archive, .. } if key == f.key() => Some(archive.as_str()),
+                _ => None,
+            })
+        });
         match in_folder {
             Some(folder) => {
                 let path = keys::path_for(folder.key()).display().to_string();
@@ -445,20 +495,23 @@ impl RestoreView {
                 ui.weak(tr.t("versions-hint"));
             }
         }
-        let current = version_of(list, self.chosen.get(key)).map(|v| v.archive.as_str());
+        let current = match folder_archive {
+            // A version is stored in the archive where its content first
+            // appeared: the folder's is the newest up to its date.
+            Some(date) => list.iter().find(|v| v.archive.as_str() <= date).map(|v| v.archive.as_str()),
+            None => version_of(list, self.chosen.get(key)).map(|v| v.archive.as_str()),
+        };
         let mut choice = None;
-        ui.add_enabled_ui(in_folder.is_none(), |ui| {
-            for v in list {
-                let label = tr.t_args(
-                    "version-detail",
-                    &[("backup", arg(v.backup_label.clone())), ("size", arg(tr.bytes(v.size)))],
-                );
-                let hint = tr.t_args("version-modified", &[("date", arg(v.modified_label.clone()))]);
-                if ui.radio(current == Some(v.archive.as_str()), label).on_hover_text(hint).clicked() {
-                    choice = Some((key.to_owned(), v.archive.clone()));
-                }
+        for v in list {
+            let label = tr.t_args(
+                "version-detail",
+                &[("backup", arg(v.backup_label.clone())), ("size", arg(tr.bytes(v.size)))],
+            );
+            let hint = tr.t_args("version-modified", &[("date", arg(v.modified_label.clone()))]);
+            if ui.radio(current == Some(v.archive.as_str()), label).on_hover_text(hint).clicked() {
+                choice = Some((key.to_owned(), v.archive.clone()));
             }
-        });
+        }
         if in_folder.is_none() && !matches!(tick, Tick::On) {
             ui.add_space(theme::SPACE_XS);
             ui.weak(tr.t("versions-tick-hint"));
@@ -470,6 +523,15 @@ impl RestoreView {
 /// The version `chosen` (an archive) among `list`, or the newest.
 fn version_of<'a>(list: &'a [FileVersion], chosen: Option<&String>) -> Option<&'a FileVersion> {
     chosen.and_then(|a| list.iter().find(|v| &v.archive == a)).or_else(|| list.first())
+}
+
+/// What drawing the tree collects: clicks, the files in the order shown
+/// (for the arrow keys), and whether to scroll to the file shown.
+#[derive(Debug, Default)]
+struct Rows {
+    clicks: Vec<RowClick>,
+    files: Vec<usize>,
+    scroll: bool,
 }
 
 /// A click in the tree, applied once it is drawn.
@@ -520,7 +582,7 @@ fn tree_list_ui(
     tree: &Tree,
     ticked: &[Ticked<'_>],
     shown: Option<&str>,
-    clicks: &mut Vec<RowClick>,
+    rows: &mut Rows,
 ) {
     ui.weak(
         tr.t_args("restore-tree-count", &[("files", arg(tree.files)), ("deleted", arg(tree.deleted_files))]),
@@ -528,7 +590,7 @@ fn tree_list_ui(
     ui.weak(tr.t_args("restore-tree-hint", &symbol::args()));
     egui::ScrollArea::vertical().id_salt("tree").auto_shrink(false).show(ui, |ui| {
         for &r in &tree.roots {
-            node_ui(ui, tr, tree, r, ticked, shown, clicks);
+            node_ui(ui, tr, tree, r, ticked, shown, rows);
         }
     });
 }
@@ -541,7 +603,7 @@ fn hits_ui(
     hits: Option<&[usize]>,
     ticked: &[Ticked<'_>],
     shown: Option<&str>,
-    clicks: &mut Vec<RowClick>,
+    rows: &mut Rows,
 ) {
     let Some(hits) = hits else { return };
     if hits.is_empty() {
@@ -559,7 +621,7 @@ fn hits_ui(
                 format!("{}  {path}   {}", symbol::FILE, tr.bytes(n.entry.size))
             };
             let text = node_text(ui, tr, n, base);
-            row(ui, tr, tree, idx, n, tree.tick(n, ticked), text, shown, clicks);
+            row(ui, tr, tree, idx, n, tree.tick(n, ticked), text, shown, rows);
         }
     });
 }
@@ -573,7 +635,7 @@ fn node_ui(
     idx: usize,
     ticked: &[Ticked<'_>],
     shown: Option<&str>,
-    clicks: &mut Vec<RowClick>,
+    rows: &mut Rows,
 ) {
     let Some(n) = tree.node(idx) else { return };
     let tick = tree.tick(n, ticked);
@@ -583,23 +645,24 @@ fn node_ui(
         CollapsingState::load_with_default_open(ui.ctx(), id, open)
             .show_header(ui, |ui| {
                 let text = node_text(ui, tr, n, symbol::with(symbol::FOLDER, &n.label));
-                row(ui, tr, tree, idx, n, tick, text, shown, clicks);
+                row(ui, tr, tree, idx, n, tick, text, shown, rows);
             })
             .body(|ui| {
                 for &c in &n.children {
-                    node_ui(ui, tr, tree, c, ticked, shown, clicks);
+                    node_ui(ui, tr, tree, c, ticked, shown, rows);
                 }
             });
     } else {
         let text =
             node_text(ui, tr, n, format!("{}  {}   {}", symbol::FILE, n.label, tr.bytes(n.entry.size)));
-        row(ui, tr, tree, idx, n, tick, text, shown, clicks);
+        row(ui, tr, tree, idx, n, tick, text, shown, rows);
     }
 }
 
 /// One row: the tick box, which alone ticks, then the name. A file's name
-/// shows its versions on the right (highlighted while shown); a folder's
-/// does nothing.
+/// shows its versions on the right (highlighted while shown, and the up
+/// and down arrows move to the file above or below); a folder's does
+/// nothing.
 #[expect(clippy::too_many_arguments, reason = "one row of the tree: its parts are drawn together")]
 fn row(
     ui: &mut Ui,
@@ -610,20 +673,24 @@ fn row(
     tick: Tick,
     text: RichText,
     shown: Option<&str>,
-    clicks: &mut Vec<RowClick>,
+    rows: &mut Rows,
 ) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = theme::SPACE_XS;
         if tick_box(ui, tr, tree, n, tick, text.text()) {
-            clicks.push(RowClick::Tick(idx));
+            rows.clicks.push(RowClick::Tick(idx));
         }
         if n.is_dir() {
             ui.add(egui::Label::new(text).selectable(false));
         } else {
+            rows.files.push(idx);
             let on = shown == Some(n.key());
             let resp = ui.add(egui::Button::selectable(on, text).frame_when_inactive(false));
+            if on && rows.scroll {
+                resp.scroll_to_me(None);
+            }
             if resp.on_hover_text(tr.t("file-name-hint")).clicked() {
-                clicks.push(RowClick::Name(idx));
+                rows.clicks.push(RowClick::Name(idx));
             }
         }
     });
