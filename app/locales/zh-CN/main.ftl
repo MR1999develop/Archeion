@@ -570,3 +570,15 @@ recent-damaged = 问题
 recent-skipped = 已跳过
 recent-deleted = 已删除
 recent-dropped = 已移除旧版本
+
+# Profile files (File menu)
+import-profile = 导入配置文件…
+export-profile = 导出配置文件…
+import-profile-hint = 从 Archeion 导出的文件添加配置文件：包含其规则，不含密码。
+export-profile-hint = 将此配置文件的所有规则保存到文件中，以便保留或带到另一台计算机。密码不会保存在其中。
+profile-file-type = Archeion 配置文件
+import-failed-read = 无法读取该文件：{ $detail }
+import-failed-format = { $file } 不是 Archeion 配置文件。
+import-failed-newer = { $file } 由更新版本的 Archeion 创建：请更新 Archeion 后再导入。
+export-failed = 无法保存配置文件：{ $detail }
+doc-profiles-files = “文件 > 导出配置文件…”会将所选配置文件的所有规则（文件夹、排除项、目标位置、格式、计划、合并、检查、通知）保存到 .archeion-profile 文件中，以便保留或带到另一台计算机；“文件 > 导入配置文件…”会将其重新添加。密码永远不会保存在文件中：加密的配置文件会在导入后要求输入密码。在另一台计算机上，导入的配置文件会在目标位置找到其备份；在同一台计算机上导入两次时，会成为名称中带有“(2)”的副本。

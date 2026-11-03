@@ -24,6 +24,7 @@ mod i18n;
 mod instance;
 mod job;
 mod notify;
+mod profile_file;
 mod restore_plan;
 mod storage;
 mod ui;

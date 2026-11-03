@@ -596,3 +596,15 @@ recent-damaged = Problem
 recent-skipped = Skipped
 recent-deleted = Deleted
 recent-dropped = Version removed
+
+# Profile files (File menu)
+import-profile = Import profile…
+export-profile = Export profile…
+import-profile-hint = Add a profile from a file exported by Archeion: its rules, not its password.
+export-profile-hint = Save every rule of this profile to a file, to keep it or take it to another computer. The password is not saved in it.
+profile-file-type = Archeion profile
+import-failed-read = The file could not be read: { $detail }
+import-failed-format = { $file } is not an Archeion profile.
+import-failed-newer = { $file } was made by a later version of Archeion: update Archeion to import it.
+export-failed = The profile could not be saved: { $detail }
+doc-profiles-files = File > Export profile… saves every rule of the selected profile (folders, exclusions, destination, format, schedule, merge, checks, notifications) to a .archeion-profile file, to keep it or take it to another computer; File > Import profile… adds it back. The password is never in the file: an encrypted profile asks for it after the import. On another computer the imported profile finds its backups at the destination; imported twice on the same one, it becomes a copy with "(2)" in its name.

@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con le impostazioni del profilo più compatte (ramo
-`feature/compact-settings` unito; `tools\check.bat` verde: fmt, clippy, 315
+`main` con l'importazione e l'esportazione dei profili (ramo
+`feature/profile-files` unito; `tools\check.bat` verde: fmt, clippy, 320
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -83,3 +83,8 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   Guida e gli altri moduli restano a `FORM_MAX_WIDTH` 600 per la lettura),
   il nome come riga e non come sezione, spazio libero accanto alla
   destinazione: con la finestra 1200×1000 finiscono a circa 655 px.
+- Profili come file `.archeion-profile` (`app/src/profile_file.rs`): TOML
+  con `format = 1` e il profilo intero, mai la password; al massimo 1 MiB;
+  un formato successivo è rifiutato. L'importazione mantiene l'id (su un
+  altro PC il profilo ritrova i suoi backup) salvo che esista già: allora
+  id nuovo e nome con "(2)".

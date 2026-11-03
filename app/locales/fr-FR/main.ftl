@@ -596,3 +596,15 @@ recent-damaged = Problème
 recent-skipped = Ignoré
 recent-deleted = Supprimé
 recent-dropped = Version retirée
+
+# Profile files (File menu)
+import-profile = Importer un profil…
+export-profile = Exporter le profil…
+import-profile-hint = Ajoute un profil depuis un fichier exporté par Archeion : ses règles, pas son mot de passe.
+export-profile-hint = Enregistre toutes les règles de ce profil dans un fichier, pour le conserver ou l’emporter sur un autre ordinateur. Le mot de passe n’y est pas enregistré.
+profile-file-type = Profil Archeion
+import-failed-read = Impossible de lire le fichier : { $detail }
+import-failed-format = { $file } n’est pas un profil Archeion.
+import-failed-newer = { $file } a été créé par une version plus récente d’Archeion : mettez Archeion à jour pour l’importer.
+export-failed = Impossible d’enregistrer le profil : { $detail }
+doc-profiles-files = Fichier > Exporter le profil… enregistre toutes les règles du profil sélectionné (dossiers, exclusions, destination, format, planification, fusion, vérifications, notifications) dans un fichier .archeion-profile, pour le conserver ou l’emporter sur un autre ordinateur ; Fichier > Importer un profil… l’ajoute de nouveau. Le mot de passe n’est jamais dans le fichier : un profil chiffré le demande après l’importation. Sur un autre ordinateur, le profil importé retrouve ses sauvegardes à la destination ; importé deux fois sur le même, il devient une copie avec « (2) » dans son nom.
