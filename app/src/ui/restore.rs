@@ -296,6 +296,15 @@ impl RestoreView {
             self.focused = Some(folder.clone());
             return;
         }
+        // Everything inside ticked one by one: the click unticks it all.
+        let now: Vec<Ticked<'_>> = self.picks.iter().map(ticked).collect();
+        if tree.tick(node, &now) == Tick::Full {
+            self.picks.retain(|p| !keys::is_within(p.key(), &key));
+            if self.focused.as_deref().is_some_and(|f| keys::is_within(f, &key)) {
+                self.focused = None;
+            }
+            return;
+        }
         self.focused = Some(key.clone());
         if node.is_dir() {
             let Some(newest) = tree.dates(node).first().map(|a| a.name.clone()) else { return };
@@ -623,6 +632,16 @@ fn tick_box(ui: &mut Ui, tr: &Tr, tree: &Tree, n: &Node, tick: Tick, text: RichT
         Tick::Partial => {
             let resp = widgets::partial_checkbox(ui, text);
             resp.on_hover_text(format!("{}\n{}", tr.t("tick-partial"), node_hint(tr, n))).changed()
+        }
+        Tick::Full => {
+            let mut on = true;
+            let hint = format!(
+                "{}
+{}",
+                tr.t("tick-full"),
+                node_hint(tr, n)
+            );
+            widgets::checkbox(ui, &mut on, text).on_hover_text(hint).changed()
         }
         Tick::On | Tick::Off => {
             let mut on = tick == Tick::On;

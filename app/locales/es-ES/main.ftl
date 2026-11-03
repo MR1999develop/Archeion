@@ -182,6 +182,7 @@ remove-from-selection = Quitar de la selección
 tick-in-folder = Se restaura con la carpeta marcada { $folder }. Desmárcalo para dejarlo fuera.
 tick-not-in-folder-date = No está en la copia con la que vuelve la carpeta marcada { $folder }: no se restaura. Desmarca esa carpeta para elegirlo por separado.
 tick-partial = Hay algo marcado dentro, o excluido de la carpeta marcada. Haz clic para marcar toda la carpeta.
+tick-full = Todo lo que contiene está marcado uno por uno. Haz clic para desmarcarlo todo.
 tick-left-out = Excluido de la carpeta marcada { $folder }: no se restaura. Márcalo para restaurarlo con la carpeta.
 folder-left-out = { $count ->
     [one] { $count } elemento desmarcado dentro: no se restaura.

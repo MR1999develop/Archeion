@@ -212,6 +212,9 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Fixed
 
+- Restore files: a folder whose files and subfolders were all ticked one
+  by one kept the filled box of a partial selection; it now shows ticked,
+  and clicking it unticks everything inside.
 - Development builds no longer open a console window beside Archeion
   (release builds already did not).
 - A profile re-created with the destination of a deleted profile failed

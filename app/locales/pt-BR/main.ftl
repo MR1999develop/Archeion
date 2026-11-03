@@ -182,6 +182,7 @@ remove-from-selection = Remover da seleção
 tick-in-folder = Restaurado com a pasta marcada { $folder }. Desmarque para deixá-lo de fora.
 tick-not-in-folder-date = Não está no backup com que volta a pasta marcada { $folder }: não é restaurado. Desmarque essa pasta para escolhê-lo sozinho.
 tick-partial = Há algo marcado dentro, ou deixado de fora da pasta marcada. Clique para marcar a pasta inteira.
+tick-full = Tudo o que ela contém está marcado um a um. Clique para desmarcar tudo.
 tick-left-out = Deixado de fora da pasta marcada { $folder }: não é restaurado. Marque para restaurá-lo com a pasta.
 folder-left-out = { $count ->
     [one] { $count } item desmarcado dentro: não é restaurado.

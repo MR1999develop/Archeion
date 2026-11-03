@@ -175,6 +175,7 @@ remove-from-selection = 从所选内容中移除
 tick-in-folder = 将随已勾选的文件夹 { $folder } 一起恢复。取消勾选即可排除它。
 tick-not-in-folder-date = 不在已勾选的文件夹 { $folder } 所用的备份中：不会恢复。取消勾选该文件夹即可单独选择它。
 tick-partial = 其中有已勾选的项目，或有从已勾选文件夹中排除的项目。点击可勾选整个文件夹。
+tick-full = 其中的所有项目都已逐个勾选。点击可全部取消勾选。
 tick-left-out = 已从勾选的文件夹 { $folder } 中排除：不会恢复。勾选它即可随文件夹一起恢复。
 folder-left-out = 其中 { $count } 个项目已取消勾选：不会恢复。
 card-show-options = 点击查看并更改其版本、日期和目标位置。
