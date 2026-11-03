@@ -62,6 +62,8 @@ pub struct ArcheionApp {
     selected: Option<ProfileId>,
     tab: Tab,
     job: Option<Job>,
+    /// While a run started here goes on, Windows says so at shut down.
+    shutdown_block: Option<archeion_win::ShutdownBlock>,
     /// The last run once it has ended, for its summary.
     last_run: Option<Activity>,
     restore: RestoreView,
@@ -179,6 +181,7 @@ impl ArcheionApp {
             selected,
             tab: Tab::Settings,
             job: None,
+            shutdown_block: None,
             last_run: None,
             restore: RestoreView::default(),
             history: HistoryView::default(),
@@ -1294,9 +1297,34 @@ fn forget_password(id: ProfileId) {
     }
 }
 
+impl ArcheionApp {
+    /// Shutting down or signing out during a run shows why the window is
+    /// still open (Windows ends the run otherwise without a word; an
+    /// unfinished backup resumes next time).
+    fn hold_shutdown(&mut self, frame: &eframe::Frame) {
+        use raw_window_handle::{HasWindowHandle as _, RawWindowHandle};
+        let running = self.job.as_ref().is_some_and(|j| j.activity.outcome.is_none());
+        if !running {
+            self.shutdown_block = None;
+            return;
+        }
+        if self.shutdown_block.is_some() {
+            return;
+        }
+        let hwnd = frame.window_handle().ok().and_then(|h| match h.as_raw() {
+            RawWindowHandle::Win32(w) => Some(w.hwnd.get()),
+            _ => None,
+        });
+        if let Some(hwnd) = hwnd {
+            self.shutdown_block = archeion_win::ShutdownBlock::new(hwnd, &self.tr.t("shutdown-reason"));
+        }
+    }
+}
+
 impl eframe::App for ArcheionApp {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        self.hold_shutdown(frame);
         self.window_events(&ctx);
         self.remember_size(&ctx);
         self.poll_wipe(&ctx);

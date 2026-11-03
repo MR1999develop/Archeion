@@ -101,13 +101,15 @@ $app = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell
 fn show(title: &str, body: &str) -> std::io::Result<()> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let status = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
-        .arg(encode_command(SCRIPT))
-        .env("ARCHEION_TOAST_TITLE", title)
-        .env("ARCHEION_TOAST_BODY", body)
-        .creation_flags(CREATE_NO_WINDOW)
-        .status()?;
+    let status = std::process::Command::new(archeion_win::system_program(
+        r"System32\WindowsPowerShell\v1.0\powershell.exe",
+    ))
+    .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand"])
+    .arg(encode_command(SCRIPT))
+    .env("ARCHEION_TOAST_TITLE", title)
+    .env("ARCHEION_TOAST_BODY", body)
+    .creation_flags(CREATE_NO_WINDOW)
+    .status()?;
     if status.success() { Ok(()) } else { Err(std::io::Error::other(format!("powershell: {status}"))) }
 }
 

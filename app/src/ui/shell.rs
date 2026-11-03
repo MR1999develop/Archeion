@@ -4,16 +4,19 @@
 
 use std::path::PathBuf;
 
-/// The system's opener: `explorer <path>` on Windows (it opens files with
-/// their default program too, and takes the path as one argument, so no
-/// shell quoting is involved), `open` on macOS, `xdg-open` elsewhere.
-const OPENER: &str = if cfg!(windows) {
-    "explorer"
-} else if cfg!(target_os = "macos") {
-    "open"
-} else {
-    "xdg-open"
-};
+/// The system's opener: `explorer <path>` on Windows, by its full path
+/// (it opens files with their default program too, and takes the path as
+/// one argument, so no shell quoting is involved), `open` on macOS,
+/// `xdg-open` elsewhere.
+fn opener() -> std::path::PathBuf {
+    if cfg!(windows) {
+        archeion_win::system_program("explorer.exe")
+    } else if cfg!(target_os = "macos") {
+        "open".into()
+    } else {
+        "xdg-open".into()
+    }
+}
 
 /// Opens `path` with the system's opener. Waits for the opener on its own
 /// thread, so the window never blocks and no child process is left
@@ -22,7 +25,7 @@ pub fn open(path: PathBuf) {
     let spawned = std::thread::Builder::new().name("open-path".into()).spawn(move || {
         // explorer.exe often exits with 1 even when the path opened: only
         // a failure to start it is worth logging.
-        if let Err(e) = std::process::Command::new(OPENER).arg(&path).status() {
+        if let Err(e) = std::process::Command::new(opener()).arg(&path).status() {
             tracing::warn!(error = %e, path = %path.display(), "opening with the system");
         }
     });

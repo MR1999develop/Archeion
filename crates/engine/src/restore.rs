@@ -137,6 +137,7 @@ pub(crate) fn restore_from(
     };
 
     for p in &planned {
+        progress.check_stop()?;
         let (e, dest) = (p.entry, &p.dest);
         if e.kind == EntryKind::Dir {
             if let Err(err) = fs::create_dir_all(dest) {

@@ -476,7 +476,7 @@ fn schtasks(args: &[&str]) -> Result<(), SchedulerError> {
 fn schtasks_output(args: &[&str]) -> Result<Vec<u8>, SchedulerError> {
     use std::os::windows::process::CommandExt;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-    let out = std::process::Command::new("schtasks.exe")
+    let out = std::process::Command::new(archeion_win::system_program(r"System32\schtasks.exe"))
         .args(args)
         .creation_flags(CREATE_NO_WINDOW)
         .output()

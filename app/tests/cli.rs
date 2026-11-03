@@ -346,3 +346,25 @@ fn an_unknown_profile_fails_without_touching_anything() {
     assert!(events(&out).iter().any(|e| e == "failed"), "{:?}", events(&out));
     assert!(!s.profile.destination.path().exists());
 }
+
+#[test]
+fn a_run_whose_window_closes_its_input_stops_and_the_next_run_works() {
+    // What Cancel does: the window closes the run's standard input (here
+    // closed from the start).
+    let s = sandbox(Container::ZipPerFile, false);
+    let id = s.profile.id.to_string();
+    let out = archeion(&s, &["run", &id, "--stop-on-eof"], None);
+    assert_eq!(code(&out), 6, "stopped: {}", String::from_utf8_lossy(&out.stdout));
+    assert!(archives(&s, None).is_empty(), "nothing committed");
+    backup(&s, None);
+    assert_eq!(archives(&s, None).len(), 1);
+}
+
+#[cfg(windows)]
+#[test]
+fn the_executable_carries_its_manifest() {
+    let exe = fs::read(env!("CARGO_BIN_EXE_archeion")).unwrap();
+    for needed in ["requestedExecutionLevel level=\"asInvoker\"", "supportedOS", "longPathAware"] {
+        assert!(exe.windows(needed.len()).any(|w| w == needed.as_bytes()), "no {needed}");
+    }
+}

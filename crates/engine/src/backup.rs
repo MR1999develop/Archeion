@@ -268,6 +268,7 @@ fn run(
                 source: std::io::Error::other("stopped for a test"),
             });
         }
+        progress.check_stop()?;
         let estimate = file_estimate(&copier, &p, &scan.entries);
         let Some(entry) = scan.entries.get_mut(p.idx) else { continue };
         progress.start_file(p.path.display().to_string());
@@ -354,6 +355,9 @@ fn run(
     let mut manifest = Manifest::new(kind, entries);
     manifest.normalize();
     report.files_unchanged = scan.unchanged;
+    if !encrypted {
+        report.files_efs_in_clear = scan.efs;
+    }
     if let Some(prev) = &previous {
         let now: HashSet<&str> = manifest.entries.iter().map(|e| e.key.as_str()).collect();
         let gone = prev.entries.iter().filter(|e| e.kind == EntryKind::File && !now.contains(e.key.as_str()));
@@ -730,6 +734,8 @@ struct Scan<'a> {
     /// Copy unchanged files too (complete backup).
     copy_all: bool,
     entries: Vec<Entry>,
+    /// Files encrypted by Windows (EFS) found.
+    efs: u64,
     /// Entries whose content must be copied: index into `entries`, path.
     to_copy: Vec<(usize, PathBuf, Change)>,
     unchanged: u64,
@@ -739,7 +745,7 @@ impl<'a> Scan<'a> {
     fn new(previous: Option<&'a Manifest>, excludes: &'a Excluder, copy_all: bool) -> Self {
         let previous =
             previous.map(|m| m.entries.iter().map(|e| (e.key.as_str(), e)).collect()).unwrap_or_default();
-        Self { previous, excludes, copy_all, entries: Vec::new(), to_copy: Vec::new(), unchanged: 0 }
+        Self { previous, excludes, copy_all, entries: Vec::new(), efs: 0, to_copy: Vec::new(), unchanged: 0 }
     }
 
     /// Walks `source`; `scanning` counts the files found and shows the
@@ -776,7 +782,14 @@ impl<'a> Scan<'a> {
                 scanning.start_file(folder.display().to_string());
             }
             if ft.is_symlink() {
-                continue; // junctions and links: their targets are backed up on their own
+                // Junctions and links are not followed: what they point to
+                // is backed up only when it is among the sources. Windows'
+                // own hidden ones (Documents\My Music…) go unsaid.
+                let attributes = item.metadata().map(|m| attributes(&m)).unwrap_or(0);
+                if source_kind(attributes) != SourceKind::WindowsLink {
+                    skip(sink, report, item.path(), LINK_SKIPPED.to_owned());
+                }
+                continue;
             }
             let key = match keys::key_for(item.path()) {
                 Ok(k) => k,
@@ -806,6 +819,23 @@ impl<'a> Scan<'a> {
                     continue;
                 }
             };
+            match source_kind(attributes(&meta)) {
+                SourceKind::OnlineOnly => {
+                    // Reading it would download it: its last saved version
+                    // stays, and the reason is in the log.
+                    skip(sink, report, item.path(), ONLINE_ONLY.to_owned());
+                    if let Some(old) = self.previous.get(key.as_str()) {
+                        let mut kept = (*old).clone();
+                        kept.stored = false;
+                        kept.blob = None;
+                        kept.chunks = None;
+                        self.entries.push(kept);
+                    }
+                    continue;
+                }
+                SourceKind::Encrypted => self.efs += 1,
+                SourceKind::Plain | SourceKind::WindowsLink => {}
+            }
             let mut entry = Entry {
                 key,
                 kind: EntryKind::File,
@@ -840,6 +870,55 @@ impl<'a> Scan<'a> {
             self.entries.push(entry);
         }
     }
+}
+
+const LINK_SKIPPED: &str = "a junction or symbolic link: not followed, so what it points to is backed up only if it is among the sources";
+const ONLINE_ONLY: &str = "an online-only file (OneDrive or a similar service): reading it would download it; \
+     its last saved version is kept. Make it always available on this device to back it up";
+
+/// What the attributes of a file found in a source say about backing it up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourceKind {
+    Plain,
+    /// Encrypted by Windows (EFS): read in the clear.
+    Encrypted,
+    /// Not on this PC: a cloud placeholder or an offline file.
+    OnlineOnly,
+    /// A hidden system link Windows keeps for old programs.
+    WindowsLink,
+}
+
+const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+const FILE_ATTRIBUTE_SYSTEM: u32 = 0x4;
+const FILE_ATTRIBUTE_OFFLINE: u32 = 0x1000;
+const FILE_ATTRIBUTE_ENCRYPTED: u32 = 0x4000;
+const FILE_ATTRIBUTE_RECALL_ON_OPEN: u32 = 0x4_0000;
+const FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS: u32 = 0x40_0000;
+
+fn source_kind(attributes: u32) -> SourceKind {
+    let has = |flag: u32| attributes & flag != 0;
+    if has(FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS)
+        || has(FILE_ATTRIBUTE_RECALL_ON_OPEN)
+        || has(FILE_ATTRIBUTE_OFFLINE)
+    {
+        SourceKind::OnlineOnly
+    } else if has(FILE_ATTRIBUTE_HIDDEN) && has(FILE_ATTRIBUTE_SYSTEM) {
+        SourceKind::WindowsLink
+    } else if has(FILE_ATTRIBUTE_ENCRYPTED) {
+        SourceKind::Encrypted
+    } else {
+        SourceKind::Plain
+    }
+}
+
+#[cfg(windows)]
+fn attributes(meta: &std::fs::Metadata) -> u32 {
+    std::os::windows::fs::MetadataExt::file_attributes(meta)
+}
+
+#[cfg(not(windows))]
+fn attributes(_meta: &std::fs::Metadata) -> u32 {
+    0
 }
 
 fn skip(sink: &dyn EventSink, report: &mut BackupReport, path: &Path, reason: String) {
@@ -921,6 +1000,19 @@ fn reason(e: &EngineError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn attributes_tell_online_only_encrypted_and_windows_own_links() {
+        assert_eq!(source_kind(0x20), SourceKind::Plain);
+        // OneDrive "online only", "always keep" not set.
+        assert_eq!(source_kind(0x40_0000 | 0x20), SourceKind::OnlineOnly);
+        assert_eq!(source_kind(0x4_0000), SourceKind::OnlineOnly);
+        assert_eq!(source_kind(0x1000), SourceKind::OnlineOnly);
+        assert_eq!(source_kind(0x4000 | 0x20), SourceKind::Encrypted);
+        // Documents\My Music and the like: hidden, system, reparse point.
+        assert_eq!(source_kind(0x2 | 0x4 | 0x400 | 0x10), SourceKind::WindowsLink);
+        assert_eq!(source_kind(0x2), SourceKind::Plain, "hidden alone");
+    }
 
     #[test]
     fn nested_sources_are_backed_up_once() {

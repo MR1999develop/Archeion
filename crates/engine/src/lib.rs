@@ -66,6 +66,14 @@ use archeion_core::RunEvent;
 /// Receives the events of a run. Called from the run's thread.
 pub trait EventSink: Send + Sync + 'static {
     fn emit(&self, event: RunEvent);
+
+    /// True once the caller wants the run to stop. Checked between files:
+    /// the run then ends with [`EngineError::Cancelled`], leaving what a
+    /// stop leaves (an unfinished backup resumes next time; a merge or a
+    /// restore is simply not done).
+    fn stop_requested(&self) -> bool {
+        false
+    }
 }
 
 /// Failure of an engine operation, by how the caller reacts.
@@ -97,6 +105,9 @@ pub enum EngineError {
         "the backups at the destination are not described as encrypted, but the profile or the backups are"
     )]
     EncryptionMissing,
+    /// The caller asked the run to stop ([`EventSink::stop_requested`]).
+    #[error("stopped on request")]
+    Cancelled,
     /// The destination is encrypted and no password was given.
     #[error("the destination is encrypted: a password is needed")]
     PasswordNeeded,

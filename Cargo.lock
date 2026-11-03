@@ -311,6 +311,7 @@ dependencies = [
  "fluent-templates",
  "jiff",
  "keyring",
+ "raw-window-handle",
  "rfd",
  "serde",
  "serde_json",
@@ -365,6 +366,7 @@ name = "archeion_scheduler"
 version = "0.1.0"
 dependencies = [
  "archeion_core",
+ "archeion_win",
  "tempfile",
  "thiserror 2.0.21",
 ]

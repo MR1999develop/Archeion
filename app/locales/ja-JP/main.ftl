@@ -138,6 +138,11 @@ backup-resumed = { $count ->
 backup-as-changes = { $count ->
    *[other] { $count } 個のファイルを変更分だけ保存しました
 }
+backup-efs-clear = { $count ->
+    [one] Windows (EFS) で暗号化されたファイル 1 個を、その暗号化なしで保存しました
+   *[other] Windows (EFS) で暗号化されたファイル { $count } 個を、その暗号化なしで保存しました
+}
+backup-efs-clear-hint = 保護したままにするには、このプロファイルの新しい保存先で暗号化を有効にしてください。
 run-cancelled = キャンセルしました。バックアップは何も変更されていません。停止したバックアップは、次回、停止した位置から続行します。
 
 # Errors
@@ -444,6 +449,7 @@ alert-stale-title = Archeion: 「{ $name }」がバックアップされてい�
 alert-stale-body = { $days } 日間バックアップがありません (前回: { $when })。保存先が接続されているか確認するか、Archeion からバックアップを開始してください。
 closing-after-run = 操作が実行中です。終了すると Archeion は自動的に閉じます。
 closing-cancel = 閉じない
+shutdown-reason = バックアップ操作を実行中です。今 Windows をシャットダウンすると中断され、次回に続きから行われます。
 
 # Notification area and Preferences window
 menu-preferences = 環境設定…

@@ -63,6 +63,11 @@ impl<'a> Progress<'a> {
     }
 
     /// The next file begins; `path` is shown as the current file.
+    /// [`crate::EngineError::Cancelled`] once the caller asked to stop.
+    pub(crate) fn check_stop(&self) -> crate::Result<()> {
+        if self.sink.stop_requested() { Err(crate::EngineError::Cancelled) } else { Ok(()) }
+    }
+
     pub(crate) fn start_file(&mut self, path: impl Into<String>) {
         self.files_done = self.files_done.saturating_add(1);
         self.current = path.into();

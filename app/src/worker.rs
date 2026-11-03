@@ -13,7 +13,15 @@
 use crate::{activity::Op, credentials, history, i18n::Tr, notify, storage::Storage};
 use archeion_core::{BackupMode, ProfileId, RunEvent};
 use archeion_engine::{EngineError, EventSink, Password, RestoreRequest};
-use std::{io::Write as _, path::PathBuf, process::ExitCode, sync::Mutex};
+use std::{
+    io::Write as _,
+    path::PathBuf,
+    process::ExitCode,
+    sync::{
+        Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
+};
 
 /// What the worker does.
 #[derive(Debug)]
@@ -45,6 +53,23 @@ pub enum Work {
 pub(crate) const EXIT_FAILED: u8 = 1;
 pub(crate) const EXIT_DESTINATION_UNAVAILABLE: u8 = 2;
 const EXIT_BUSY: u8 = 3;
+const EXIT_CANCELLED: u8 = 6;
+
+/// Set once the window that started this run asked it to stop.
+static STOP: AtomicBool = AtomicBool::new(false);
+
+/// Watches standard input on a thread of its own: when the window closes
+/// it (Cancel), the run stops at the next file, like an interruption.
+pub fn stop_when_stdin_closes() {
+    let spawned = std::thread::Builder::new().name("stop-watch".into()).spawn(|| {
+        let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+        tracing::info!("asked to stop");
+        STOP.store(true, Ordering::Relaxed);
+    });
+    if let Err(e) = spawned {
+        tracing::warn!(error = %e, "watching for a stop request");
+    }
+}
 pub(crate) const EXIT_PASSWORD: u8 = 4;
 pub(crate) const EXIT_NO_SPACE: u8 = 5;
 
@@ -60,6 +85,10 @@ struct Sink {
 }
 
 impl EventSink for Sink {
+    fn stop_requested(&self) -> bool {
+        STOP.load(Ordering::Relaxed)
+    }
+
     fn emit(&self, event: RunEvent) {
         let now = history::now_ms();
         if matches!(event, RunEvent::Files { .. }) {
@@ -137,6 +166,10 @@ pub fn watch(storage: &Storage) -> ExitCode {
 /// the data folder).
 pub fn run(storage: &Storage, id: ProfileId, work: Work, scheduled: bool, log: Option<PathBuf>) -> ExitCode {
     let _span = tracing::info_span!("run", profile = %id, ?work, scheduled).entered();
+    if scheduled {
+        // Nobody is waiting for it: low CPU, disk, memory and energy use.
+        archeion_win::enter_background_mode();
+    }
     let settings = storage.load();
     let profile = settings.as_ref().ok().and_then(|s| s.profile(id).cloned());
 
@@ -282,6 +315,11 @@ pub fn run(storage: &Storage, id: ProfileId, work: Work, scheduled: bool, log: O
             let text = tr.t("run-encryption-missing");
             alert(text.clone());
             fail(&sink, &text)
+        }
+        Err(EngineError::Cancelled) => {
+            // The window has written the cancellation in the log.
+            tracing::info!("stopped on request");
+            ExitCode::from(EXIT_CANCELLED)
         }
         Err(EngineError::ForeignDestination) => {
             let text = tr.t("run-foreign-destination");

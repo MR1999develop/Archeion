@@ -141,6 +141,11 @@ backup-as-changes = { $count ->
     [one] { $count } फ़ाइल केवल बदलावों के रूप में सहेजी गई
    *[other] { $count } फ़ाइलें केवल बदलावों के रूप में सहेजी गईं
 }
+backup-efs-clear = { $count ->
+    [one] Windows (EFS) द्वारा एन्क्रिप्ट की गई 1 फ़ाइल उस एन्क्रिप्शन के बिना सहेजी गई
+   *[other] Windows (EFS) द्वारा एन्क्रिप्ट की गई { $count } फ़ाइलें उस एन्क्रिप्शन के बिना सहेजी गईं
+}
+backup-efs-clear-hint = इन्हें सुरक्षित रखने के लिए, इस प्रोफ़ाइल के नए गंतव्य पर एन्क्रिप्शन चालू करें।
 run-cancelled = रद्द किया गया। बैकअप में कुछ भी नहीं बदला; रोका गया बैकअप अगली बार वहीं से जारी रहता है जहाँ वह रुका था।
 
 # Errors
@@ -457,6 +462,7 @@ alert-stale-title = Archeion: "{ $name }" का बैकअप नहीं �
 alert-stale-body = { $days } दिनों से कोई बैकअप नहीं (पिछला { $when } को)। जाँचें कि गंतव्य कनेक्ट है, या Archeion से बैकअप शुरू करें।
 closing-after-run = एक कार्रवाई चल रही है: उसके समाप्त होने पर Archeion अपने-आप बंद हो जाएगा।
 closing-cancel = बंद न करें
+shutdown-reason = एक बैकअप कार्य चल रहा है: अगर Windows अभी बंद होता है, तो यह रुक जाएगा और अगली बार आगे बढ़ेगा।
 
 # Notification area and Preferences window
 menu-preferences = प्राथमिकताएँ…

@@ -46,7 +46,15 @@ pub fn claim(dir: &Path) -> std::io::Result<Claim> {
     match lock.try_lock() {
         Ok(()) => {
             let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
-            fs::write(dir.join(PORT_FILE), listener.local_addr()?.port().to_string())?;
+            // The port, then this process's id: the second launch lets it
+            // come to the front.
+            let text = format!(
+                "{}
+{}",
+                listener.local_addr()?.port(),
+                std::process::id()
+            );
+            fs::write(dir.join(PORT_FILE), text)?;
             Ok(Claim::Primary(Primary { lock, listener }))
         }
         Err(fs::TryLockError::WouldBlock) => {
@@ -62,7 +70,13 @@ fn wake(dir: &Path) -> std::io::Result<()> {
     let port_file = dir.join(PORT_FILE);
     let started = std::time::Instant::now();
     loop {
-        if let Some(port) = fs::read_to_string(&port_file).ok().and_then(|t| t.trim().parse::<u16>().ok()) {
+        let text = fs::read_to_string(&port_file).unwrap_or_default();
+        let mut lines = text.lines().map(str::trim);
+        if let Some(port) = lines.next().and_then(|t| t.parse::<u16>().ok()) {
+            // Windows lets only the program in front give the focus away.
+            if let Some(pid) = lines.next().and_then(|t| t.parse::<u32>().ok()) {
+                archeion_win::allow_foreground(pid);
+            }
             let addr = SocketAddr::from((Ipv4Addr::LOCALHOST, port));
             match TcpStream::connect_timeout(&addr, IO_TIMEOUT) {
                 Ok(mut stream) => return stream.write_all(SHOW),
@@ -110,6 +124,9 @@ mod tests {
     fn a_second_launch_wakes_the_first() {
         let dir = tempfile::tempdir().unwrap();
         let Claim::Primary(primary) = claim(dir.path()).unwrap() else { panic!("first launch") };
+        let published = fs::read_to_string(dir.path().join(PORT_FILE)).unwrap();
+        let pid = std::process::id().to_string();
+        assert_eq!(published.lines().nth(1), Some(pid.as_str()), "the id that may take the focus");
         let (tx, rx) = mpsc::channel();
         primary.serve(move || {
             let _ = tx.send(());
