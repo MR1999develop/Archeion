@@ -4,9 +4,9 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con i file eliminati ripristinati con la cartella e marcati
-"_deleted_" (ramo `feature/restore-deleted` unito; `tools\check.bat` verde: fmt, clippy, 341
-test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
+`main` con la nuova icona, anche nell'eseguibile (ramo
+`feature/new-icon` unito; `tools\check.bat` verde: fmt, clippy, 342
+test, 1 ignorato: le schermate). La build di rilascio è stata controllata con la nuova icona
 (nessun percorso locale nell'exe).
 
 ## Lavoro in corso
@@ -147,3 +147,8 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   `restore::DELETED_PREFIX` ("_deleted_"). Nell'albero un file salvato
   prima della data della cartella risulta spuntato con lei. Il totale
   sopra Ripristina non conta ancora i file eliminati (in `TIDY.md`).
+- Icona disegnata in codice (`ui/icon.rs`): finestra, area di notifica e,
+  tramite `app/build.rs` (crate `winresource`, che usa `rc.exe` del
+  Windows SDK), anche l'eseguibile, con nome, descrizione e copyright MR
+  nelle Proprietà. Anteprima: `cargo test -p archeion --bin archeion
+  icon_preview -- --ignored` scrive `target/ui-screens/archeion.ico`.

@@ -40,6 +40,10 @@ tray-icon = { version = "0.26", default-features = false }
 # Start with Windows (HKCU Run key).
 winreg = "0.56"
 
+[build-dependencies]
+# The icon in the Windows executable.
+winresource = "0.1"
+
 [dev-dependencies]
 # Drives the egui screens in tests, without a window.
 egui_kittest = { version = "0.37", features = ["eframe", "snapshot", "wgpu"] }

@@ -51,6 +51,11 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Changed
 
+- A new icon: an archive box inside an arrow turning back, on the accent
+  blue, for the window, the notification area and now the executable too
+  (File Explorer, shortcuts), whose Properties also name Archeion and its
+  licence.
+
 - Restore files: a ticked folder also ticks, and brings back, the files it
   held before and that were deleted at the source since, each in its last
   version; they can be unticked one by one. Every restored file no longer
