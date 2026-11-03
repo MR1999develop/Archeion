@@ -570,3 +570,15 @@ recent-damaged = 問題
 recent-skipped = スキップ
 recent-deleted = 削除
 recent-dropped = 旧バージョンを削除
+
+# Profile files (File menu)
+import-profile = プロファイルをインポート…
+export-profile = プロファイルをエクスポート…
+import-profile-hint = Archeion でエクスポートしたファイルからプロファイルを追加します（ルールのみで、パスワードは含まれません）。
+export-profile-hint = このプロファイルのすべてのルールをファイルに保存し、保管したり別のコンピューターへ移したりできます。パスワードは保存されません。
+profile-file-type = Archeion プロファイル
+import-failed-read = ファイルを読み取れませんでした: { $detail }
+import-failed-format = { $file } は Archeion のプロファイルではありません。
+import-failed-newer = { $file } は新しいバージョンの Archeion で作成されています。インポートするには Archeion を更新してください。
+export-failed = プロファイルを保存できませんでした: { $detail }
+doc-profiles-files = [ファイル] > [プロファイルをエクスポート…] は、選択したプロファイルのすべてのルール（フォルダー、除外、保存先、形式、スケジュール、統合、チェック、通知）を .archeion-profile ファイルに保存し、保管したり別のコンピューターへ移したりできます。[ファイル] > [プロファイルをインポート…] で再び追加できます。パスワードがファイルに含まれることはなく、暗号化されたプロファイルはインポート後にパスワードを求めます。別のコンピューターでは、インポートしたプロファイルが保存先のバックアップを見つけます。同じコンピューターに 2 回インポートすると、名前に「(2)」が付いたコピーになります。

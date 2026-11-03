@@ -17,6 +17,7 @@ use crate::{
     i18n::{Tr, arg},
     instance::Primary,
     job::Job,
+    profile_file::{self, ImportError},
     storage::Storage,
 };
 use archeion_core::{Destination, Profile, ProfileId, Schedule, Settings, Summary};
@@ -329,6 +330,58 @@ impl ArcheionApp {
         self.save();
     }
 
+    /// Adds the profile of a file chosen by the user, selects it and
+    /// registers its scheduled tasks. Its password, if encrypted, is asked
+    /// for by its settings, as for a new profile.
+    fn import_profile(&mut self) {
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(self.tr.t("import-profile"))
+            .add_filter(self.tr.t("profile-file-type"), &[profile_file::EXTENSION])
+            .pick_file()
+        else {
+            return;
+        };
+        let file = || arg(path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()));
+        match profile_file::import(&path) {
+            Ok(profile) => {
+                let id = profile_file::add(&mut self.settings, profile);
+                self.selected = Some(id);
+                self.tab = Tab::Settings;
+                self.restore.invalidate();
+                self.drafts.clear_password();
+                self.save();
+                self.apply_schedule(id);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, path = %path.display(), "profile import");
+                self.error = Some(match e {
+                    ImportError::Read(e) => {
+                        self.tr.t_args("import-failed-read", &[("detail", arg(e.to_string()))])
+                    }
+                    ImportError::NotAProfile => self.tr.t_args("import-failed-format", &[("file", file())]),
+                    ImportError::Newer(_) => self.tr.t_args("import-failed-newer", &[("file", file())]),
+                });
+            }
+        }
+    }
+
+    /// Saves the selected profile to a file the user names.
+    fn export_profile(&mut self) {
+        let Some(profile) = self.selected.and_then(|id| self.settings.profile(id)).cloned() else { return };
+        let Some(path) = rfd::FileDialog::new()
+            .set_title(self.tr.t("export-profile"))
+            .add_filter(self.tr.t("profile-file-type"), &[profile_file::EXTENSION])
+            .set_file_name(profile_file::file_name(&profile.name))
+            .save_file()
+        else {
+            return;
+        };
+        if let Err(e) = profile_file::export(&path, &profile) {
+            tracing::error!(error = format!("{e:#}"), path = %path.display(), "profile export");
+            self.error = Some(self.tr.t_args("export-failed", &[("detail", arg(format!("{e:#}")))]));
+        }
+    }
+
     fn select(&mut self, ctx: &egui::Context, id: ProfileId) {
         if self.selected != Some(id) {
             self.flush_schedule(ctx, true);
@@ -552,6 +605,21 @@ impl ArcheionApp {
             ui.menu_button(self.tr.t("menu-file"), |ui| {
                 if ui.add(egui::Button::new(self.tr.t("new-profile")).shortcut_text("Ctrl+N")).clicked() {
                     self.new_profile();
+                }
+                if ui
+                    .button(self.tr.t("import-profile"))
+                    .on_hover_text(self.tr.t("import-profile-hint"))
+                    .clicked()
+                {
+                    self.import_profile();
+                }
+                let exportable = self.selected.is_some_and(|id| self.settings.profile(id).is_some());
+                if ui
+                    .add_enabled(exportable, egui::Button::new(self.tr.t("export-profile")))
+                    .on_hover_text(self.tr.t("export-profile-hint"))
+                    .clicked()
+                {
+                    self.export_profile();
                 }
                 ui.separator();
                 let preferences = egui::Button::new(self.tr.t("menu-preferences")).shortcut_text("Ctrl+,");

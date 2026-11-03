@@ -46,6 +46,7 @@ const SECTIONS: &[Section] = &[
             Text("doc-profiles-exclusions"),
             Text("doc-profiles-format"),
             Text("doc-profiles-delete"),
+            Text("doc-profiles-files"),
         ],
     },
     Section {

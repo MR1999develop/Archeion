@@ -8,6 +8,13 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Added
 
+- File > Export profile… saves every rule of the selected profile to a
+  readable `.archeion-profile` file (never the password); File > Import
+  profile… adds it, with its scheduled tasks. On another computer the
+  imported profile keeps its id and so finds its backups at the
+  destination; imported twice on the same one it becomes a copy with
+  "(2)" in its name. Files of another kind, too large or of a later
+  format are refused with a message. In the guide.
 - The window opens at the size it last had, maximized if it was; the
   size is saved a second after resizing stops, or when the window closes.
   The first time it opens at 1200 × 1000, enough for every setting of a

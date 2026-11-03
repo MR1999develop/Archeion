@@ -315,6 +315,7 @@ dependencies = [
  "serde_json",
  "sys-locale",
  "tempfile",
+ "thiserror 2.0.21",
  "toml",
  "tracing",
  "tracing-subscriber",

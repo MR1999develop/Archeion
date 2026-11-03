@@ -596,3 +596,15 @@ recent-damaged = Problema
 recent-skipped = Ignorado
 recent-deleted = Excluído
 recent-dropped = Versão removida
+
+# Profile files (File menu)
+import-profile = Importar perfil…
+export-profile = Exportar perfil…
+import-profile-hint = Adiciona um perfil de um arquivo exportado pelo Archeion: as regras dele, não a senha.
+export-profile-hint = Salva todas as regras deste perfil em um arquivo, para guardá-lo ou levá-lo a outro computador. A senha não é salva nele.
+profile-file-type = Perfil do Archeion
+import-failed-read = Não foi possível ler o arquivo: { $detail }
+import-failed-format = { $file } não é um perfil do Archeion.
+import-failed-newer = { $file } foi criado por uma versão mais recente do Archeion: atualize o Archeion para importá-lo.
+export-failed = Não foi possível salvar o perfil: { $detail }
+doc-profiles-files = Arquivo > Exportar perfil… salva todas as regras do perfil selecionado (pastas, exclusões, destino, formato, agendamento, mesclagem, verificações, notificações) em um arquivo .archeion-profile, para guardá-lo ou levá-lo a outro computador; Arquivo > Importar perfil… o adiciona de novo. A senha nunca fica no arquivo: um perfil criptografado a pede após a importação. Em outro computador, o perfil importado encontra seus backups no destino; importado duas vezes no mesmo, vira uma cópia com "(2)" no nome.
