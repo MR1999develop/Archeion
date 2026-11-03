@@ -121,42 +121,50 @@ pub fn adopt_destination(profile: &Profile) -> Result<()> {
     retry(|| fs::rename(&tmp, &path)).map_err(EngineError::io(format!("replacing {}", path.display())))
 }
 
-/// What [`delete_destination`] did.
+/// What [`trash_destination`] did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct DestinationDeleted {
-    /// The folder is gone: it held nothing else.
-    pub folder_removed: bool,
+pub struct DestinationTrashed {
+    /// The whole folder went to the Recycle Bin: it held nothing else.
+    pub folder_trashed: bool,
     /// Names in the folder that Archeion did not write, left in place.
     pub left: Vec<String>,
 }
 
-/// Deletes the backups of `profile`: everything Archeion wrote in its
-/// destination folder (archives, chunks, key, descriptor, unfinished
-/// backups), then the folder itself when nothing else is in it. Files
-/// Archeion did not write are left, and named. Cannot be undone.
+/// Moves the backups of `profile` to the Windows Recycle Bin, from where
+/// they can be restored until it is emptied: the whole destination folder
+/// when it holds nothing else, otherwise each thing Archeion wrote in it
+/// (archives, chunks, key, descriptor, unfinished backups); files Archeion
+/// did not write are left, and named.
+///
+/// Windows deletes outright what it cannot recycle (a network share, a
+/// removable drive), and says it recycled it: so a small probe file goes
+/// first and must be found in the Recycle Bin, and so must everything
+/// moved after it; at the first that is not, it stops.
 ///
 /// The folder must hold this profile's backups: a folder of another
 /// profile is refused, one without backups is left alone.
 ///
 /// # Errors
-/// [`EngineError::ForeignDestination`] for another profile's folder,
-/// [`EngineError::Busy`] while a run uses it, or
-/// [`EngineError::DestinationUnavailable`]; otherwise see [`EngineError`].
-pub fn delete_destination(profile: &Profile) -> Result<DestinationDeleted> {
+/// [`EngineError::NoRecycleBin`] before anything is moved,
+/// [`EngineError::NotRecycled`] when Windows deleted something instead of
+/// recycling it, [`EngineError::ForeignDestination`],
+/// [`EngineError::Busy`] or [`EngineError::DestinationUnavailable`];
+/// otherwise see [`EngineError`].
+pub fn trash_destination(profile: &Profile) -> Result<DestinationTrashed> {
     let root = profile.destination.path();
     if root.as_os_str().is_empty() {
-        return Ok(DestinationDeleted::default());
+        return Ok(DestinationTrashed::default());
     }
     ensure_reachable(root)?;
     if !root.exists() {
-        return Ok(DestinationDeleted { folder_removed: true, left: Vec::new() });
+        return Ok(DestinationTrashed { folder_trashed: true, left: Vec::new() });
     }
     match read_descriptor(root)? {
         Some(d) if d.profile == profile.id => {}
         Some(_) => return Err(EngineError::ForeignDestination),
         None => {
-            // No backups here: nothing of Archeion's to delete.
-            return Ok(DestinationDeleted { folder_removed: false, left: names_in(root)? });
+            // No backups here: nothing of Archeion's to move.
+            return Ok(DestinationTrashed { folder_trashed: false, left: names_in(root)? });
         }
     }
     let lock_path = root.join(LOCK);
@@ -171,25 +179,94 @@ pub fn delete_destination(profile: &Profile) -> Result<DestinationDeleted> {
         Err(TryLockError::WouldBlock) => return Err(EngineError::Busy),
         Err(TryLockError::Error(e)) => return Err(EngineError::io("locking the destination")(e)),
     }
-    tracing::info!(profile = %profile.id, root = %root.display(), "deleting the backups");
-    let mut left = Vec::new();
-    for name in names_in(root)? {
-        if !written_by_archeion(&name) {
-            left.push(name);
-            continue;
-        }
-        // The descriptor last, so a deletion cut short can be done again;
-        // the lock once released.
-        if name == DESCRIPTOR || name == LOCK {
-            continue;
-        }
-        remove_entry(&root.join(&name))?;
-    }
-    remove_entry(&root.join(DESCRIPTOR))?;
+    probe_recycle_bin(root)?;
+    tracing::info!(profile = %profile.id, root = %root.display(), "moving the backups to the Recycle Bin");
+    let (ours, left): (Vec<String>, Vec<String>) =
+        names_in(root)?.into_iter().partition(|n| written_by_archeion(n));
     drop(lock);
-    remove_entry(&lock_path)?;
-    let folder_removed = left.is_empty() && retry(|| fs::remove_dir(root)).is_ok();
-    Ok(DestinationDeleted { folder_removed, left })
+    if left.is_empty() {
+        recycle(root)?;
+        return Ok(DestinationTrashed { folder_trashed: true, left });
+    }
+    // The descriptor last, so what is still there stays a destination.
+    let (last, first): (Vec<String>, Vec<String>) = ours.into_iter().partition(|n| n == DESCRIPTOR);
+    for name in first.iter().chain(&last) {
+        recycle(&root.join(name))?;
+    }
+    Ok(DestinationTrashed { folder_trashed: false, left })
+}
+
+/// Moves `path` to the Recycle Bin and checks that it is there.
+fn recycle(path: &Path) -> Result<()> {
+    let since = std::time::SystemTime::now();
+    trash::delete(path).map_err(|e| {
+        EngineError::io(format!("moving {} to the Recycle Bin", path.display()))(std::io::Error::other(
+            e.to_string(),
+        ))
+    })?;
+    if in_recycle_bin(path, since)? {
+        Ok(())
+    } else {
+        Err(EngineError::NotRecycled(path.display().to_string()))
+    }
+}
+
+/// Sends a probe file of `root` to the Recycle Bin and back out of it:
+/// a drive without one deletes it instead.
+fn probe_recycle_bin(root: &Path) -> Result<()> {
+    let stamp =
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let probe = root.join(format!("archeion.recycle-probe-{}-{stamp}", std::process::id()));
+    fs::write(&probe, b"Archeion checks that this drive has a Recycle Bin.")
+        .map_err(EngineError::io(format!("writing {}", probe.display())))?;
+    match recycle(&probe) {
+        Ok(()) => {
+            purge_from_recycle_bin(&probe);
+            Ok(())
+        }
+        Err(EngineError::NotRecycled(_)) => Err(EngineError::NoRecycleBin(root.display().to_string())),
+        Err(e) => {
+            let _ = fs::remove_file(&probe);
+            Err(e)
+        }
+    }
+}
+
+/// The item of the Recycle Bin that was `path`, put there since `since`.
+fn recycled_item(path: &Path, since: std::time::SystemTime) -> Result<Option<trash::TrashItem>> {
+    let (Some(name), Some(parent)) = (path.file_name(), path.parent()) else { return Ok(None) };
+    let since = since
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX))
+        // Deletion times are whole seconds.
+        .saturating_sub(2);
+    let same = |a: &Path, b: &Path| a.to_string_lossy().eq_ignore_ascii_case(&b.to_string_lossy());
+    let items = trash::os_limited::list()
+        .map_err(|e| EngineError::io("reading the Recycle Bin")(std::io::Error::other(e.to_string())))?;
+    Ok(items
+        .into_iter()
+        .find(|i| i.name == name && same(&i.original_parent, parent) && i.time_deleted >= since))
+}
+
+fn in_recycle_bin(path: &Path, since: std::time::SystemTime) -> Result<bool> {
+    // Windows may list an item a moment after moving it.
+    for wait_ms in [0, 100, 300, 600] {
+        std::thread::sleep(std::time::Duration::from_millis(wait_ms));
+        if recycled_item(path, since)?.is_some() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Removes the probe from the Recycle Bin: it is not the user's.
+fn purge_from_recycle_bin(probe: &Path) {
+    let since = std::time::SystemTime::UNIX_EPOCH;
+    if let Ok(Some(item)) = recycled_item(probe, since)
+        && let Err(e) = trash::os_limited::purge_all([item])
+    {
+        tracing::warn!(error = %e, "removing the probe from the Recycle Bin");
+    }
 }
 
 /// Names Archeion writes at the root of a destination.
@@ -206,17 +283,6 @@ fn names_in(dir: &Path) -> Result<Vec<String>> {
         read.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect();
     names.sort_unstable();
     Ok(names)
-}
-
-/// Removes a file or a folder with all it holds; a missing one is fine.
-fn remove_entry(path: &Path) -> Result<()> {
-    let result = retry(|| match fs::symlink_metadata(path) {
-        Ok(m) if m.is_dir() => fs::remove_dir_all(path),
-        Ok(_) => fs::remove_file(path),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(e) => Err(e),
-    });
-    result.map_err(EngineError::io(format!("deleting {}", path.display())))
 }
 
 /// True while a backup, merge or other run holds the destination of

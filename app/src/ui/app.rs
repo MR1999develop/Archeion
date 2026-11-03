@@ -521,8 +521,8 @@ impl ArcheionApp {
     }
 
     /// Removes the profile and its tasks; Undo brings them back until the
-    /// next deletion. With `backups`, its backups at the destination are
-    /// deleted too, in the background, and there is no Undo.
+    /// next deletion. With `backups`, its backups at the destination go to
+    /// the Recycle Bin too, in the background, and there is no Undo.
     fn delete(&mut self, id: ProfileId, backups: bool) {
         let Some(pos) = self.settings.profiles.iter().position(|p| p.id == id) else { return };
         let profile = self.settings.profiles.remove(pos);
@@ -558,19 +558,23 @@ impl ArcheionApp {
                 return;
             }
             Err(mpsc::TryRecvError::Disconnected) => Err(EngineError::Io {
-                context: "deleting the backups".into(),
+                context: "moving the backups to the Recycle Bin".into(),
                 source: std::io::Error::other("stopped unexpectedly"),
             }),
         };
         let name = || arg(name.clone());
         let (text, warn) = match result {
             Ok(d) if d.left.is_empty() => (self.tr.t_args("delete-backups-done", &[("name", name())]), false),
+            Err(EngineError::NoRecycleBin(_)) => {
+                let args = [("name", name()), ("path", arg(path.clone()))];
+                (self.tr.t_args("delete-backups-no-bin", &args), true)
+            }
             Ok(d) => {
                 let args = [("name", name()), ("path", arg(path.clone())), ("count", arg(d.left.len()))];
                 (self.tr.t_args("delete-backups-left", &args), true)
             }
             Err(e) => {
-                tracing::error!(error = %e, "deleting the backups");
+                tracing::error!(error = %e, "moving the backups to the Recycle Bin");
                 (
                     self.tr
                         .t_args("delete-backups-failed", &[("name", name()), ("detail", arg(e.to_string()))]),
@@ -1595,13 +1599,14 @@ mod screens;
 #[path = "app_tests.rs"]
 mod tests;
 
-/// The deletion of a deleted profile's backups, on a thread of its own.
+/// A deleted profile's backups going to the Recycle Bin, on a thread of
+/// their own.
 #[derive(Debug)]
 enum Wipe {
     Running {
         name: String,
         path: String,
-        done: mpsc::Receiver<Result<archeion_engine::DestinationDeleted, EngineError>>,
+        done: mpsc::Receiver<Result<archeion_engine::DestinationTrashed, EngineError>>,
     },
     /// What the status bar says once it ended.
     Done { text: String, warn: bool },
@@ -1611,11 +1616,11 @@ impl Wipe {
     fn start(profile: Profile) -> Self {
         let (tx, done) = mpsc::channel();
         let (name, path) = (profile.name.clone(), profile.destination.path().display().to_string());
-        let spawned = std::thread::Builder::new().name("delete-backups".into()).spawn(move || {
-            let _ = tx.send(archeion_engine::delete_destination(&profile));
+        let spawned = std::thread::Builder::new().name("trash-backups".into()).spawn(move || {
+            let _ = tx.send(archeion_engine::trash_destination(&profile));
         });
         if let Err(e) = spawned {
-            tracing::error!(error = %e, "starting the deletion of the backups");
+            tracing::error!(error = %e, "starting to move the backups to the Recycle Bin");
         }
         Self::Running { name, path, done }
     }

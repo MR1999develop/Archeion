@@ -73,19 +73,20 @@ delete-profile = Excluir perfil
 delete-profile-hint = Pede confirmação e depois remove o perfil e suas tarefas agendadas; os backups permanecem no destino, a menos que você escolha excluí-los também.
 delete-profile-title = Excluir o perfil "{ $name }"?
 delete-profile-body = O perfil e suas tarefas agendadas são removidos. Até você fechar a mensagem na barra de status, Desfazer os traz de volta.
-delete-profile-body-backups = O perfil, suas tarefas agendadas e seus backups são excluídos.
 delete-profile-password = A senha salva é removida do Gerenciador de Credenciais do Windows quando não for mais possível desfazer: ao fechar essa mensagem, excluir outro perfil ou sair do Archeion.
 delete-profile-backups = Os backups em { $path } não são excluídos: um novo perfil que use essa pasta pode assumi-los com "Usar estes backups neste perfil".
-delete-profile-with-backups = Excluir também os backups em { $path }
-delete-profile-backups-gone = Os backups não poderão ser recuperados depois, e Desfazer não poderá trazer o perfil de volta. Só é excluído o que o Archeion gravou: os outros arquivos da pasta ficam.
-delete-profile-and-backups = Excluir perfil e backups
-delete-backups-running = Excluindo os backups de "{ $name }"…
-delete-backups-done = Os backups de "{ $name }" foram excluídos.
-delete-backups-left = Os backups de "{ $name }" foram excluídos; { $path } fica, com { $count ->
+delete-profile-with-backups = Mover também os backups em { $path } para a Lixeira
+delete-profile-backups-gone = Eles podem ser restaurados da Lixeira até que ela seja esvaziada, mas Desfazer não poderá mais trazer o perfil de volta. Só sai o que o Archeion gravou: os outros arquivos da pasta ficam. Uma pasta de rede ou uma unidade removível não tem Lixeira: ali nada é movido.
+delete-profile-and-backups = Excluir perfil, backups para a Lixeira
+delete-profile-body-backups = O perfil e suas tarefas agendadas são excluídos, e seus backups vão para a Lixeira.
+delete-backups-running = Movendo os backups de "{ $name }" para a Lixeira…
+delete-backups-done = Os backups de "{ $name }" estão na Lixeira.
+delete-backups-left = Os backups de "{ $name }" estão na Lixeira; { $path } fica, com { $count ->
     [one] 1 item
    *[other] { $count } itens
 } que o Archeion não gravou.
-delete-backups-failed = Não foi possível excluir os backups de "{ $name }": { $detail }
+delete-backups-failed = Nem todos os backups de "{ $name }" puderam ir para a Lixeira: { $detail }
+delete-backups-no-bin = { $path } não tem Lixeira (pasta de rede ou unidade removível): os backups de "{ $name }" não foram tocados. Exclua-os à mão se não precisar mais deles.
 
 day-monday = segunda-feira
 day-tuesday = terça-feira
@@ -496,7 +497,7 @@ doc-profiles-title = Perfis
 doc-profiles-body = Um perfil define o que incluir no backup, onde e quando. Crie um em Arquivo > Novo perfil (Ctrl+N) e preencha a guia Configurações: um nome, as pastas para backup e o destino, que pode ser uma pasta, um disco externo ou um compartilhamento de rede. Use cada pasta de destino para um único perfil.
 doc-profiles-exclusions = As exclusões deixam de fora o que você não precisa: uma pasta e todo o seu conteúdo, um arquivo ou todos os arquivos de um tipo, como .tmp. Em "Excluir padrões" você pode adicionar padrões, comparados com o caminho completo sem diferenciar maiúsculas: * é qualquer texto em um nome, ** quaisquer pastas, ? um caractere. Por exemplo **/node_modules ou **/cache/**.
 doc-profiles-format = O formato de armazenamento (um zip por arquivo ou cópias simples) e a criptografia devem ser escolhidos antes do primeiro backup: depois que o destino contém backups, eles não podem mudar. Para trocar, escolha um destino vazio.
-doc-profiles-delete = Excluir perfil pede confirmação e depois remove o perfil e suas tarefas agendadas; os backups permanecem no destino. Logo em seguida, Desfazer na barra de status traz o perfil de volta. Um perfil que use essa pasta mais tarde pode assumi-los com "Usar estes backups neste perfil". Na confirmação, "Excluir também os backups" os exclui também, para sempre e sem Desfazer: só sai o que o Archeion gravou nessa pasta, e a própria pasta quando não sobra mais nada nela.
+doc-profiles-delete = Excluir perfil pede confirmação e depois remove o perfil e suas tarefas agendadas; os backups permanecem no destino. Logo em seguida, Desfazer na barra de status traz o perfil de volta. Um perfil que use essa pasta mais tarde pode assumi-los com "Usar estes backups neste perfil". Na confirmação, "Mover também os backups para a Lixeira" os move para lá também, sem Desfazer para o perfil: só sai o que o Archeion gravou nessa pasta, e a pasta inteira quando não há mais nada nela. Uma pasta de rede ou uma unidade removível não tem Lixeira: ali nada é movido.
 doc-auto-title = Backups automáticos
 doc-auto-schedule = Em "Backup automático", escolha quando os backups são feitos sozinhos: nos dias escolhidos, em um ou mais horários; a cada poucas horas entre dois horários; ou uma vez por mês, em um dia de 1 a 28. O Archeion registra o agendamento no Agendador de Tarefas do Windows, então os backups são feitos mesmo quando o Archeion não está aberto.
 doc-auto-missed = Se o computador estiver desligado no horário agendado, o backup é feito assim que ele for ligado de novo.

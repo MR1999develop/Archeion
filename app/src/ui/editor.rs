@@ -92,10 +92,8 @@ struct DeleteDialog {
     /// Cancel takes the keyboard focus on the first frame, so Enter
     /// cannot delete.
     focus_cancel: bool,
-    /// Delete the backups at the destination too.
+    /// Move the backups at the destination to the Recycle Bin too.
     backups: bool,
-    /// "I understand" that the backups cannot be recovered.
-    ack: bool,
 }
 
 /// The saved password of an encrypted profile, as the window knows it.
@@ -370,8 +368,7 @@ fn run_now(
                 .on_disabled_hover_text(tr.t("busy-hint"))
                 .clicked()
             {
-                drafts.delete =
-                    Some(DeleteDialog { profile: p.id, focus_cancel: true, backups: false, ack: false });
+                drafts.delete = Some(DeleteDialog { profile: p.id, focus_cancel: true, backups: false });
             }
         });
     });
@@ -379,9 +376,10 @@ fn run_now(
 
 /// The warning opened by "Delete profile": what goes, what stays, and
 /// [`Command::Delete`] once confirmed. The backups at the destination can
-/// go too: a tick, a warning that they cannot be recovered and "I
-/// understand" first. Cancel, Esc and a click outside close it; Enter does
-/// not delete. Deleting waits while a job runs.
+/// go to the Recycle Bin too, with a tick; the warning then says where
+/// they go and that Undo no longer brings the profile back. Cancel, Esc
+/// and a click outside close it; Enter does not delete. Deleting waits
+/// while a job runs.
 fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool, out: &mut Outcome) {
     let Some(dialog) = &mut drafts.delete else { return };
     if dialog.profile != p.id {
@@ -394,7 +392,7 @@ fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool,
         ui.set_max_width(DELETE_DIALOG_WIDTH);
         ui.heading(tr.t_args("delete-profile-title", &[("name", arg(p.name.clone()))]));
         ui.add_space(theme::SPACE_S);
-        // With the backups, no Undo: the text says what goes instead.
+        // With the backups, no Undo: the text says where it all goes.
         ui.label(tr.t(if dialog.backups { "delete-profile-body-backups" } else { "delete-profile-body" }));
         if p.encrypted {
             ui.label(tr.t("delete-profile-password"));
@@ -403,15 +401,12 @@ fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool,
             let path = p.destination.path().display().to_string();
             ui.add_space(theme::SPACE_XS);
             let label = tr.t_args("delete-profile-with-backups", &[("path", arg(path.clone()))]);
-            if widgets::checkbox(ui, &mut dialog.backups, label).changed() {
-                dialog.ack = false;
-            }
+            widgets::checkbox(ui, &mut dialog.backups, label);
             if dialog.backups {
                 ui.colored_label(
-                    ui.visuals().error_fg_color,
+                    ui.visuals().warn_fg_color,
                     symbol::with(symbol::WARNING, tr.t("delete-profile-backups-gone")),
                 );
-                widgets::checkbox(ui, &mut dialog.ack, tr.t("merge-complete-ack"));
             } else {
                 ui.label(tr.t_args("delete-profile-backups", &[("path", arg(path))]));
             }
@@ -430,10 +425,8 @@ fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool,
                 }
                 cancel = cancel_button.clicked();
                 let label = if dialog.backups { "delete-profile-and-backups" } else { "delete-profile" };
-                let ready = !busy && (!dialog.backups || dialog.ack);
-                let why = tr.t(if busy { "busy-hint" } else { "merge-ack-hint" });
                 let button = widgets::danger_button(ui, tr.t(label));
-                delete = ui.add_enabled(ready, button).on_disabled_hover_text(why).clicked();
+                delete = ui.add_enabled(!busy, button).on_disabled_hover_text(tr.t("busy-hint")).clicked();
             });
         });
     });

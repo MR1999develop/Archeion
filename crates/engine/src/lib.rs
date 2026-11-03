@@ -55,8 +55,8 @@ pub use crypto::Password;
 pub use extract::{ExtractRequest, Secret, extract};
 pub use merge::{delete_archive, merge, merge_pending, merge_range};
 pub use repo::{
-    DestinationDeleted, adopt_destination, delete_destination, destination_busy, destination_owner,
-    list_archives,
+    DestinationTrashed, adopt_destination, destination_busy, destination_owner, list_archives,
+    trash_destination,
 };
 pub use restore::{RestoreItem, RestoreRequest, RestoreTarget, restore};
 pub use verify::verify;
@@ -83,6 +83,13 @@ pub enum EngineError {
     /// The destination folder belongs to another profile.
     #[error("the destination is used by another profile")]
     ForeignDestination,
+    /// The destination's drive has no Recycle Bin (a network share, a
+    /// removable drive): nothing was moved.
+    #[error("{0} has no Recycle Bin: nothing was moved")]
+    NoRecycleBin(String),
+    /// Windows deleted this instead of moving it to the Recycle Bin.
+    #[error("{0} was deleted instead of going to the Recycle Bin")]
+    NotRecycled(String),
     /// The destination is encrypted and no password was given.
     #[error("the destination is encrypted: a password is needed")]
     PasswordNeeded,

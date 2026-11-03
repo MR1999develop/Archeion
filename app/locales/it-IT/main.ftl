@@ -73,19 +73,20 @@ delete-profile = Elimina profilo
 delete-profile-hint = Chiede conferma, poi toglie il profilo e le sue attività pianificate; i backup restano nella destinazione, a meno che tu non scelga di eliminare anche quelli.
 delete-profile-title = Eliminare il profilo "{ $name }"?
 delete-profile-body = Il profilo e le sue attività pianificate vengono tolti. Finché non chiudi il messaggio nella barra di stato, "Annulla eliminazione" li ripristina.
-delete-profile-body-backups = Il profilo, le sue attività pianificate e i suoi backup vengono eliminati.
 delete-profile-password = La password salvata viene tolta da Gestione credenziali di Windows quando l'eliminazione non si può più annullare: chiudendo quel messaggio, eliminando un altro profilo o uscendo da Archeion.
 delete-profile-backups = I backup in { $path } non vengono cancellati: un nuovo profilo che usa quella cartella può prenderli in carico con "Usa questi backup per questo profilo".
-delete-profile-with-backups = Elimina anche i backup in { $path }
-delete-profile-backups-gone = I backup non si potranno più recuperare e "Annulla eliminazione" non potrà ripristinare il profilo. Viene cancellato solo ciò che ha scritto Archeion: gli altri file della cartella restano.
-delete-profile-and-backups = Elimina profilo e backup
-delete-backups-running = Eliminazione dei backup di "{ $name }"…
-delete-backups-done = I backup di "{ $name }" sono stati eliminati.
-delete-backups-left = I backup di "{ $name }" sono stati eliminati; { $path } resta, con { $count ->
+delete-profile-with-backups = Sposta anche i backup in { $path } nel Cestino
+delete-profile-backups-gone = Si possono ripristinare dal Cestino finché non lo svuoti, ma "Annulla eliminazione" non potrà più ripristinare il profilo. Va via solo ciò che ha scritto Archeion: gli altri file della cartella restano. Una cartella di rete o un disco rimovibile non hanno il Cestino: lì non viene spostato niente.
+delete-profile-and-backups = Elimina profilo, backup nel Cestino
+delete-profile-body-backups = Il profilo e le sue attività pianificate vengono eliminati, e i suoi backup vanno nel Cestino.
+delete-backups-running = Spostamento dei backup di "{ $name }" nel Cestino…
+delete-backups-done = I backup di "{ $name }" sono nel Cestino.
+delete-backups-left = I backup di "{ $name }" sono nel Cestino; { $path } resta, con { $count ->
     [one] 1 elemento
    *[other] { $count } elementi
 } non scritti da Archeion.
-delete-backups-failed = Impossibile eliminare i backup di "{ $name }": { $detail }
+delete-backups-failed = Non tutti i backup di "{ $name }" sono potuti andare nel Cestino: { $detail }
+delete-backups-no-bin = { $path } non ha il Cestino (cartella di rete o disco rimovibile): i backup di "{ $name }" non sono stati toccati. Eliminali a mano se non ti servono più.
 
 day-monday = lunedì
 day-tuesday = martedì
@@ -496,7 +497,7 @@ doc-profiles-title = Profili
 doc-profiles-body = Un profilo dice che cosa salvare, dove e quando. Creane uno con File > Nuovo profilo (Ctrl+N) e compila la scheda Impostazioni: un nome, le cartelle da salvare e la destinazione, cioè una cartella o un disco esterno oppure una cartella di rete. Usa ogni cartella di destinazione per un solo profilo.
 doc-profiles-exclusions = Le esclusioni lasciano fuori ciò che non serve: una cartella con tutto il suo contenuto, un file, o tutti i file di un tipo come .tmp. Con "Escludi modelli" puoi aggiungere dei modelli, confrontati con il percorso completo senza distinguere maiuscole e minuscole: * è qualsiasi testo in un nome, ** qualsiasi cartella, ? un carattere. Per esempio **/node_modules o **/cache/**.
 doc-profiles-format = Il formato di salvataggio (uno zip per file o copie semplici) e la cifratura vanno scelti prima del primo backup: quando la destinazione contiene dei backup non si possono più cambiare. Per passare all'altro, scegli una destinazione vuota.
-doc-profiles-delete = Elimina profilo chiede conferma, poi toglie il profilo e le sue attività pianificate; i backup restano nella destinazione. Subito dopo, "Annulla eliminazione" nella barra di stato ripristina il profilo. Un profilo che in seguito usa quella cartella può prenderli in carico con "Usa questi backup per questo profilo". Nella conferma, "Elimina anche i backup" cancella anche quelli, per sempre e senza "Annulla eliminazione": va via solo ciò che Archeion ha scritto nella cartella, e la cartella stessa quando non contiene altro.
+doc-profiles-delete = Elimina profilo chiede conferma, poi toglie il profilo e le sue attività pianificate; i backup restano nella destinazione. Subito dopo, "Annulla eliminazione" nella barra di stato ripristina il profilo. Un profilo che in seguito usa quella cartella può prenderli in carico con "Usa questi backup per questo profilo". Nella conferma, "Sposta anche i backup nel Cestino" sposta anche quelli nel Cestino, senza "Annulla eliminazione" per il profilo: va via solo ciò che Archeion ha scritto nella cartella, e la cartella intera quando non contiene altro. Una cartella di rete o un disco rimovibile non hanno il Cestino: lì non viene spostato niente.
 doc-auto-title = Backup automatici
 doc-auto-schedule = In "Backup automatico" scegli quando i backup partono da soli: nei giorni scelti a uno o più orari, ogni tot ore tra due orari, oppure una volta al mese in un giorno dall'1 al 28. Archeion registra la pianificazione nell'Utilità di pianificazione di Windows, così i backup partono anche quando Archeion non è aperto.
 doc-auto-missed = Se all'ora prevista il computer è spento, il backup parte appena si riaccende.

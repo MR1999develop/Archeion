@@ -73,19 +73,20 @@ delete-profile = Delete profile
 delete-profile-hint = Asks first, then removes the profile and its scheduled tasks; the backups stay at the destination unless you choose to delete them too.
 delete-profile-title = Delete profile "{ $name }"?
 delete-profile-body = The profile and its scheduled tasks are removed. Until you close the message in the status bar, Undo brings them back.
-delete-profile-body-backups = The profile, its scheduled tasks and its backups are deleted.
 delete-profile-password = The saved password is removed from Windows Credential Manager when Undo is no longer possible: when you close that message, delete another profile or quit Archeion.
 delete-profile-backups = The backups in { $path } are not deleted: a new profile that uses that folder can take them over with "Use these backups for this profile".
-delete-profile-with-backups = Also delete the backups in { $path }
-delete-profile-backups-gone = The backups cannot be recovered afterwards, and Undo cannot bring the profile back. Only what Archeion wrote is deleted: other files in that folder stay.
-delete-profile-and-backups = Delete profile and backups
-delete-backups-running = Deleting the backups of "{ $name }"…
-delete-backups-done = The backups of "{ $name }" are deleted.
-delete-backups-left = The backups of "{ $name }" are deleted; { $path } stays, with { $count ->
+delete-profile-with-backups = Also move the backups in { $path } to the Recycle Bin
+delete-profile-backups-gone = They can be restored from the Recycle Bin until it is emptied, but Undo can no longer bring the profile back. Only what Archeion wrote goes: other files in that folder stay. A network share or a removable drive has no Recycle Bin: there, nothing is moved.
+delete-profile-and-backups = Delete profile, backups to Recycle Bin
+delete-profile-body-backups = The profile and its scheduled tasks are deleted, and its backups go to the Recycle Bin.
+delete-backups-running = Moving the backups of "{ $name }" to the Recycle Bin…
+delete-backups-done = The backups of "{ $name }" are in the Recycle Bin.
+delete-backups-left = The backups of "{ $name }" are in the Recycle Bin; { $path } stays, with { $count ->
     [one] 1 item
    *[other] { $count } items
 } that Archeion did not write.
-delete-backups-failed = The backups of "{ $name }" could not be deleted: { $detail }
+delete-backups-failed = The backups of "{ $name }" could not all go to the Recycle Bin: { $detail }
+delete-backups-no-bin = { $path } has no Recycle Bin (a network share or a removable drive): the backups of "{ $name }" were not touched. Delete them by hand if you no longer need them.
 
 day-monday = Monday
 day-tuesday = Tuesday
@@ -496,7 +497,7 @@ doc-profiles-title = Profiles
 doc-profiles-body = A profile says what to back up, where and when. Create one with File > New profile (Ctrl+N) and fill in its Settings tab: a name, the folders to back up, and the destination, a folder or external drive or a network share. Use each destination folder for one profile only.
 doc-profiles-exclusions = Exclusions leave out what you do not need: a folder and everything in it, a file, or every file of a type such as .tmp. With "Exclude patterns" you can add patterns, matched against the full path ignoring case: * is any text in a name, ** any folders, ? one character. For example **/node_modules or **/cache/**.
 doc-profiles-format = The storage format (one zip per file or plain copies) and encryption must be chosen before the first backup: once the destination holds backups they cannot change. To switch, choose an empty destination.
-doc-profiles-delete = Delete profile asks for confirmation, then removes the profile and its scheduled tasks; the backups stay at the destination. Right after, Undo in the status bar brings the profile back. A profile that uses that folder later can take them over with "Use these backups for this profile". In the confirmation, "Also delete the backups" deletes them too, for good and without Undo: only what Archeion wrote in that folder goes, and the folder itself when nothing else is left in it.
+doc-profiles-delete = Delete profile asks for confirmation, then removes the profile and its scheduled tasks; the backups stay at the destination. Right after, Undo in the status bar brings the profile back. A profile that uses that folder later can take them over with "Use these backups for this profile". In the confirmation, "Also move the backups to the Recycle Bin" moves them there too, without Undo for the profile: only what Archeion wrote in that folder goes, and the whole folder when nothing else is in it. A network share or a removable drive has no Recycle Bin: there, nothing is moved.
 doc-auto-title = Automatic backups
 doc-auto-schedule = Under "Automatic backup" choose when backups run by themselves: on chosen days at one or more times, every few hours between two times, or once a month on a day from 1 to 28. Archeion registers the schedule in Windows Task Scheduler, so backups run even when Archeion is not open.
 doc-auto-missed = If the computer is off at the scheduled time, the backup runs as soon as it is on again.

@@ -118,11 +118,11 @@ fn screens() {
             .unwrap()
             .click();
             settle(&mut h);
-            let with = h
-                .state()
-                .tr
-                .t_args("delete-profile-with-backups", &[("path", crate::i18n::arg(String::new()))]);
-            let with = with.trim().to_owned();
+            // The text up to the folder, which sits inside the sentence.
+            let marker = "\u{1}";
+            let with =
+                h.state().tr.t_args("delete-profile-with-backups", &[("path", crate::i18n::arg(marker))]);
+            let with = with.split(marker).next().unwrap_or_default().trim().to_owned();
             if let Some(n) =
                 h.query_all_by(|n| n.label().is_some_and(|l| l.starts_with(with.as_str()))).last()
             {
