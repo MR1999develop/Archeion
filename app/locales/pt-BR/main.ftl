@@ -36,6 +36,7 @@ dest-adopt-hint = Os backups existentes passam a ser deste perfil: o próximo ba
 dest-adopt-failed = Não foi possível assumir os backups: { $detail }
 dest-foreign-hint = O destino contém os backups de outro perfil: veja a seção Destino.
 run-foreign-destination = O destino contém os backups de outro perfil. Abra as configurações do perfil: se esse perfil foi excluído, "Usar estes backups neste perfil" os assume.
+run-encryption-missing = Os backups do destino não constam como criptografados, mas o perfil ou os próprios backups estão: ou a criptografia foi ativada depois dos primeiros backups, ou a descrição do destino foi removida ou alterada fora do Archeion. Nada foi gravado. Para backups criptografados, escolha um destino novo e vazio.
 browse = Procurar…
 container = Formato
 container-zip-per-file = Um zip por arquivo

@@ -36,6 +36,7 @@ dest-adopt-hint = Las copias existentes pasan a ser de este perfil: la próxima 
 dest-adopt-failed = No se han podido asumir las copias: { $detail }
 dest-foreign-hint = El destino contiene las copias de otro perfil: consulta la sección Destino.
 run-foreign-destination = El destino contiene las copias de otro perfil. Abre la configuración del perfil: si ese perfil se eliminó, "Usar estas copias para este perfil" las asume.
+run-encryption-missing = Las copias del destino no figuran como cifradas, pero el perfil o las propias copias sí lo están: o el cifrado se activó después de las primeras copias, o la descripción del destino se eliminó o se cambió fuera de Archeion. No se escribió nada. Para copias cifradas, elige un destino nuevo y vacío.
 browse = Examinar…
 container = Formato
 container-zip-per-file = Un zip por archivo

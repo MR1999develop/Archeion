@@ -154,6 +154,9 @@ impl Form {
                     _ => zip.by_index(0),
                 };
                 let entry = entry.map_err(zip_error(&ctx))?;
+                if matches!(self, Self::Vault(_)) && !entry.encrypted() {
+                    return Err(damaged(format!("chunk {} is not encrypted", self.relative(id))));
+                }
                 entry.take(limit).read_to_end(&mut data).map_err(EngineError::io(ctx.clone()))?;
             }
         }

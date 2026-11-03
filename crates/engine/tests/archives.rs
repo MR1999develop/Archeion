@@ -1013,17 +1013,137 @@ fn encrypted_backups_hide_names_and_content_and_need_the_password() {
 }
 
 #[test]
-fn encryption_cannot_be_switched_on_once_backups_exist() {
+fn encryption_switched_on_once_backups_exist_writes_nothing_in_the_clear() {
     let mut f = fixture(Container::ZipPerFile);
     run_backup(&f.profile);
     f.profile.encrypted = true;
     sleep(Duration::from_millis(1100));
-    backup(&f.profile, Some(&pw("late")), BackupMode::Auto, &Recorder::default()).unwrap();
+    let r = backup(&f.profile, Some(&pw("late")), BackupMode::Auto, &Recorder::default());
+    assert!(matches!(r, Err(EngineError::EncryptionMissing)), "{r:?}");
     assert_eq!(
         archeion_engine::existing_format(&f.profile).unwrap(),
         Some(ExistingFormat { container: Container::ZipPerFile, encrypted: false })
     );
-    assert_eq!(list_archives(&f.profile, None).unwrap().len(), 2, "still readable without a password");
+    assert_eq!(list_archives(&f.profile, None).unwrap().len(), 1, "no new backup");
+}
+
+/// An encrypted destination with one backup, and its password.
+fn encrypted_backup() -> (Fixture, Password, String) {
+    let mut f = fixture(Container::ZipPerFile);
+    f.profile.encrypted = true;
+    let secret = pw("correct horse battery");
+    backup(&f.profile, Some(&secret), BackupMode::Auto, &Recorder::default()).unwrap();
+    let name = list_archives(&f.profile, Some(&secret)).unwrap().remove(0).name;
+    (f, secret, name)
+}
+
+#[test]
+fn removing_the_encryption_description_does_not_make_backups_plain() {
+    let (mut f, secret, _) = encrypted_backup();
+    let dest = f.profile.destination.path().to_path_buf();
+    let descriptor = dest.join("archeion.json");
+    let mut d: serde_json::Value = serde_json::from_str(&fs::read_to_string(&descriptor).unwrap()).unwrap();
+    d.as_object_mut().unwrap().remove("encryption");
+    fs::write(&descriptor, d.to_string()).unwrap();
+
+    sleep(Duration::from_millis(1100));
+    for encrypted in [true, false] {
+        f.profile.encrypted = encrypted;
+        let r = backup(&f.profile, Some(&secret), BackupMode::Auto, &Recorder::default());
+        assert!(matches!(r, Err(EngineError::EncryptionMissing)), "profile encrypted {encrypted}: {r:?}");
+    }
+    // The settings see the destination as encrypted, so the profile follows it.
+    assert_eq!(
+        archeion_engine::existing_format(&f.profile).unwrap(),
+        Some(ExistingFormat { container: Container::ZipPerFile, encrypted: true })
+    );
+    // Also with the description gone altogether.
+    fs::remove_file(&descriptor).unwrap();
+    let r = backup(&f.profile, Some(&secret), BackupMode::Auto, &Recorder::default());
+    assert!(matches!(r, Err(EngineError::EncryptionMissing)), "{r:?}");
+    assert!(!all_paths(&dest).iter().any(|p| p.ends_with("manifest.jsonl")), "nothing in the clear");
+}
+
+#[test]
+fn a_plain_archive_put_in_an_encrypted_destination_is_not_restored() {
+    let (f, secret, name) = encrypted_backup();
+    let archive = f.profile.destination.path().join(&name);
+    // A plain backup of other content, moved in under the same name.
+    let mut other = fixture(Container::Folder);
+    fs::write(other.source.join("a.txt"), "planted").unwrap();
+    other.profile.sources = f.profile.sources.clone();
+    backup(&other.profile, None, BackupMode::Auto, &Recorder::default()).unwrap();
+    let plain =
+        other.profile.destination.path().join(list_archives(&other.profile, None).unwrap().remove(0).name);
+    fs::remove_dir_all(&archive).unwrap();
+    fs::rename(&plain, &archive).unwrap();
+
+    let req = RestoreRequest::single(
+        &name,
+        Vec::new(),
+        &RestoreTarget::Folder { path: f.restore_to.clone() },
+        true,
+    );
+    let r = restore(&f.profile, Some(&secret), &req, &Recorder::default());
+    assert!(matches!(r, Err(EngineError::Damaged { .. })), "{r:?}");
+    assert!(!restored(&f, "a.txt").exists());
+}
+
+#[test]
+fn a_plain_zip_put_in_the_vault_is_not_restored() {
+    use std::io::Write as _;
+    let (f, secret, name) = encrypted_backup();
+    let vault = f.profile.destination.path().join(&name).join("vault");
+    for zip_path in walkdir_paths(&vault).into_iter().map(|p| vault.join(p)).filter(|p| p.is_file()) {
+        let mut z = zip::ZipWriter::new(fs::File::create(&zip_path).unwrap());
+        z.start_file("data", zip::write::SimpleFileOptions::default()).unwrap();
+        z.write_all(b"planted").unwrap();
+        z.finish().unwrap();
+    }
+    let req = RestoreRequest::single(
+        &name,
+        Vec::new(),
+        &RestoreTarget::Folder { path: f.restore_to.clone() },
+        true,
+    );
+    let r = restore(&f.profile, Some(&secret), &req, &Recorder::default()).unwrap();
+    assert!(!r.skipped.is_empty(), "the planted files are refused");
+    assert!(
+        !restored(&f, "a.txt").exists() || fs::read_to_string(restored(&f, "a.txt")).unwrap() != "planted"
+    );
+}
+
+#[test]
+fn a_doctored_key_cannot_restore_outside_the_folder() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    let name = list_archives(&f.profile, None).unwrap().remove(0).name;
+    let manifest = f.profile.destination.path().join(&name).join("manifest.jsonl");
+    let text = fs::read_to_string(&manifest).unwrap();
+    let doctored: Vec<String> = text
+        .lines()
+        .map(|l| {
+            if !l.contains("/a.txt\"") {
+                return l.to_owned();
+            }
+            let mut e: serde_json::Value = serde_json::from_str(l).unwrap();
+            let key = e["key"].as_str().unwrap().replace("/a.txt", "/../../../../evil.txt");
+            e["key"] = key.into();
+            e.to_string()
+        })
+        .collect();
+    fs::write(&manifest, doctored.join("\n") + "\n").unwrap();
+
+    let req = RestoreRequest::single(
+        &name,
+        Vec::new(),
+        &RestoreTarget::Folder { path: f.restore_to.clone() },
+        true,
+    );
+    let r = restore(&f.profile, None, &req, &Recorder::default());
+    assert!(matches!(r, Err(EngineError::Damaged { .. })), "{r:?}");
+    assert!(!f._dir.path().join("evil.txt").exists());
+    assert!(!f.restore_to.parent().unwrap().join("evil.txt").exists());
 }
 
 #[test]

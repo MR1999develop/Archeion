@@ -352,6 +352,13 @@ impl Repo {
         let recovered = repo.recover()?;
 
         let empty = archives_in(&repo.root)?.is_empty();
+        // Backups of an encrypted profile are never written in the clear: a
+        // destination with backups that no longer says it is encrypted was
+        // changed from outside.
+        let described_encrypted = descriptor.as_ref().is_some_and(|d| d.encryption.is_some());
+        if !described_encrypted && !empty && (profile.encrypted || holds_sealed_archives(&repo.root)?) {
+            return Err(EngineError::EncryptionMissing);
+        }
         let rewrite = match &descriptor {
             None => create,
             Some(d) => create && empty && d.encryption.is_some() != profile.encrypted,
@@ -697,6 +704,13 @@ pub(crate) fn is_encrypted(root: &Path) -> Result<bool> {
     Ok(read_descriptor(root)?.is_some_and(|d| d.encryption.is_some()))
 }
 
+/// True when an archive at `root` has an encrypted manifest, whatever the
+/// description says: removing the description does not make a destination
+/// plain.
+pub(crate) fn holds_sealed_archives(root: &Path) -> Result<bool> {
+    Ok(archives_in(root)?.iter().any(|a| root.join(a.to_string()).join(MANIFEST_ZIP).exists()))
+}
+
 pub(crate) fn archives_in(root: &Path) -> Result<Vec<ArchiveName>> {
     let mut list: Vec<ArchiveName> = fs::read_dir(root)
         .map_err(EngineError::io(format!("listing {}", root.display())))?
@@ -711,16 +725,39 @@ pub(crate) fn archives_in(root: &Path) -> Result<Vec<ArchiveName>> {
 pub(crate) fn read_manifest(dir: &Path, name: &ArchiveName, keys: Option<&Keys>) -> Result<Manifest> {
     let damaged = |message: String| EngineError::Damaged { archive: name.to_string(), message };
     let sealed = dir.join(MANIFEST_ZIP);
-    let text = if sealed.exists() {
+    // An encrypted destination reads sealed manifests only: a plain one put
+    // in its place could say anything.
+    let text = if sealed.exists() || keys.is_some() {
         let keys = keys.ok_or(EngineError::PasswordNeeded)?;
-        let bytes = fs::read(&sealed).map_err(EngineError::io(format!("reading {}", sealed.display())))?;
+        if !sealed.exists() {
+            return Err(damaged("the encrypted manifest is missing".to_owned()));
+        }
+        let bytes = read_limited(&sealed)?;
         let plain = decrypt_single(&bytes, keys.password())?;
         String::from_utf8(plain).map_err(|e| damaged(e.to_string()))?
     } else {
         let path = dir.join(MANIFEST);
-        fs::read_to_string(&path).map_err(EngineError::io(format!("reading {}", path.display())))?
+        String::from_utf8(read_limited(&path)?).map_err(|e| damaged(e.to_string()))?
     };
     Manifest::from_text(&text).map_err(|e| damaged(e.to_string()))
+}
+
+/// Largest manifest read: about ten million files. A bigger file (or one
+/// that unpacks bigger) is refused instead of filling the memory.
+pub(crate) const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+
+/// The bytes of `path`, refused beyond [`MAX_MANIFEST_BYTES`].
+fn read_limited(path: &Path) -> Result<Vec<u8>> {
+    use std::io::Read as _;
+    let ctx = || format!("reading {}", path.display());
+    let mut bytes = Vec::new();
+    File::open(path)
+        .and_then(|f| f.take(MAX_MANIFEST_BYTES + 1).read_to_end(&mut bytes))
+        .map_err(EngineError::io(ctx()))?;
+    if bytes.len() as u64 > MAX_MANIFEST_BYTES {
+        return Err(EngineError::io(ctx())(std::io::Error::other("the manifest is too large")));
+    }
+    Ok(bytes)
 }
 
 /// Writes `manifest.jsonl`, or the encrypted `manifest.zip` with `keys`.
