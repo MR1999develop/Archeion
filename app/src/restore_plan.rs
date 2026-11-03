@@ -175,7 +175,10 @@ impl Claim<'_> {
 /// once: a ticked file and a ticked folder holding it, from two different
 /// backups, both replacing it, are a conflict.
 #[must_use]
-pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
+/// `with_deleted`: ticked folders also bring back the files deleted at the
+/// source before their date; restored files no longer at the source are
+/// always named as deleted.
+pub fn plan(picks: &[Pick], default: &DefaultDest, with_deleted: bool, busy: bool) -> Plan {
     let dest = default.resolve();
     let mut out = Plan::default();
     let missing_folder = dest.is_none();
@@ -221,7 +224,7 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
                     target,
                     overwrite,
                     exclude: exclude.clone(),
-                    with_deleted: true,
+                    with_deleted,
                 });
             }
         }
@@ -284,7 +287,7 @@ mod tests {
             exclude.push(KEY.into());
         }
         let picks = [file(KEY, vec![version(NEW)]), docs];
-        let p = plan(&picks, &overwrite(), false);
+        let p = plan(&picks, &overwrite(), true, false);
         assert!(p.conflicts.is_empty());
         assert_eq!(p.request.items[1].exclude, vec![KEY.to_owned()], "the exclusion reaches the engine");
     }
@@ -295,12 +298,12 @@ mod tests {
 
     #[test]
     fn nothing_ticked_waits_for_a_tick() {
-        let p = plan(&[], &DefaultDest::default(), false);
+        let p = plan(&[], &DefaultDest::default(), true, false);
         assert_eq!(p.blocker, Some(Blocker::Nothing));
         assert!(p.request.items.is_empty());
 
         // A file whose versions are all unticked counts as nothing.
-        let p = plan(&[file(KEY, vec![])], &DefaultDest::default(), false);
+        let p = plan(&[file(KEY, vec![])], &DefaultDest::default(), true, false);
         assert_eq!(p.blocker, Some(Blocker::Nothing));
         assert_eq!(p.summary.files, 0);
     }
@@ -308,13 +311,13 @@ mod tests {
     #[test]
     fn a_file_still_loading_its_versions_waits() {
         let picks = [Pick::File { key: KEY.into(), loading: true, versions: vec![] }];
-        assert_eq!(plan(&picks, &DefaultDest::default(), false).blocker, Some(Blocker::Loading));
+        assert_eq!(plan(&picks, &DefaultDest::default(), true, false).blocker, Some(Blocker::Loading));
     }
 
     #[test]
     fn versions_and_folders_become_items_with_the_destination() {
         let picks = [file(KEY, vec![version(NEW), version(OLD)]), folder("C/Photos", OLD, Some(1000))];
-        let p = plan(&picks, &DefaultDest::default(), false);
+        let p = plan(&picks, &DefaultDest::default(), true, false);
         assert_eq!(p.blocker, None);
         assert_eq!(p.request.items.len(), 3);
         assert!(p.request.items.iter().all(|i| i.target == RestoreTarget::BesideOriginal && !i.overwrite));
@@ -329,57 +332,57 @@ mod tests {
 
     #[test]
     fn one_version_may_overwrite_the_original_two_conflict() {
-        let p = plan(&[file(KEY, vec![version(OLD)])], &overwrite(), false);
+        let p = plan(&[file(KEY, vec![version(OLD)])], &overwrite(), true, false);
         assert_eq!(p.blocker, None);
         assert!(p.request.items[0].overwrite);
 
         let two = [file(KEY, vec![version(NEW), version(OLD)])];
-        let p = plan(&two, &overwrite(), false);
+        let p = plan(&two, &overwrite(), true, false);
         assert_eq!(p.blocker, Some(Blocker::Conflict));
         assert_eq!(p.conflicts, BTreeSet::from([0]));
         // Without replace, the current file is kept: no conflict.
         let keep = DefaultDest { replace: false, ..overwrite() };
-        assert_eq!(plan(&two, &keep, false).blocker, None);
+        assert_eq!(plan(&two, &keep, true, false).blocker, None);
     }
 
     #[test]
     fn a_folder_overwriting_the_original_conflicts_with_a_file_inside_it() {
         let picks = [file(KEY, vec![version(NEW)]), folder("C/Docs", OLD, None)];
-        let p = plan(&picks, &overwrite(), false);
+        let p = plan(&picks, &overwrite(), true, false);
         assert_eq!(p.conflicts, BTreeSet::from([0, 1]));
         assert_eq!(p.blocker, Some(Blocker::Conflict));
 
         // The same date is the same content: no conflict.
         let picks = [file(KEY, vec![version(OLD)]), folder("C/Docs", OLD, None)];
-        assert!(plan(&picks, &overwrite(), false).conflicts.is_empty());
+        assert!(plan(&picks, &overwrite(), true, false).conflicts.is_empty());
     }
 
     #[test]
     fn another_folder_without_its_folder_waits() {
         let default = DefaultDest { kind: DestKind::Folder, folder: None, replace: false };
         let picks = [file(KEY, vec![version(NEW)])];
-        assert_eq!(plan(&picks, &default, false).blocker, Some(Blocker::NoFolder));
-        assert!(plan(&picks, &default, false).request.items.is_empty());
+        assert_eq!(plan(&picks, &default, true, false).blocker, Some(Blocker::NoFolder));
+        assert!(plan(&picks, &default, true, false).request.items.is_empty());
     }
 
     #[test]
     fn a_running_operation_blocks_last() {
         let picks = [file(KEY, vec![version(NEW)])];
-        assert_eq!(plan(&picks, &DefaultDest::default(), true).blocker, Some(Blocker::Busy));
-        assert_eq!(plan(&[], &DefaultDest::default(), true).blocker, Some(Blocker::Nothing));
+        assert_eq!(plan(&picks, &DefaultDest::default(), true, true).blocker, Some(Blocker::Busy));
+        assert_eq!(plan(&[], &DefaultDest::default(), true, true).blocker, Some(Blocker::Nothing));
     }
 
     #[test]
     fn an_unknown_folder_size_makes_the_total_partial() {
         let picks = [folder("C/Photos", OLD, None), folder("C/Music", OLD, Some(5))];
-        let s = plan(&picks, &DefaultDest::default(), false).summary;
+        let s = plan(&picks, &DefaultDest::default(), true, false).summary;
         assert_eq!((s.folders, s.bytes, s.partial), (2, 5, true));
     }
 
     #[test]
     fn another_folder_with_replace_reaches_the_engine() {
         let default = DefaultDest { replace: true, ..to_folder("elsewhere") };
-        let p = plan(&[folder("C/Photos", OLD, Some(1))], &default, false);
+        let p = plan(&[folder("C/Photos", OLD, Some(1))], &default, true, false);
         let item = &p.request.items[0];
         assert_eq!(item.target, RestoreTarget::Folder { path: PathBuf::from("elsewhere") });
         assert!(item.overwrite);

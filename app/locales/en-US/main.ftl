@@ -157,6 +157,8 @@ unexpected-stop = The operation stopped unexpectedly.
 dates = Backup dates
 archive-tooltip = { $files } files, { $stored } saved in this backup ({ $size })
 search-hint = Search a file or folder by name in every backup…
+include-deleted = Include deleted files in ticked folders
+include-deleted-hint = On: a ticked folder also brings back the files deleted at the source since, named _deleted_. Off: it comes back as it was at its date; a deleted file can still be ticked on its own.
 no-results = No file or folder with that name.
 results = { $count ->
     [one] 1 file found

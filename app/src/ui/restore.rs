@@ -101,6 +101,10 @@ pub struct RestoreView {
     /// Kept when the archives change and across profiles, like a folder
     /// chosen in a file dialog.
     default: DefaultDest,
+    /// A ticked folder leaves out the files deleted at the source before
+    /// its date (the tick box above the tree, on unless unticked); kept
+    /// like `default`.
+    skip_deleted: bool,
     backups: BackupsView,
 }
 
@@ -108,8 +112,8 @@ impl RestoreView {
     /// Forget everything read, e.g. after a backup, merge or deletion
     /// changed the archives. The default destination and the view stay.
     pub fn invalidate(&mut self) {
-        let (default, view) = (std::mem::take(&mut self.default), self.view);
-        *self = Self { default, view, ..Self::default() };
+        let (default, view, skip_deleted) = (std::mem::take(&mut self.default), self.view, self.skip_deleted);
+        *self = Self { default, view, skip_deleted, ..Self::default() };
     }
 
     /// Shows the "Restore files" view next time the tab is drawn.
@@ -266,7 +270,8 @@ impl RestoreView {
                         && let Some(at) = exclude.iter().position(|x| *x == key)
                     {
                         exclude.swap_remove(at);
-                        let now: Vec<Ticked<'_>> = self.picks.iter().map(ticked).collect();
+                        let now: Vec<Ticked<'_>> =
+                            self.picks.iter().map(|p| ticked(p, !self.skip_deleted)).collect();
                         if !matches!(tree.tick(node, &now), Tick::NotInFolderDate { .. })
                             && let Some(Pick::Folder { exclude, .. }) = holder_of(&mut self.picks, &key)
                         {
@@ -280,7 +285,7 @@ impl RestoreView {
         // A file the ticked folder's date lacks (deleted before it): ticked
         // on its own, in its newest version or the one chosen.
         // The folder leaves it out, so the two never claim the same file.
-        let now: Vec<Ticked<'_>> = self.picks.iter().map(ticked).collect();
+        let now: Vec<Ticked<'_>> = self.picks.iter().map(|p| ticked(p, !self.skip_deleted)).collect();
         if !node.is_dir() && matches!(tree.tick(node, &now), Tick::NotInFolderDate { .. }) {
             if let Some(Pick::Folder { exclude, .. }) = holder_of(&mut self.picks, &key) {
                 exclude.push(key.clone());
@@ -312,7 +317,7 @@ impl RestoreView {
             return;
         }
         // Everything inside ticked one by one: the click unticks it all.
-        let now: Vec<Ticked<'_>> = self.picks.iter().map(ticked).collect();
+        let now: Vec<Ticked<'_>> = self.picks.iter().map(|p| ticked(p, !self.skip_deleted)).collect();
         if tree.tick(node, &now) == Tick::Full {
             self.picks.retain(|p| !keys::is_within(p.key(), &key));
             return;
@@ -406,6 +411,10 @@ impl RestoreView {
                 self.query_edited = Some(Instant::now());
             }
         });
+        let mut include = !self.skip_deleted;
+        widgets::checkbox(ui, &mut include, tr.t("include-deleted"))
+            .on_hover_text(tr.t("include-deleted-hint"));
+        self.skip_deleted = !include;
         if refresh {
             // Read the backups again; the selection stays.
             self.trees.remove(&profile.id);
@@ -419,7 +428,8 @@ impl RestoreView {
         let mut rows = Rows { scroll: std::mem::take(&mut self.scroll_to_shown), ..Rows::default() };
         match self.trees.get(&profile.id).map(|(_, t)| t) {
             Some(Load::Ready(tree)) => {
-                let ticked: Vec<Ticked<'_>> = self.picks.iter().map(ticked).collect();
+                let ticked: Vec<Ticked<'_>> =
+                    self.picks.iter().map(|p| ticked(p, !self.skip_deleted)).collect();
                 if tree.files == 0 {
                     ui.weak(tr.t("no-backups-yet"));
                 } else if self.query.trim().is_empty() {
@@ -453,7 +463,7 @@ impl RestoreView {
         profile: &Profile,
         busy: bool,
     ) -> Option<RestoreRequest> {
-        let plan = restore_plan::plan(&self.picks, &self.default, busy);
+        let plan = restore_plan::plan(&self.picks, &self.default, !self.skip_deleted, busy);
         egui::Panel::top("restore-default").show(ui, |ui| default_ui(ui, tr, &mut self.default));
         let mut request = None;
         egui::Panel::bottom("restore-go").show(ui, |ui| {
@@ -498,7 +508,7 @@ impl RestoreView {
             }
             return None;
         };
-        let ticked: Vec<Ticked<'_>> = self.picks.iter().map(ticked).collect();
+        let ticked: Vec<Ticked<'_>> = self.picks.iter().map(|p| ticked(p, !self.skip_deleted)).collect();
         let tick = tree.tick(node, &ticked);
         let in_folder = match tick {
             Tick::InFolder { folder } => tree.node(folder),
@@ -601,10 +611,13 @@ fn spawn_folder_size(
 }
 
 /// What the tree needs to know of a card.
-fn ticked(pick: &Pick) -> Ticked<'_> {
+/// `with_deleted`: ticked folders also bring back their deleted files.
+fn ticked(pick: &Pick, with_deleted: bool) -> Ticked<'_> {
     match pick {
-        Pick::File { key, .. } => Ticked { key, folder_archive: None, exclude: &[] },
-        Pick::Folder { key, archive, exclude, .. } => Ticked { key, folder_archive: Some(archive), exclude },
+        Pick::File { key, .. } => Ticked { key, folder_archive: None, exclude: &[], with_deleted },
+        Pick::Folder { key, archive, exclude, .. } => {
+            Ticked { key, folder_archive: Some(archive), exclude, with_deleted }
+        }
     }
 }
 

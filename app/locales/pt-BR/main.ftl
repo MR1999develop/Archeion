@@ -157,6 +157,8 @@ unexpected-stop = A operação parou inesperadamente.
 dates = Datas dos backups
 archive-tooltip = { $files } arquivos, { $stored } salvos neste backup ({ $size })
 search-hint = Pesquisar um arquivo ou pasta pelo nome em todos os backups…
+include-deleted = Incluir os arquivos excluídos nas pastas marcadas
+include-deleted-hint = Ativada: uma pasta marcada também traz de volta os arquivos excluídos da origem desde então, com _deleted_ antes do nome. Desativada: volta como estava na sua data; um arquivo excluído ainda pode ser marcado sozinho.
 no-results = Nenhum arquivo ou pasta com esse nome.
 results = { $count ->
     [one] { $count } arquivo encontrado

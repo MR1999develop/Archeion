@@ -157,6 +157,8 @@ unexpected-stop = L'operazione si è interrotta in modo inatteso.
 dates = Date dei backup
 archive-tooltip = { $files } file, { $stored } salvati in questo backup ({ $size })
 search-hint = Cerca un file o una cartella per nome in tutti i backup…
+include-deleted = Includi i file eliminati nelle cartelle spuntate
+include-deleted-hint = Attiva: una cartella spuntata riporta anche i file eliminati dall'origine nel frattempo, con _deleted_ davanti al nome. Spenta: torna com'era alla sua data; un file eliminato si può comunque spuntare da solo.
 no-results = Nessun file o cartella con questo nome.
 results = { $count ->
     [one] 1 file trovato

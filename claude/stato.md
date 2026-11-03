@@ -4,9 +4,9 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con la nuova icona, anche nell'eseguibile (ramo
-`feature/new-icon` unito; `tools\check.bat` verde: fmt, clippy, 342
-test, 1 ignorato: le schermate). La build di rilascio è stata controllata con la nuova icona
+`main` con la casella "Includi i file eliminati" sopra l'albero (ramo
+`feature/include-deleted-toggle` unito; `tools\check.bat` verde: fmt,
+clippy, 343 test, 2 ignorati: le schermate e l'anteprima dell'icona). La build di rilascio è stata controllata con la nuova icona
 (nessun percorso locale nell'exe).
 
 ## Lavoro in corso
@@ -152,3 +152,7 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata con l
   Windows SDK), anche l'eseguibile, con nome, descrizione e copyright MR
   nelle Proprietà. Anteprima: `cargo test -p archeion --bin archeion
   icon_preview -- --ignored` scrive `target/ui-screens/archeion.ico`.
+- Casella "Includi i file eliminati nelle cartelle spuntate" sopra
+  l'albero (`RestoreView::skip_deleted`, attiva per default, tenuta come la
+  destinazione): vale per tutte le cartelle spuntate, subito; arriva al
+  motore come `with_deleted` delle cartelle (i file restano marcati).

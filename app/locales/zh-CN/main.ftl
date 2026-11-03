@@ -151,6 +151,8 @@ unexpected-stop = 操作意外停止。
 dates = 备份日期
 archive-tooltip = { $files } 个文件，此备份保存了 { $stored } 个（{ $size }）
 search-hint = 在所有备份中按名称搜索文件或文件夹…
+include-deleted = 在勾选的文件夹中包括已删除的文件
+include-deleted-hint = 开启：勾选的文件夹还会还原之后从源中删除的文件，名称前加上 _deleted_。关闭：恢复为其日期时的状态；已删除的文件仍可单独勾选。
 no-results = 没有该名称的文件或文件夹。
 results = { $count ->
    *[other] 找到 { $count } 个文件

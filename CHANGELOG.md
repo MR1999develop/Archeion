@@ -58,8 +58,11 @@ All notable changes to Archeion are listed here. The format follows
 
 - Restore files: a ticked folder also ticks, and brings back, the files it
   held before and that were deleted at the source since, each in its last
-  version; they can be unticked one by one. Every restored file no longer
-  at the source is named with "_deleted_" first (_deleted_report.docx).
+  version; they can be unticked one by one. "Include deleted files in
+  ticked folders", above the tree and on by default, turns this off: a
+  ticked folder then comes back as it was at its date. Every restored file
+  no longer at the source is named with "_deleted_" first
+  (_deleted_report.docx).
   Requests written by the command line or before stay as they were
   (`with_deleted` is off unless set).
 
