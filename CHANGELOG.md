@@ -8,6 +8,13 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Added
 
+- Merging backups keeps the files deleted at the source between the
+  backups it fuses, with their last content, so they can still be
+  restored: "Keep the files deleted at the source in the merged backup",
+  ticked by default, in the profile settings (automatic merges) and in
+  Manage backups (a merge by hand; `archeion merge … --drop-deleted` from
+  the command line). Unticked, they are dropped as before. Deleting one
+  backup still drops what only it held.
 - "Delete profile" can move the profile's backups to the Windows Recycle
   Bin too, with a tick in the confirmation. Only what Archeion wrote in
   the destination folder goes (archives, chunks, key, descriptor,

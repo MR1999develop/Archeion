@@ -26,7 +26,7 @@ use crate::{
     repo::{Purpose, Repo, dir_size},
 };
 use archeion_core::{
-    ArchiveKind, ArchiveName, ChunkId, ChunkRef, Chunks, EntryKind, FileAction, FileDone, Manifest,
+    ArchiveKind, ArchiveName, ChunkId, ChunkRef, Chunks, Entry, EntryKind, FileAction, FileDone, Manifest,
     MergeGroup, MergeReport, Phase, Profile, RunEvent, Summary, keys,
     merge_plan::{Deletion, automatic_keep_set, deletion, merge_groups, range_group},
 };
@@ -40,14 +40,17 @@ use std::{
 ///
 /// Each group of consecutive archives that the rules do not keep is merged
 /// with the kept archive that follows it; the result carries that archive's
-/// date and holds the newest content of the group. Files deleted or
-/// replaced inside the group are dropped, which frees space. The initial
-/// complete archive and the backups of the recent days are always kept.
+/// date and holds the newest content of the group. Older versions of the
+/// files are dropped, which frees space; files deleted at the source inside
+/// the group are kept with their last content when the profile says so
+/// ([`archeion_core::MergePolicy::keep_deleted`]), dropped otherwise. The
+/// initial complete archive and the backups of the recent days are always
+/// kept.
 ///
 /// # Errors
 /// See [`EngineError`].
 pub fn merge(profile: &Profile, password: Option<&Password>, sink: &dyn EventSink) -> Result<MergeReport> {
-    run(profile, password, sink, |archives| {
+    run(profile, password, sink, profile.merge.keep_deleted, |archives| {
         Ok(merge_groups(&automatic_keep_set(archives, &profile.merge.rules, local_now()))
             .into_iter()
             .map(Step::Merge)
@@ -58,6 +61,8 @@ pub fn merge(profile: &Profile, password: Option<&Password>, sink: &dyn EventSin
 /// Merges the archives from `first` to `last` (names as listed, either
 /// order) and every archive between them into one, dated like the newest.
 /// Including the initial complete archive produces a new complete archive.
+/// Files deleted at the source inside the range are kept or dropped as
+/// [`archeion_core::MergePolicy::keep_deleted`] says.
 ///
 /// # Errors
 /// [`EngineError::InvalidProfile`] when fewer than two archives are chosen
@@ -70,7 +75,7 @@ pub fn merge_range(
     sink: &dyn EventSink,
 ) -> Result<MergeReport> {
     let (a, b) = (parse_name(first)?, parse_name(last)?);
-    run(profile, password, sink, |archives| {
+    run(profile, password, sink, profile.merge.keep_deleted, |archives| {
         range_group(archives, &a, &b)
             .map(|g| vec![Step::Merge(g)])
             .map_err(|e| EngineError::InvalidProfile(e.to_string()))
@@ -93,7 +98,8 @@ pub fn delete_archive(
     sink: &dyn EventSink,
 ) -> Result<MergeReport> {
     let name = parse_name(archive)?;
-    run(profile, password, sink, |archives| {
+    // The deleted backup's files go with it.
+    run(profile, password, sink, false, |archives| {
         match deletion(archives, &name).map_err(|e| EngineError::InvalidProfile(e.to_string()))? {
             Deletion::Remove(i) => Ok(vec![Step::Remove(i)]),
             Deletion::MergeWithNext(g) => Ok(vec![Step::Merge(g)]),
@@ -135,10 +141,13 @@ enum Step {
     Remove(usize),
 }
 
+/// Merges or removes archives as `plan` says. `keep_deleted`: a merged
+/// archive keeps the files deleted inside its group.
 fn run(
     profile: &Profile,
     password: Option<&Password>,
     sink: &dyn EventSink,
+    keep_deleted: bool,
     plan: impl FnOnce(&[ArchiveName]) -> Result<Vec<Step>>,
 ) -> Result<MergeReport> {
     sink.emit(RunEvent::Phase { phase: Phase::Opening });
@@ -159,7 +168,7 @@ fn run(
         match step {
             Step::Merge(g) => {
                 let oldest = *g.start() == 0;
-                plans.push(GroupPlan::new(&repo, archives.get(g).unwrap_or_default(), oldest)?);
+                plans.push(GroupPlan::new(&repo, archives.get(g).unwrap_or_default(), oldest, keep_deleted)?);
             }
             Step::Remove(i) => removals.extend(archives.get(i).copied()),
         }
@@ -226,8 +235,10 @@ impl GroupPlan {
     /// initial complete one always does); otherwise it is incremental and
     /// the files it does not hold stay in the archives before the group.
     /// `oldest` tells that the group starts with the oldest archive, which
-    /// must hold everything.
-    fn new(repo: &Repo, members: &[ArchiveName], oldest: bool) -> Result<Self> {
+    /// must hold everything. `keep_deleted`: the files and folders listed
+    /// by a member but not by the last one (deleted at the source inside
+    /// the group) stay, as the last member listing them had them.
+    fn new(repo: &Repo, members: &[ArchiveName], oldest: bool, keep_deleted: bool) -> Result<Self> {
         let Some(last) = members.last() else {
             return Err(EngineError::Damaged { archive: String::new(), message: "empty merge group".into() });
         };
@@ -239,9 +250,14 @@ impl GroupPlan {
         let mut lists_chunks = false;
         // Every stored version: key, member, size.
         let mut versions: Vec<(String, usize, u64)> = Vec::new();
+        // Every entry of the group, as the last member listing it has it.
+        let mut seen: HashMap<String, Entry> = HashMap::new();
         for (j, name) in members.iter().enumerate() {
             let mut m = repo.manifest(name)?;
             format = format.max(m.format);
+            if keep_deleted {
+                seen.extend(m.entries.iter().map(|e| (e.key.clone(), Entry { chunks: None, ..e.clone() })));
+            }
             for e in m.entries.iter_mut().filter(|e| e.stored) {
                 if e.kind == EntryKind::File {
                     versions.push((e.key.clone(), j, e.size));
@@ -254,6 +270,13 @@ impl GroupPlan {
         }
         let mut manifest = manifest.expect("group is not empty");
         manifest.format = format;
+        if keep_deleted {
+            let gone: Vec<Entry> = seen.into_values().filter(|e| manifest.get(&e.key).is_none()).collect();
+            if !gone.is_empty() {
+                manifest.entries.extend(gone);
+                manifest.entries.sort_by(|a, b| a.key.cmp(&b.key));
+            }
+        }
         let mut missing = None;
         for e in manifest.entries.iter_mut().filter(|e| e.kind == EntryKind::File) {
             e.stored = holder.contains_key(&e.key);

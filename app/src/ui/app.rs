@@ -870,13 +870,12 @@ impl ArcheionApp {
         let ctx = ui.ctx().clone();
         match self.restore.show(ui, &self.tr, &profile, busy) {
             Some(Action::Restore(request)) => self.start_restore(&ctx, id, &request),
-            Some(Action::Merge { first, last }) => {
-                self.start_with(
-                    &ctx,
-                    id,
-                    Op::Merge,
-                    vec!["--from".into(), first.into(), "--to".into(), last.into()],
-                );
+            Some(Action::Merge { first, last, keep_deleted }) => {
+                let mut args = vec!["--from".into(), first.into(), "--to".into(), last.into()];
+                if !keep_deleted {
+                    args.push("--drop-deleted".into());
+                }
+                self.start_with(&ctx, id, Op::Merge, args);
             }
             Some(Action::Delete { archive }) => {
                 self.start_with(&ctx, id, Op::Delete, vec!["--archive".into(), archive.into()]);

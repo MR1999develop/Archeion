@@ -50,11 +50,26 @@ pub enum Container {
 /// runs, whenever they would merge something and nothing else uses the
 /// destination. Fields of older versions (`schedule`, `automatic`) are
 /// ignored when read.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MergePolicy {
     /// Which archives survive.
     #[serde(default)]
     pub rules: Retention,
+    /// A merged backup keeps the files deleted at the source between the
+    /// backups it fuses, with their last content, instead of dropping
+    /// them. On unless the user turns it off.
+    #[serde(default = "keep_deleted_default")]
+    pub keep_deleted: bool,
+}
+
+fn keep_deleted_default() -> bool {
+    true
+}
+
+impl Default for MergePolicy {
+    fn default() -> Self {
+        Self { rules: Retention::default(), keep_deleted: true }
+    }
 }
 
 /// Periodic checks that the archives can really be restored.

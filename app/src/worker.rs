@@ -26,9 +26,11 @@ pub enum Work {
         archive: String,
     },
     /// By the profile's rules, or the archives from the first to the second
-    /// name.
+    /// name; `drop_deleted`: the files deleted inside go, whatever the
+    /// profile says.
     Merge {
         range: Option<(String, String)>,
+        drop_deleted: bool,
     },
     /// JSON [`RestoreRequest`] in a file written by the window.
     Restore {
@@ -156,8 +158,8 @@ pub fn run(storage: &Storage, id: ProfileId, work: Work, scheduled: bool, log: O
         (Work::Backup { mode: BackupMode::Complete }, _) => Some("complete".to_owned()),
         (Work::Backup { mode: BackupMode::Auto }, _) => None,
         (Work::Delete { archive }, _) => Some(archive.clone()),
-        (Work::Merge { range: Some((a, b)) }, _) => Some(format!("{a} → {b}")),
-        (Work::Merge { range: None }, _) => None,
+        (Work::Merge { range: Some((a, b)), .. }, _) => Some(format!("{a} → {b}")),
+        (Work::Merge { range: None, .. }, _) => None,
         (Work::Restore { .. }, Some(Ok(req))) => Some(req.archives().join(", ")),
         (Work::Restore { .. }, _) => None,
         (Work::Verify { sample: None }, _) => Some(history::CHECK_FULL.to_owned()),
@@ -201,9 +203,15 @@ pub fn run(storage: &Storage, id: ProfileId, work: Work, scheduled: bool, log: O
     // The engine reports progress and the final summary itself.
     let result = match work {
         Work::Backup { mode } => archeion_engine::backup(&profile, pw, mode, &sink).map(|_| ()),
-        Work::Merge { range: None } => archeion_engine::merge(&profile, pw, &sink).map(|_| ()),
-        Work::Merge { range: Some((first, last)) } => {
-            archeion_engine::merge_range(&profile, pw, &first, &last, &sink).map(|_| ())
+        Work::Merge { range, drop_deleted } => {
+            let mut profile = profile.clone();
+            profile.merge.keep_deleted &= !drop_deleted;
+            match range {
+                None => archeion_engine::merge(&profile, pw, &sink).map(|_| ()),
+                Some((first, last)) => {
+                    archeion_engine::merge_range(&profile, pw, &first, &last, &sink).map(|_| ())
+                }
+            }
         }
         Work::Delete { archive } => {
             archeion_engine::delete_archive(&profile, pw, &archive, &sink).map(|_| ())
