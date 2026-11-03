@@ -52,10 +52,12 @@ type FolderFiles = Vec<(String, u64)>;
 #[derive(Debug, Clone)]
 pub enum Action {
     Restore(RestoreRequest),
-    /// Merge the backups from `first` to `last` and everything between.
+    /// Merge the backups from `first` to `last` and everything between;
+    /// `keep_deleted`: keeping the files deleted between them.
     Merge {
         first: String,
         last: String,
+        keep_deleted: bool,
     },
     /// Delete one backup.
     Delete {

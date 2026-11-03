@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con i backup del profilo eliminato nel Cestino (ramo
-`feature/backups-to-trash` unito; `tools\check.bat` verde: fmt, clippy, 327
+`main` con l'unione che mantiene i file eliminati (ramo
+`feature/merge-keep-deleted` unito; `tools\check.bat` verde: fmt, clippy, 332
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -115,3 +115,10 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   spostato si cerca nel Cestino; al primo che manca ci si ferma. Niente
   Annulla per il profilo; la password salvata si toglie subito. I test
   svuotano dal Cestino ciò che vi mettono.
+- Unione: `MergePolicy::keep_deleted` (vero per default, anche per i
+  profili salvati prima) fa entrare nel manifesto unito le voci elencate
+  da un membro del gruppo ma non dall'ultimo, com'erano nell'ultimo che
+  le elencava. Vale per l'unione automatica e per quella a mano (casella
+  propria, che parte dal valore del profilo; `--drop-deleted` la spegne
+  per quell'unione). L'eliminazione di un singolo backup scarta sempre
+  ciò che conteneva solo lui.

@@ -286,6 +286,40 @@ fn verify_merge_and_delete_keep_the_backups_restorable() {
     assert_eq!(restored(&s, &to), last, "the newest backup is whole after merge and delete");
 }
 
+/// A file created, backed up and deleted at the source between two merged
+/// backups: kept by the merge unless `--drop-deleted` says otherwise.
+fn merge_with_a_deleted_file(drop: bool) -> bool {
+    let s = sandbox(Container::ZipPerFile, false);
+    let id = s.profile.id.to_string();
+    backup(&s, None);
+    write(&s.source.join("note.txt"), b"short-lived");
+    backup(&s, None);
+    fs::remove_file(s.source.join("note.txt")).unwrap();
+    write(&s.source.join("a.txt"), b"alpha changed");
+    backup(&s, None);
+    let names = archives(&s, None);
+    let mut args = vec!["merge", id.as_str(), "--from", names[1].as_str(), "--to", names[0].as_str()];
+    if drop {
+        args.push("--drop-deleted");
+    }
+    ok(&archeion(&s, &args, None));
+    let names = archives(&s, None);
+    assert_eq!(names.len(), 2, "{names:?}");
+    let to = s.root.join("restored");
+    ok(&restore(&s, vec![item(&names[0], key(&s, ""), &to, vec![])], None));
+    restored(&s, &to).keys().any(|k| k.ends_with("note.txt"))
+}
+
+#[test]
+fn a_merge_keeps_the_files_deleted_between_its_backups() {
+    assert!(merge_with_a_deleted_file(false), "kept by default");
+}
+
+#[test]
+fn a_merge_with_drop_deleted_drops_them() {
+    assert!(!merge_with_a_deleted_file(true), "dropped when asked");
+}
+
 #[test]
 fn an_unknown_profile_fails_without_touching_anything() {
     let s = sandbox(Container::Folder, false);

@@ -244,6 +244,68 @@ fn manual_merge_can_include_the_initial_complete() {
     assert!(v.problems.is_empty(), "{:?}", v.problems);
 }
 
+/// A complete backup, then `note.txt` created, backed up, deleted at the
+/// source and `a.txt` changed, backed up: three backups, newest first.
+fn a_file_deleted_between_backups(keep_deleted: bool) -> (Fixture, Vec<String>) {
+    let mut f = fixture(Container::ZipPerFile);
+    f.profile.merge.keep_deleted = keep_deleted;
+    run_backup(&f.profile);
+    fs::write(f.source.join("note.txt"), "short-lived").unwrap();
+    run_backup(&f.profile);
+    fs::remove_file(f.source.join("note.txt")).unwrap();
+    fs::write(f.source.join("a.txt"), "v2").unwrap();
+    run_backup(&f.profile);
+    let names = list_archives(&f.profile, None).unwrap().into_iter().map(|a| a.name).collect();
+    (f, names)
+}
+
+#[test]
+fn a_merge_keeps_the_files_deleted_inside_it_when_asked() {
+    let (f, names) = a_file_deleted_between_backups(true);
+    // The two incrementals.
+    merge_range(&f.profile, None, &names[1], &names[0], &Recorder::default()).unwrap();
+    let after = list_archives(&f.profile, None).unwrap();
+    assert_eq!(after.len(), 2);
+    restore_all(&f, &after[0].name);
+    assert_eq!(
+        fs::read_to_string(restored(&f, "note.txt")).unwrap(),
+        "short-lived",
+        "kept, with its content"
+    );
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "v2", "the newest content");
+    let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+}
+
+#[test]
+fn a_merge_drops_the_files_deleted_inside_it_when_not_asked() {
+    let (f, names) = a_file_deleted_between_backups(false);
+    merge_range(&f.profile, None, &names[1], &names[0], &Recorder::default()).unwrap();
+    let after = list_archives(&f.profile, None).unwrap();
+    restore_all(&f, &after[0].name);
+    assert!(!restored(&f, "note.txt").exists(), "dropped");
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "v2");
+}
+
+#[test]
+fn a_merge_from_the_first_complete_keeps_deleted_files_in_the_new_complete() {
+    let (f, names) = a_file_deleted_between_backups(true);
+    fs::remove_file(f.source.join("a.txt")).unwrap();
+    run_backup(&f.profile);
+    // From the first complete to the backup that no longer lists note.txt.
+    merge_range(&f.profile, None, &names[2], &names[0], &Recorder::default()).unwrap();
+    let after = list_archives(&f.profile, None).unwrap();
+    assert_eq!(after[1].kind, ArchiveKind::Complete);
+    restore_all(&f, &after[1].name);
+    assert_eq!(fs::read_to_string(restored(&f, "note.txt")).unwrap(), "short-lived");
+    fs::remove_dir_all(&f.restore_to).unwrap();
+    // The backup after the merge still says a.txt was deleted after it.
+    restore_all(&f, &after[0].name);
+    assert!(!restored(&f, "a.txt").exists());
+    let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+}
+
 #[test]
 fn manual_merge_needs_two_backups() {
     let f = four_backups();

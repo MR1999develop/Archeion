@@ -75,6 +75,8 @@ enum Command {
     Watch,
     /// Merge the archives of one profile: by its rules, or the chosen range
     /// `--from <backup> --to <backup>` (everything between is included).
+    /// Files deleted at the source inside the merged backups are kept as
+    /// the profile says; `--drop-deleted` drops them from this merge.
     Merge {
         profile: ProfileId,
         #[arg(long)]
@@ -83,6 +85,8 @@ enum Command {
         from: Option<String>,
         #[arg(long, requires = "from")]
         to: Option<String>,
+        #[arg(long)]
+        drop_deleted: bool,
     },
     /// Check the backups of one profile: every stored file, or with
     /// `--sample N` a restore test of N files of the newest backup.
@@ -154,8 +158,8 @@ fn main() -> ExitCode {
         Some(Command::Delete { profile, archive }) => {
             worker::run(&storage, profile, worker::Work::Delete { archive }, false, cli.log)
         }
-        Some(Command::Merge { profile, scheduled, from, to }) => {
-            let work = worker::Work::Merge { range: from.zip(to) };
+        Some(Command::Merge { profile, scheduled, from, to, drop_deleted }) => {
+            let work = worker::Work::Merge { range: from.zip(to), drop_deleted };
             worker::run(&storage, profile, work, scheduled, cli.log)
         }
         Some(Command::Restore { profile, request }) => {

@@ -129,6 +129,17 @@ fn screens() {
                 n.click();
             }
             shot(&mut h, &out, &name("10-delete"));
+            // The merge section, open: its rules and the deleted files tick.
+            let cancel = h.state().tr.t("cancel");
+            if let Some(n) = h.query_all_by(|n| n.label().as_deref() == Some(cancel.as_str())).last() {
+                n.click();
+            }
+            settle(&mut h);
+            let merge = h.state().tr.t("merge");
+            if let Some(n) = h.query_all_by(|n| n.label().as_deref() == Some(merge.as_str())).last() {
+                n.click();
+            }
+            shot(&mut h, &out, &name("11-merge-settings"));
         }
     }
 }

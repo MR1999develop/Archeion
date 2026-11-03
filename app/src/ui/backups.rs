@@ -30,6 +30,9 @@ pub struct BackupsView {
     merge_marks: BTreeSet<String>,
     /// "I understand" for a merge that replaces the initial complete backup.
     merge_ack: bool,
+    /// The merged backup keeps the files deleted between the chosen ones;
+    /// set from the profile when the choice starts.
+    keep_deleted: bool,
     /// Backup whose deletion is being confirmed.
     deleting: Option<String>,
     /// "I understand" for the deletion.
@@ -93,6 +96,7 @@ impl BackupsView {
             && ui.button(tr.t("merge-choose")).on_hover_text(tr.t("merge-choose-hint")).clicked()
         {
             self.merge_mode = true;
+            self.keep_deleted = profile.merge.keep_deleted;
         }
         ui.add_space(theme::SPACE_S);
 
@@ -265,6 +269,10 @@ impl BackupsView {
             );
             widgets::checkbox(ui, &mut self.merge_ack, tr.t("merge-complete-ack"));
         }
+        if chosen >= 2 {
+            widgets::checkbox(ui, &mut self.keep_deleted, tr.t("merge-keep-deleted"))
+                .on_hover_text(tr.t("merge-keep-deleted-hint"));
+        }
         ui.horizontal(|ui| {
             let ready = chosen >= 2 && !busy && (!replaces_complete || self.merge_ack);
             let why = if busy {
@@ -280,7 +288,11 @@ impl BackupsView {
                 .clicked()
                 && let (Some(n), Some(o)) = (newest, oldest)
             {
-                action = Some(Action::Merge { first: o.name.clone(), last: n.name.clone() });
+                action = Some(Action::Merge {
+                    first: o.name.clone(),
+                    last: n.name.clone(),
+                    keep_deleted: self.keep_deleted,
+                });
             }
             if ui.button(tr.t("cancel")).clicked() || action.is_some() {
                 self.merge_mode = false;

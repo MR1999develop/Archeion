@@ -226,6 +226,8 @@ pub fn show(
     section(ui, "merge", &tr.t("merge"), false, false, |ui| {
         ui.weak(tr.t("merge-hint"));
         ui.weak(tr.t("merge-automatic-hint"));
+        let keep = widgets::checkbox(ui, &mut p.merge.keep_deleted, tr.t("merge-keep-deleted"));
+        out.changed |= keep.on_hover_text(tr.t("merge-keep-deleted-hint")).changed();
         retention(ui, tr, &mut p.merge.rules, &mut out);
     });
     section(ui, "checks", &tr.t("verify-section"), false, false, |ui| {
