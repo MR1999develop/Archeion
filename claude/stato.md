@@ -157,6 +157,6 @@ clippy, 343 test, 2 ignorati: le schermate e l'anteprima dell'icona). La build d
   destinazione): vale per tutte le cartelle spuntate, subito; arriva al
   motore come `with_deleted` delle cartelle (i file restano marcati).
 - Tolti `tools\probe.bat` (esperimenti iniziali), `tools\git_init.bat` e
-  `toolsirst-commit.txt` (il repository esiste), le chiavi di traduzione
+  `tools\first-commit.txt` (il repository esiste), le chiavi di traduzione
   delle funzioni rimosse. Resta `tools\github_publish.bat`: il repository
   non ha ancora un remote.
