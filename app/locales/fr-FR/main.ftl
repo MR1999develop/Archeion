@@ -70,11 +70,22 @@ merge-now-hint = Applique les règles de fusion maintenant ; la première sauveg
 busy-hint = Une sauvegarde ou une fusion est déjà en cours.
 fix-profile-hint = Complétez d'abord le profil.
 delete-profile = Supprimer le profil
-delete-profile-hint = Demande confirmation, puis supprime le profil et ses tâches planifiées ; les sauvegardes restent sur la destination.
+delete-profile-hint = Demande confirmation, puis supprime le profil et ses tâches planifiées ; les sauvegardes restent sur la destination, sauf si vous choisissez de les supprimer aussi.
 delete-profile-title = Supprimer le profil « { $name } » ?
 delete-profile-body = Le profil et ses tâches planifiées sont supprimés. Tant que vous ne fermez pas le message dans la barre d'état, Annuler les rétablit.
+delete-profile-body-backups = Le profil, ses tâches planifiées et ses sauvegardes sont supprimés.
 delete-profile-password = Le mot de passe enregistré est supprimé du Gestionnaire d'identification Windows quand l'annulation n'est plus possible : quand vous fermez ce message, supprimez un autre profil ou quittez Archeion.
 delete-profile-backups = Les sauvegardes dans { $path } ne sont pas supprimées : un nouveau profil qui utilise ce dossier peut les reprendre avec « Utiliser ces sauvegardes pour ce profil ».
+delete-profile-with-backups = Supprimer aussi les sauvegardes dans { $path }
+delete-profile-backups-gone = Les sauvegardes ne pourront plus être récupérées, et Annuler ne pourra pas rétablir le profil. Seul ce qu’Archeion a écrit est supprimé : les autres fichiers du dossier restent.
+delete-profile-and-backups = Supprimer le profil et les sauvegardes
+delete-backups-running = Suppression des sauvegardes de « { $name } »…
+delete-backups-done = Les sauvegardes de « { $name } » sont supprimées.
+delete-backups-left = Les sauvegardes de « { $name } » sont supprimées ; { $path } reste, avec { $count ->
+    [one] 1 élément
+   *[other] { $count } éléments
+} qu’Archeion n’a pas écrits.
+delete-backups-failed = Impossible de supprimer les sauvegardes de « { $name } » : { $detail }
 
 day-monday = lundi
 day-tuesday = mardi
@@ -485,7 +496,7 @@ doc-profiles-title = Profils
 doc-profiles-body = Un profil indique quoi sauvegarder, où et quand. Créez-en un avec Fichier > Nouveau profil (Ctrl+N) et remplissez son onglet Paramètres : un nom, les dossiers à sauvegarder et la destination, un dossier, un disque externe ou un partage réseau. Utilisez chaque dossier de destination pour un seul profil.
 doc-profiles-exclusions = Les exclusions laissent de côté ce dont vous n'avez pas besoin : un dossier et tout son contenu, un fichier, ou tous les fichiers d'un type comme .tmp. Avec « Exclure des motifs », vous pouvez ajouter des motifs, comparés au chemin complet sans tenir compte de la casse : * correspond à n'importe quel texte dans un nom, ** à n'importe quels dossiers, ? à un caractère. Par exemple **/node_modules ou **/cache/**.
 doc-profiles-format = Le format de stockage (un zip par fichier ou copies simples) et le chiffrement doivent être choisis avant la première sauvegarde : une fois que la destination contient des sauvegardes, ils ne peuvent plus changer. Pour en changer, choisissez une destination vide.
-doc-profiles-delete = Supprimer le profil demande confirmation, puis supprime le profil et ses tâches planifiées ; les sauvegardes restent sur la destination. Juste après, Annuler dans la barre d'état rétablit le profil. Un profil qui utilise ce dossier plus tard peut les reprendre avec « Utiliser ces sauvegardes pour ce profil ».
+doc-profiles-delete = Supprimer le profil demande confirmation, puis supprime le profil et ses tâches planifiées ; les sauvegardes restent sur la destination. Juste après, Annuler dans la barre d'état rétablit le profil. Un profil qui utilise ce dossier plus tard peut les reprendre avec « Utiliser ces sauvegardes pour ce profil ». Dans la confirmation, « Supprimer aussi les sauvegardes » les supprime aussi, définitivement et sans Annuler : seul ce qu’Archeion a écrit dans ce dossier disparaît, ainsi que le dossier lui-même s’il ne contient plus rien d’autre.
 doc-auto-title = Sauvegardes automatiques
 doc-auto-schedule = Sous « Sauvegarde automatique », choisissez quand les sauvegardes s'exécutent toutes seules : les jours choisis à une ou plusieurs heures, toutes les quelques heures entre deux heures, ou une fois par mois un jour de 1 à 28. Archeion enregistre la planification dans le Planificateur de tâches Windows, si bien que les sauvegardes s'exécutent même quand Archeion n'est pas ouvert.
 doc-auto-missed = Si l'ordinateur est éteint à l'heure prévue, la sauvegarde s'exécute dès qu'il est rallumé.

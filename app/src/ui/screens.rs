@@ -107,6 +107,28 @@ fn screens() {
             h.state_mut().help = super::Help::default();
             h.state_mut().selected = h.state().settings.profiles.get(1).map(|p| p.id);
             shot(&mut h, &out, &name("9-profile-encrypted"));
+            // The deletion warning, with the backups ticked.
+            h.state_mut().selected = h.state().settings.profiles.first().map(|p| p.id);
+            settle(&mut h);
+            let delete = h.state().tr.t("delete-profile");
+            h.query_all_by(|n| {
+                n.role() == egui::accesskit::Role::Button && n.label().as_deref() == Some(delete.as_str())
+            })
+            .last()
+            .unwrap()
+            .click();
+            settle(&mut h);
+            let with = h
+                .state()
+                .tr
+                .t_args("delete-profile-with-backups", &[("path", crate::i18n::arg(String::new()))]);
+            let with = with.trim().to_owned();
+            if let Some(n) =
+                h.query_all_by(|n| n.label().is_some_and(|l| l.starts_with(with.as_str()))).last()
+            {
+                n.click();
+            }
+            shot(&mut h, &out, &name("10-delete"));
         }
     }
 }

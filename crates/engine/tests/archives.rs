@@ -317,6 +317,61 @@ fn destination_in_use_is_busy() {
     assert!(!backup_engine_busy(&f.profile));
 }
 
+#[test]
+fn deleting_the_backups_removes_what_archeion_wrote_and_the_empty_folder() {
+    let f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile);
+    run_backup(&f.profile);
+    let root = f.profile.destination.path().to_path_buf();
+    let done = archeion_engine::delete_destination(&f.profile).unwrap();
+    assert_eq!(done, archeion_engine::DestinationDeleted { folder_removed: true, left: Vec::new() });
+    assert!(!root.exists());
+    assert!(f.source.join("a.txt").exists(), "the source is not touched");
+    // Done again: nothing left to do.
+    assert!(archeion_engine::delete_destination(&f.profile).unwrap().folder_removed);
+}
+
+#[test]
+fn deleting_the_backups_leaves_other_files_and_their_folder() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    let root = f.profile.destination.path().to_path_buf();
+    fs::write(root.join("notes.txt"), "mine").unwrap();
+    fs::create_dir(root.join("Photos")).unwrap();
+    let done = archeion_engine::delete_destination(&f.profile).unwrap();
+    assert!(!done.folder_removed);
+    assert_eq!(done.left, vec!["Photos".to_owned(), "notes.txt".to_owned()]);
+    let mut names: Vec<String> =
+        fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+    names.sort();
+    assert_eq!(names, vec!["Photos", "notes.txt"], "only what Archeion did not write");
+}
+
+#[test]
+fn the_backups_of_another_profile_or_in_use_are_not_deleted() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    let root = f.profile.destination.path().to_path_buf();
+    let mut other = Profile::new("Other");
+    other.destination = f.profile.destination.clone();
+    assert!(matches!(archeion_engine::delete_destination(&other), Err(EngineError::ForeignDestination)));
+    let lock = fs::File::options().write(true).open(root.join("archeion.lock")).unwrap();
+    lock.lock().unwrap();
+    assert!(matches!(archeion_engine::delete_destination(&f.profile), Err(EngineError::Busy)));
+    drop(lock);
+    assert_eq!(list_archives(&f.profile, None).unwrap().len(), 1, "nothing was deleted");
+
+    // A folder without backups is left alone.
+    let mut empty = Profile::new("Empty");
+    let plain = f._dir.path().join("plain");
+    fs::create_dir(&plain).unwrap();
+    fs::write(plain.join("x.txt"), "x").unwrap();
+    empty.destination = Destination::Local { path: plain.clone() };
+    let done = archeion_engine::delete_destination(&empty).unwrap();
+    assert_eq!(done.left, vec!["x.txt".to_owned()]);
+    assert!(plain.join("x.txt").exists());
+}
+
 fn backup_engine_busy(p: &Profile) -> bool {
     archeion_engine::destination_busy(p)
 }

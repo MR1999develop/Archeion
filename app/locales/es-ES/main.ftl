@@ -70,11 +70,22 @@ merge-now-hint = Aplica ahora las reglas de fusión; la primera copia completa s
 busy-hint = Ya hay una copia o una fusión en curso.
 fix-profile-hint = Completa primero el perfil.
 delete-profile = Eliminar perfil
-delete-profile-hint = Pide confirmación y luego quita el perfil y sus tareas programadas; las copias se quedan en el destino.
+delete-profile-hint = Pide confirmación y luego quita el perfil y sus tareas programadas; las copias se quedan en el destino, salvo que elijas eliminarlas también.
 delete-profile-title = ¿Eliminar el perfil "{ $name }"?
 delete-profile-body = Se quitan el perfil y sus tareas programadas. Hasta que cierres el mensaje de la barra de estado, Deshacer los recupera.
+delete-profile-body-backups = Se eliminan el perfil, sus tareas programadas y sus copias.
 delete-profile-password = La contraseña guardada se quita del Administrador de credenciales de Windows cuando ya no es posible deshacer: al cerrar ese mensaje, eliminar otro perfil o salir de Archeion.
 delete-profile-backups = Las copias de { $path } no se eliminan: un perfil nuevo que use esa carpeta puede asumirlas con "Usar estas copias para este perfil".
+delete-profile-with-backups = Eliminar también las copias de { $path }
+delete-profile-backups-gone = Las copias no se podrán recuperar después, y Deshacer no podrá recuperar el perfil. Solo se elimina lo que escribió Archeion: los demás archivos de esa carpeta se quedan.
+delete-profile-and-backups = Eliminar perfil y copias
+delete-backups-running = Eliminando las copias de "{ $name }"…
+delete-backups-done = Las copias de "{ $name }" se han eliminado.
+delete-backups-left = Las copias de "{ $name }" se han eliminado; { $path } se queda, con { $count ->
+    [one] 1 elemento
+   *[other] { $count } elementos
+} que Archeion no escribió.
+delete-backups-failed = No se pudieron eliminar las copias de "{ $name }": { $detail }
 
 day-monday = lunes
 day-tuesday = martes
@@ -485,7 +496,7 @@ doc-profiles-title = Perfiles
 doc-profiles-body = Un perfil indica qué copiar, dónde y cuándo. Crea uno con Archivo > Nuevo perfil (Ctrl+N) y rellena su pestaña Configuración: un nombre, las carpetas que copiar y el destino, que puede ser una carpeta, un disco externo o una carpeta de red. Usa cada carpeta de destino para un solo perfil.
 doc-profiles-exclusions = Las exclusiones dejan fuera lo que no necesitas: una carpeta y todo su contenido, un archivo o todos los archivos de un tipo, como .tmp. Con "Excluir patrones" puedes añadir patrones, que se comparan con la ruta completa sin distinguir mayúsculas: * es cualquier texto en un nombre, ** cualquier carpeta, ? un carácter. Por ejemplo **/node_modules o **/cache/**.
 doc-profiles-format = El formato de almacenamiento (un zip por archivo o copias simples) y el cifrado deben elegirse antes de la primera copia: cuando el destino ya contiene copias, no se pueden cambiar. Para cambiarlos, elige un destino vacío.
-doc-profiles-delete = Eliminar perfil pide confirmación y luego quita el perfil y sus tareas programadas; las copias se quedan en el destino. Justo después, Deshacer en la barra de estado recupera el perfil. Un perfil que use esa carpeta más adelante puede asumirlas con "Usar estas copias para este perfil".
+doc-profiles-delete = Eliminar perfil pide confirmación y luego quita el perfil y sus tareas programadas; las copias se quedan en el destino. Justo después, Deshacer en la barra de estado recupera el perfil. Un perfil que use esa carpeta más adelante puede asumirlas con "Usar estas copias para este perfil". En la confirmación, "Eliminar también las copias" las borra también, para siempre y sin Deshacer: solo se va lo que Archeion escribió en esa carpeta, y la propia carpeta cuando no queda nada más en ella.
 doc-auto-title = Copias automáticas
 doc-auto-schedule = En "Copia automática" elige cuándo se hacen las copias solas: los días elegidos a una o varias horas, cada pocas horas entre dos horas, o una vez al mes un día del 1 al 28. Archeion registra la programación en el Programador de tareas de Windows, así que las copias se hacen aunque Archeion no esté abierto.
 doc-auto-missed = Si el equipo está apagado a la hora programada, la copia se ejecuta en cuanto vuelva a encenderse.

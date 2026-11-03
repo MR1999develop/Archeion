@@ -103,6 +103,8 @@ pub struct ArcheionApp {
     help: Help,
     /// The Preferences window: language and window behaviour.
     preferences: Preferences,
+    /// Backups of a deleted profile being deleted, or the outcome.
+    wipe: Option<Wipe>,
     /// When the window took a size not saved yet: it is saved once the
     /// resizing stops.
     resized_at: Option<Instant>,
@@ -198,6 +200,7 @@ impl ArcheionApp {
             help: Help::default(),
             preferences: Preferences::default(),
             resized_at: None,
+            wipe: None,
             fitted: false,
         }
     }
@@ -517,7 +520,10 @@ impl ArcheionApp {
         }
     }
 
-    fn delete(&mut self, id: ProfileId) {
+    /// Removes the profile and its tasks; Undo brings them back until the
+    /// next deletion. With `backups`, its backups at the destination are
+    /// deleted too, in the background, and there is no Undo.
+    fn delete(&mut self, id: ProfileId, backups: bool) {
         let Some(pos) = self.settings.profiles.iter().position(|p| p.id == id) else { return };
         let profile = self.settings.profiles.remove(pos);
         if self.schedule_pending.is_some_and(|(p, _)| p == id) {
@@ -529,13 +535,50 @@ impl ArcheionApp {
                 tracing::warn!(error = %e, ?kind, "removing scheduled task");
             }
         }
-        // Only the last deletion can be undone: an earlier one is final now.
-        if let Some(previous) = self.removed.replace(profile) {
+        if backups {
+            // Final: no Undo, so the saved password goes now.
+            forget_password(id);
+            self.wipe = Some(Wipe::start(profile));
+        } else if let Some(previous) = self.removed.replace(profile) {
+            // Only the last deletion can be undone: an earlier one is final now.
             forget_password(previous.id);
         }
         self.selected = self.settings.profiles.first().map(|p| p.id);
         self.restore.invalidate();
         self.save();
+    }
+
+    /// Takes the outcome of the deletion of backups, once it ended.
+    fn poll_wipe(&mut self, ctx: &egui::Context) {
+        let Some(Wipe::Running { name, path, done }) = &self.wipe else { return };
+        let result = match done.try_recv() {
+            Ok(r) => r,
+            Err(mpsc::TryRecvError::Empty) => {
+                ctx.request_repaint_after(SPINNER_DELAY);
+                return;
+            }
+            Err(mpsc::TryRecvError::Disconnected) => Err(EngineError::Io {
+                context: "deleting the backups".into(),
+                source: std::io::Error::other("stopped unexpectedly"),
+            }),
+        };
+        let name = || arg(name.clone());
+        let (text, warn) = match result {
+            Ok(d) if d.left.is_empty() => (self.tr.t_args("delete-backups-done", &[("name", name())]), false),
+            Ok(d) => {
+                let args = [("name", name()), ("path", arg(path.clone())), ("count", arg(d.left.len()))];
+                (self.tr.t_args("delete-backups-left", &args), true)
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "deleting the backups");
+                (
+                    self.tr
+                        .t_args("delete-backups-failed", &[("name", name()), ("detail", arg(e.to_string()))]),
+                    true,
+                )
+            }
+        };
+        self.wipe = Some(Wipe::Done { text, warn });
     }
 
     fn undo_delete(&mut self) {
@@ -811,7 +854,7 @@ impl ArcheionApp {
                 let ctx = ui.ctx().clone();
                 self.verify(&ctx, id, sample);
             }
-            Some(editor::Command::Delete) => self.delete(id),
+            Some(editor::Command::Delete { backups }) => self.delete(id, backups),
             Some(editor::Command::AdoptDestination) => self.adopt_destination(id),
             None => {}
         }
@@ -907,6 +950,23 @@ impl ArcheionApp {
                 }
                 if ui.button(self.tr.t("cancel")).clicked() {
                     job.cancel();
+                }
+            } else if let Some(wipe) = &self.wipe {
+                match wipe {
+                    Wipe::Running { name, .. } => {
+                        ui.spinner();
+                        ui.label(self.tr.t_args("delete-backups-running", &[("name", arg(name.clone()))]));
+                    }
+                    Wipe::Done { text, warn } => {
+                        if *warn {
+                            ui.colored_label(ui.visuals().warn_fg_color, text);
+                        } else {
+                            ui.label(text);
+                        }
+                        if widgets::icon_button(ui, symbol::REMOVE, self.tr.t("close")).clicked() {
+                            self.wipe = None;
+                        }
+                    }
                 }
             } else if let Some(removed) = &self.removed {
                 ui.label(self.tr.t_args("profile-removed", &[("name", arg(removed.name.clone()))]));
@@ -1230,6 +1290,7 @@ impl eframe::App for ArcheionApp {
         let ctx = ui.ctx().clone();
         self.window_events(&ctx);
         self.remember_size(&ctx);
+        self.poll_wipe(&ctx);
         self.poll();
         self.update_tray();
         if self.close_after_run && self.job.is_none() {
@@ -1529,3 +1590,33 @@ fn outcome_text(tr: &Tr, name: &str, op: Op, o: &Outcome) -> (String, bool) {
 #[cfg(test)]
 #[path = "screens.rs"]
 mod screens;
+
+#[cfg(test)]
+#[path = "app_tests.rs"]
+mod tests;
+
+/// The deletion of a deleted profile's backups, on a thread of its own.
+#[derive(Debug)]
+enum Wipe {
+    Running {
+        name: String,
+        path: String,
+        done: mpsc::Receiver<Result<archeion_engine::DestinationDeleted, EngineError>>,
+    },
+    /// What the status bar says once it ended.
+    Done { text: String, warn: bool },
+}
+
+impl Wipe {
+    fn start(profile: Profile) -> Self {
+        let (tx, done) = mpsc::channel();
+        let (name, path) = (profile.name.clone(), profile.destination.path().display().to_string());
+        let spawned = std::thread::Builder::new().name("delete-backups".into()).spawn(move || {
+            let _ = tx.send(archeion_engine::delete_destination(&profile));
+        });
+        if let Err(e) = spawned {
+            tracing::error!(error = %e, "starting the deletion of the backups");
+        }
+        Self::Running { name, path, done }
+    }
+}
