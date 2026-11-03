@@ -433,7 +433,9 @@ impl Reader {
     /// archive needs `keys`.
     pub(crate) fn open(archive_dir: &Path, keys: Option<&Keys>) -> Result<Self> {
         let vault = archive_dir.join(VAULT_DIR);
-        if vault.exists() {
+        // With keys, only encrypted files are read: plain files put in an
+        // encrypted destination are not its backups.
+        if vault.exists() || keys.is_some() {
             let keys = keys.ok_or(EngineError::PasswordNeeded)?;
             let archive =
                 archive_dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
@@ -466,6 +468,13 @@ impl Reader {
                 let mut zip =
                     ZipArchive::new(BufReader::with_capacity(BUFFER, file)).map_err(zip_err(&ctx))?;
                 let mut entry = zip.by_index_decrypt(0, keys.password().as_bytes()).map_err(zip_err(&ctx))?;
+                // The zip library reads a plain entry even when given a key.
+                if !entry.encrypted() {
+                    return Err(EngineError::Damaged {
+                        archive: archive.clone(),
+                        message: format!("{key} is not encrypted"),
+                    });
+                }
                 f(&mut entry)
             }
         }

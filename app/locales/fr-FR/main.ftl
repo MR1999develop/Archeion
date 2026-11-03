@@ -36,6 +36,7 @@ dest-adopt-hint = Les sauvegardes existantes deviennent celles de ce profil : la
 dest-adopt-failed = Impossible de reprendre les sauvegardes : { $detail }
 dest-foreign-hint = La destination contient les sauvegardes d'un autre profil : voir la section Destination.
 run-foreign-destination = La destination contient les sauvegardes d'un autre profil. Ouvrez les paramètres du profil : si ce profil a été supprimé, « Utiliser ces sauvegardes pour ce profil » les reprend.
+run-encryption-missing = Les sauvegardes de la destination ne sont pas décrites comme chiffrées, mais le profil ou les sauvegardes elles-mêmes le sont : soit le chiffrement a été activé après les premières sauvegardes, soit la description de la destination a été supprimée ou modifiée hors d’Archeion. Rien n’a été écrit. Pour des sauvegardes chiffrées, choisissez une destination nouvelle et vide.
 browse = Parcourir…
 container = Format
 container-zip-per-file = Un zip par fichier

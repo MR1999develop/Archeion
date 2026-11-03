@@ -345,9 +345,23 @@ pub(crate) fn encrypt_single(data: &[u8], name: &str, password: &str) -> Result<
 pub(crate) fn decrypt_single(bytes: &[u8], password: &str) -> Result<Vec<u8>> {
     let ctx = "decrypting";
     let mut zip = ZipArchive::new(Cursor::new(bytes)).map_err(zip_error(ctx))?;
-    let mut entry = zip.by_index_decrypt(0, password.as_bytes()).map_err(zip_error(ctx))?;
+    let entry = zip.by_index_decrypt(0, password.as_bytes()).map_err(zip_error(ctx))?;
+    // The zip library reads a plain entry even when given a password.
+    if !entry.encrypted() {
+        return Err(EngineError::Io {
+            context: ctx.to_owned(),
+            source: std::io::Error::other("the entry is not encrypted"),
+        });
+    }
     let mut out = Vec::new();
-    entry.read_to_end(&mut out).map_err(|_| EngineError::WrongPassword)?;
+    let limit = crate::repo::MAX_MANIFEST_BYTES;
+    entry.take(limit + 1).read_to_end(&mut out).map_err(|_| EngineError::WrongPassword)?;
+    if out.len() as u64 > limit {
+        return Err(EngineError::Io {
+            context: ctx.to_owned(),
+            source: std::io::Error::other("the entry unpacks too large"),
+        });
+    }
     Ok(out)
 }
 
@@ -413,6 +427,23 @@ mod tests {
         assert_eq!(Keys::unlock(dir.path(), &pw("second")).unwrap().password(), k.password());
         let text = std::fs::read_to_string(dir.path().join(KEY_FILE)).unwrap();
         assert!(!text.contains(k.password()), "the master key is never in clear");
+    }
+
+    #[test]
+    fn a_master_key_put_in_without_encryption_opens_with_no_password() {
+        let dir = tempfile::tempdir().unwrap();
+        Keys::create(dir.path(), &pw("the real one")).unwrap();
+        // Someone who can write to the destination wraps a key of their own
+        // in a plain zip: it must not open with any password.
+        let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file(WRAP_ENTRY, zip::write::SimpleFileOptions::default()).unwrap();
+        zip.write_all(&[7u8; 32]).unwrap();
+        let planted = to_hex(&zip.finish().unwrap().into_inner());
+        let path = dir.path().join(KEY_FILE);
+        let mut file: KeyFile = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        file.wrapped = planted;
+        std::fs::write(&path, serde_json::to_string(&file).unwrap()).unwrap();
+        assert!(matches!(Keys::unlock(dir.path(), &pw("anything")), Err(EngineError::WrongPassword)));
     }
 
     #[test]

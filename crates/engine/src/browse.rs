@@ -157,7 +157,8 @@ pub fn existing_format(profile: &Profile) -> Result<Option<ExistingFormat>> {
     let Some(root) = root(profile)? else { return Ok(None) };
     let Some(last) = archives_in(root)?.last().copied() else { return Ok(None) };
     let container = crate::container::detect(&root.join(last.to_string()));
-    Ok(Some(ExistingFormat { container, encrypted: is_encrypted(root)? }))
+    let encrypted = is_encrypted(root)? || crate::repo::holds_sealed_archives(root)?;
+    Ok(Some(ExistingFormat { container, encrypted }))
 }
 
 /// True when the drive or share of the destination is there (the folder

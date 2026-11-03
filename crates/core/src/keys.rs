@@ -13,7 +13,7 @@
 use std::path::{Component, Path, PathBuf, Prefix};
 
 /// Why a path has no key.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum KeyError {
     #[error("the path is not absolute")]
     NotAbsolute,
@@ -21,6 +21,10 @@ pub enum KeyError {
     NotUnicode,
     #[error("the path contains '..'")]
     ParentDir,
+    /// A key read from an archive that no path gives: it could lead a
+    /// restore outside the place chosen.
+    #[error("not a key Archeion writes: {0}")]
+    Unsafe(String),
 }
 
 /// Key of an absolute path.
@@ -58,6 +62,42 @@ pub fn key_for(path: &Path) -> Result<String, KeyError> {
         return Err(KeyError::NotAbsolute);
     }
     Ok(parts.join("/"))
+}
+
+/// Checks a key read from an archive: it must be one [`key_for`] can
+/// give, made of plain names, so that [`path_for`] and [`path_under`] stay
+/// where the key says. A segment such as `..`, `C:\x` or `a\b` (a folder
+/// separator on Windows) is refused.
+///
+/// # Errors
+/// [`KeyError::Unsafe`] with the key.
+pub fn check(key: &str) -> Result<(), KeyError> {
+    let unsafe_key = || KeyError::Unsafe(key.to_owned());
+    let mut segs = key.split('/');
+    let first = segs.next().unwrap_or_default();
+    let rooted = match first {
+        "ROOT" => true,
+        "UNC" => {
+            // Server and share.
+            for _ in 0..2 {
+                segs.next().filter(|s| plain(s)).ok_or_else(unsafe_key)?;
+            }
+            true
+        }
+        d => d.len() == 1 && d.as_bytes().first().is_some_and(u8::is_ascii_uppercase),
+    };
+    if !rooted || !segs.all(plain) {
+        return Err(unsafe_key());
+    }
+    Ok(())
+}
+
+/// True for one plain file or folder name on this system.
+fn plain(segment: &str) -> bool {
+    let mut parts = Path::new(segment).components();
+    !segment.contains('\0')
+        && matches!(parts.next(), Some(Component::Normal(n)) if n == segment)
+        && parts.next().is_none()
 }
 
 /// Original absolute path of a key.
@@ -132,6 +172,36 @@ mod tests {
         assert!(is_within("C/Users/user/a.txt", "C/Users/user"));
         assert!(is_within("C/Users/user", "C/Users/user"));
         assert!(!is_within("C/Users/user2/a.txt", "C/Users/user"));
+    }
+
+    #[test]
+    fn keys_of_paths_pass_the_check_and_doctored_ones_do_not() {
+        for key in ["C/Users/user/a b/ü.txt", "D", "UNC/server/share/x", "ROOT/home/m/a.txt", "C/x/.hidden"] {
+            assert_eq!(check(key), Ok(()), "{key}");
+        }
+        for key in [
+            "",
+            "C/Users/me/../../Windows/evil.dll",
+            "C/Users/./a",
+            "C//a",
+            "C/a/",
+            "c/a",
+            "CD/a",
+            "UNC/nas",
+            "UNC//share/a",
+            "../a",
+            "C/a\0b",
+        ] {
+            assert!(matches!(check(key), Err(KeyError::Unsafe(_))), "{key:?}");
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn segments_windows_reads_as_paths_are_refused() {
+        for key in [r"C/Users/C:\Windows\evil.dll", r"C/x/\\host\share\evil", r"C/a\b", "C/x/C:"] {
+            assert!(matches!(check(key), Err(KeyError::Unsafe(_))), "{key:?}");
+        }
     }
 
     #[test]

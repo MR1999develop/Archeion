@@ -278,6 +278,11 @@ pub fn run(storage: &Storage, id: ProfileId, work: Work, scheduled: bool, log: O
             sink.emit(RunEvent::NotEnoughSpace { needed, available });
             ExitCode::from(EXIT_NO_SPACE)
         }
+        Err(EngineError::EncryptionMissing) => {
+            let text = tr.t("run-encryption-missing");
+            alert(text.clone());
+            fail(&sink, &text)
+        }
         Err(EngineError::ForeignDestination) => {
             let text = tr.t("run-foreign-destination");
             alert(text.clone());

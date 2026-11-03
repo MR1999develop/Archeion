@@ -36,6 +36,7 @@ dest-adopt-hint = The existing backups become this profile's: the next backup co
 dest-adopt-failed = The backups could not be taken over: { $detail }
 dest-foreign-hint = The destination holds the backups of another profile: see the Destination section.
 run-foreign-destination = The destination holds the backups of another profile. Open the profile settings: if that profile was deleted, "Use these backups for this profile" takes them over.
+run-encryption-missing = The backups at the destination are not described as encrypted, but the profile or the backups themselves are: either encryption was switched on after the first backups, or the description of the destination was removed or changed outside Archeion. Nothing was written. For encrypted backups choose a new, empty destination.
 browse = Browse…
 container = Storage
 container-zip-per-file = One zip per file

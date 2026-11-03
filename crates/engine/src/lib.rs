@@ -90,6 +90,13 @@ pub enum EngineError {
     /// Windows deleted this instead of moving it to the Recycle Bin.
     #[error("{0} was deleted instead of going to the Recycle Bin")]
     NotRecycled(String),
+    /// The profile is encrypted but the destination, which has backups, no
+    /// longer says so: its description was removed or changed outside
+    /// Archeion. Nothing is written in the clear.
+    #[error(
+        "the backups at the destination are not described as encrypted, but the profile or the backups are"
+    )]
+    EncryptionMissing,
     /// The destination is encrypted and no password was given.
     #[error("the destination is encrypted: a password is needed")]
     PasswordNeeded,

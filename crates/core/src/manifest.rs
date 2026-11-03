@@ -312,6 +312,10 @@ impl Manifest {
         for (i, line) in lines {
             let e: Entry = serde_json::from_str(line)
                 .map_err(|e| ManifestError::Line { line: i + 1, message: e.to_string() })?;
+            // Restores write where the keys say: only keys a path gives.
+            if let Err(err) = crate::keys::check(&e.key) {
+                return Err(ManifestError::Line { line: i + 1, message: err.to_string() });
+            }
             // Restores trust the list: it must describe the whole file.
             if e.chunks.as_ref().is_some_and(|c| c.total_size() != e.size) {
                 let message = "the chunk sizes do not add up to the file size".to_owned();

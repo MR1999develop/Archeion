@@ -36,6 +36,7 @@ dest-adopt-hint = 现有备份将归此配置所有：下次备份会在其基�
 dest-adopt-failed = 无法接管这些备份：{ $detail }
 dest-foreign-hint = 目标位置存放的是另一个配置的备份：请查看“目标位置”部分。
 run-foreign-destination = 目标位置存放的是另一个配置的备份。请打开配置设置：如果那个配置已被删除，可用“将这些备份用于此配置”接管它们。
+run-encryption-missing = 目标位置的备份未被记录为已加密，但配置或备份本身是加密的：要么是在首次备份之后才开启了加密，要么目标位置的说明在 Archeion 之外被删除或更改。未写入任何内容。如需加密备份，请选择一个新的空目标位置。
 browse = 浏览…
 container = 存储格式
 container-zip-per-file = 每个文件一个 zip
