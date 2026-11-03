@@ -284,7 +284,8 @@ impl Keys {
         let tmp = root.join(format!("{KEY_FILE}.tmp"));
         crate::repo::write_durably(&tmp, text.as_bytes())?;
         let path = root.join(KEY_FILE);
-        std::fs::rename(&tmp, &path).map_err(EngineError::io(format!("replacing {}", path.display())))
+        archeion_win::rename_durably(&tmp, &path)
+            .map_err(EngineError::io(format!("replacing {}", path.display())))
     }
 }
 

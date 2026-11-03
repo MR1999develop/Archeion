@@ -19,6 +19,7 @@ archeion_engine = { workspace = true }
 archeion_scheduler = { workspace = true }
 
 anyhow = { workspace = true }
+archeion_win = { workspace = true }
 clap = { version = "4", features = ["derive"] }
 directories = "6"
 jiff = { workspace = true }

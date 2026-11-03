@@ -30,7 +30,7 @@ impl EventSink for Recorder {
 const MB: usize = 1024 * 1024;
 
 fn small_chunks() -> Tuning {
-    Tuning { chunks: ChunkParams::new(1024, 4096, 16384), stop_after_files: None }
+    Tuning { chunks: ChunkParams::new(1024, 4096, 16384), ..Tuning::default() }
 }
 
 /// Deterministic pseudo-random bytes (xorshift).

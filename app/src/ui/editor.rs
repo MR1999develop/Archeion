@@ -167,6 +167,8 @@ pub struct DestinationInfo {
     pub free: Option<u64>,
     /// The folder holds the backups of another profile.
     pub foreign: Option<Foreign>,
+    /// File system of its drive ("NTFS", "exFAT"…), when known.
+    pub file_system: Option<String>,
 }
 
 /// Owner of a destination that belongs to another profile.
@@ -1096,6 +1098,7 @@ fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, info: &DestinationInfo
         }
         None => {}
     }
+    file_system_note(ui, tr, info.file_system.as_deref());
     ui.weak(tr.t("dest-hint"));
 }
 
@@ -1110,6 +1113,23 @@ fn free_space(ui: &mut Ui, tr: &Tr, free: Option<u64>) {
         ui.colored_label(ui.visuals().warn_fg_color, symbol::with(symbol::WARNING, text));
     } else {
         ui.weak(text);
+    }
+}
+
+/// What a drive without a journal (exFAT, FAT) or with FAT32's 4 GiB limit
+/// means for the backups, as a warning; nothing for NTFS and ReFS.
+fn file_system_note(ui: &mut Ui, tr: &Tr, file_system: Option<&str>) {
+    if let Some(key) = file_system_warning(file_system) {
+        ui.colored_label(ui.visuals().warn_fg_color, symbol::with(symbol::WARNING, tr.t(key)));
+    }
+}
+
+/// The text of [`file_system_note`].
+fn file_system_warning(file_system: Option<&str>) -> Option<&'static str> {
+    match file_system? {
+        fs if fs.starts_with("FAT") => Some("dest-fs-fat"),
+        "exFAT" => Some("dest-fs-exfat"),
+        _ => None,
     }
 }
 
@@ -1430,5 +1450,15 @@ mod tests {
         d.clear_password();
         assert!(d.password.is_empty() && d.password_again.is_empty() && d.current_password.is_empty());
         assert!(d.recovery_password.is_empty() && !d.recovery_open && !d.password_ack);
+    }
+
+    #[test]
+    fn drives_without_a_journal_or_with_the_fat32_limit_are_pointed_out() {
+        assert_eq!(file_system_warning(Some("FAT32")), Some("dest-fs-fat"));
+        assert_eq!(file_system_warning(Some("FAT")), Some("dest-fs-fat"));
+        assert_eq!(file_system_warning(Some("exFAT")), Some("dest-fs-exfat"));
+        for quiet in [Some("NTFS"), Some("ReFS"), None] {
+            assert_eq!(file_system_warning(quiet), None);
+        }
     }
 }

@@ -47,8 +47,8 @@ mod verify;
 pub use backup::{Tuning, backup, backup_stopping_after, backup_tuned};
 pub use browse::{
     Catalog, CatalogArchive, CatalogEntry, ExistingFormat, FileVersion, SearchHit, archive_manifest, catalog,
-    change_password, check_password, destination_reachable, existing_format, file_versions, free_space,
-    recovery_key, search,
+    change_password, check_password, destination_file_system, destination_reachable, existing_format,
+    file_versions, free_space, recovery_key, search,
 };
 pub use chunker::ChunkParams;
 pub use crypto::Password;

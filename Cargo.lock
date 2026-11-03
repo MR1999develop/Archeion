@@ -302,6 +302,7 @@ dependencies = [
  "archeion_core",
  "archeion_engine",
  "archeion_scheduler",
+ "archeion_win",
  "clap",
  "directories",
  "eframe",
@@ -342,6 +343,7 @@ name = "archeion_engine"
 version = "0.1.0"
 dependencies = [
  "archeion_core",
+ "archeion_win",
  "argon2",
  "blake3",
  "fs4",
@@ -365,6 +367,15 @@ dependencies = [
  "archeion_core",
  "tempfile",
  "thiserror 2.0.21",
+]
+
+[[package]]
+name = "archeion_win"
+version = "0.1.0"
+dependencies = [
+ "tempfile",
+ "tracing",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

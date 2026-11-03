@@ -44,6 +44,10 @@ pub struct Tuning {
     pub chunks: Option<ChunkParams>,
     /// Stop, as if cancelled, once this many files have been copied.
     pub stop_after_files: Option<u64>,
+    /// The destination's file system as given, instead of asking Windows.
+    pub file_system: Option<&'static str>,
+    /// The size FAT refuses, instead of 4 GiB.
+    pub fat_max_file: Option<u64>,
 }
 
 /// Backs up `profile` into a new archive. The first backup is complete;
@@ -251,6 +255,12 @@ fn run(
     }
     let mut drop_entries = HashSet::new();
     let mut copied_now = 0u64;
+    // FAT and FAT32 hold no file of 4 GiB or more: such a file is skipped
+    // with the reason (its last version kept), not left to fail half
+    // written.
+    let file_system =
+        tuning.file_system.map(str::to_owned).or_else(|| archeion_win::file_system(repo.root()));
+    let fat = file_system.is_some_and(|f| f.starts_with("FAT"));
     for p in pending {
         if tuning.stop_after_files.is_some_and(|n| copied_now >= n) {
             return Err(EngineError::Io {
@@ -261,7 +271,15 @@ fn run(
         let estimate = file_estimate(&copier, &p, &scan.entries);
         let Some(entry) = scan.entries.get_mut(p.idx) else { continue };
         progress.start_file(p.path.display().to_string());
-        match copier.copy_file(&p.job, &p.path, entry, &mut |n| progress.add(n)) {
+        let copied = if fat
+            && entry.size >= tuning.fat_max_file.unwrap_or(FAT_MAX_FILE)
+            && p.job != Job::Chunks
+        {
+            Err(EngineError::Io { context: "copying".into(), source: std::io::Error::other(FAT_TOO_LARGE) })
+        } else {
+            copier.copy_file(&p.job, &p.path, entry, &mut |n| progress.add(n))
+        };
+        match copied {
             Ok(stored) => {
                 // A file that changed while being read is copied again next time.
                 if stored.journal && stored.size == entry.size {
@@ -882,6 +900,11 @@ fn unique_name(existing: &[ArchiveName], kind: ArchiveKind) -> ArchiveName {
     }
     ArchiveName { time, kind }
 }
+
+/// Bytes from which a file does not fit on FAT32.
+const FAT_MAX_FILE: u64 = 4 * 1024 * 1024 * 1024;
+const FAT_TOO_LARGE: &str =
+    "the destination drive uses FAT32, which cannot hold files of 4 GiB or more: format it as exFAT or NTFS";
 
 fn reason(e: &EngineError) -> String {
     match e {

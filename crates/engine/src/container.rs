@@ -353,6 +353,9 @@ fn write_single_zip(
     if let Some(t) = mtime_ns {
         let _ = file.set_modified(system_time(t));
     }
+    // On the disk before the archive is committed: a committed file of
+    // zeros would be taken as unchanged by the next backups.
+    file.sync_all().map_err(EngineError::io(ctx.to_owned()))?;
     Ok((n, hash))
 }
 
@@ -369,6 +372,8 @@ fn write_plain(
     let (n, hash, buffered) = hashing.finish();
     let file = buffered.into_inner().map_err(|e| EngineError::io(ctx.to_owned())(e.into_error()))?;
     let _ = file.set_modified(system_time(mtime_ns));
+    // As in `write_single_zip`.
+    file.sync_all().map_err(EngineError::io(ctx.to_owned()))?;
     Ok((n, hash))
 }
 
@@ -415,7 +420,14 @@ impl<W: Write> Write for HashingWriter<W> {
 pub(crate) fn link_or_copy(src: &Path, dest: &Path, ctx: &str) -> Result<()> {
     create_parent(dest, ctx)?;
     if fs::hard_link(src, dest).is_err() {
+        // No links (exFAT, FAT32, some shares): a copy, on the disk before
+        // the archive holding it is committed and the original removed.
         fs::copy(src, dest).map_err(EngineError::io(ctx.to_owned()))?;
+        File::options()
+            .write(true)
+            .open(dest)
+            .and_then(|f| f.sync_all())
+            .map_err(EngineError::io(ctx.to_owned()))?;
     }
     Ok(())
 }
