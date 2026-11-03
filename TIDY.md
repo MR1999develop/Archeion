@@ -19,6 +19,13 @@ trigger it. Remove an item when it is done or no longer applies.
   `feature/automatic-backup`, `tools\github_publish.bat` (pushes `main`
   and the feature branch), `tools\git_push.bat -PullRequest`; read the
   four `.log` files.
+- **Commands typed in a terminal print nothing** (3 November): the
+  executable is a windows-subsystem program, so `archeion extract` run by
+  hand in `cmd` or PowerShell does not show its output (it does through a
+  pipe or redirection, as the window, Task Scheduler and the tests use
+  it). Fix with `AttachConsole(ATTACH_PARENT_PROCESS)` at start, which
+  needs a Windows API call (no `unsafe` in our crates: a small crate or a
+  separate console helper).
 - **Screenshots not compared automatically** (2 November): the views are
   rendered with `cargo test -p archeion --bin archeion screens -- --ignored`
   into `target/ui-screens` and looked at, with no stored references: add

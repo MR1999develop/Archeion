@@ -212,6 +212,8 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Fixed
 
+- Development builds no longer open a console window beside Archeion
+  (release builds already did not).
 - A profile re-created with the destination of a deleted profile failed
   with "the destination is used by another profile": the settings now say
   so and offer "Use these backups for this profile".

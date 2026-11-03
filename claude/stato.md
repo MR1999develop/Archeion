@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con l'importazione e l'esportazione dei profili (ramo
-`feature/profile-files` unito; `tools\check.bat` verde: fmt, clippy, 320
+`main` senza finestra della console anche in sviluppo (ramo
+`feature/no-console` unito; `tools\check.bat` verde: fmt, clippy, 320
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -88,3 +88,7 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   un formato successivo è rifiutato. L'importazione mantiene l'id (su un
   altro PC il profilo ritrova i suoi backup) salvo che esista già: allora
   id nuovo e nome con "(2)".
+- L'eseguibile è sempre un programma a finestre (`windows_subsystem`,
+  tranne i test unitari): niente console accanto alla finestra; i comandi
+  scrivono su stdout letto tramite pipe. Comandi a mano nel terminale
+  senza output: in `TIDY.md`.
