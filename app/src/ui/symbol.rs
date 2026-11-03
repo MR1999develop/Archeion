@@ -34,6 +34,6 @@ pub fn with(icon: &str, text: impl std::fmt::Display) -> String {
 
 /// The icons texts name (`{ $deleted-icon }` in "Files marked … deleted"),
 /// as arguments of [`crate::i18n::Tr::t_args`].
-pub fn args() -> [(&'static str, fluent_templates::fluent_bundle::FluentValue<'static>); 2] {
-    [("deleted-icon", DELETED.into()), ("remove-icon", REMOVE.into())]
+pub fn args() -> [(&'static str, fluent_templates::fluent_bundle::FluentValue<'static>); 1] {
+    [("deleted-icon", DELETED.into())]
 }

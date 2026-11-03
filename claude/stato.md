@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con il ripristino a destinazione unica (ramo
-`feature/restore-simple` unito; `tools\check.bat` verde: fmt, clippy, 322
+`main` con il ripristino senza schede (ramo `feature/restore-no-cards`
+unito; `tools\check.bat` verde: fmt, clippy, 321
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -102,3 +102,7 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   destinazione di ogni versione o cartella e l'icona ✎. Restano le
   versioni di un file e la data di una cartella. "Togli selezione" è un
   pulsante accanto a Ripristina.
+- Ripristino senza schede (richiesta dell'utente, 3 novembre): un file
+  torna nella versione più recente, una cartella com'era nel backup più
+  recente che la contiene. Una versione o una data più vecchia non si
+  sceglie più dalla finestra.

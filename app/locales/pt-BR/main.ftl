@@ -149,9 +149,6 @@ results = { $count ->
    *[other] { $count } arquivos encontrados
 }
 close = Fechar
-versions-hint = Cada versão é um conteúdo diferente do arquivo, da mais recente para a mais antiga.
-version-modified = Modificado em { $date }
-version-detail = Salvo pelo backup de { $backup } · { $size }
 restore-to = Restaurar em:
 target-beside = Ao lado do original, com a data
 target-beside-hint = relatorio.docx é restaurado como "relatorio (2026-11-02 21.30).docx": o arquivo atual não é alterado.
@@ -175,41 +172,21 @@ restore-tree-count = { $files ->
     } nos backups · excluídos na origem: { $deleted }
 restore-tree-hint = Marque arquivos ou pastas para restaurá-los; a pesquisa encontra um arquivo pelo nome. Arquivos marcados com { $deleted-icon } excluído não estão mais na origem e ainda podem ser restaurados.
 deleted-label = excluído
-deleted-since = Não está no backup mais recente: excluído na origem.
 tree-deleted-file = Não está no backup mais recente: excluído na origem. Marque-o para restaurar uma de suas versões.
 tree-deleted-folder = Não está no backup mais recente: excluída na origem. Marque-a para restaurá-la como estava em uma data.
-remove-from-selection = Remover da seleção
 tick-in-folder = Restaurado com a pasta marcada { $folder }. Desmarque para deixá-lo de fora.
 tick-not-in-folder-date = Não está no backup com que volta a pasta marcada { $folder }: não é restaurado. Desmarque essa pasta para escolhê-lo sozinho.
 tick-partial = Há algo marcado dentro, ou deixado de fora da pasta marcada. Clique para marcar a pasta inteira.
 tick-full = Tudo o que ela contém está marcado um a um. Clique para desmarcar tudo.
 tick-left-out = Deixado de fora da pasta marcada { $folder }: não é restaurado. Marque para restaurá-lo com a pasta.
-folder-left-out = { $count ->
-    [one] { $count } item desmarcado dentro: não é restaurado.
-   *[other] { $count } itens desmarcados dentro: não são restaurados.
-}
-card-show-options = Clique para ver e mudar as versões, a data e o destino.
-card-summary-file = { $versions ->
-    [one] 1 versão → { $dest }
-   *[other] { $versions } versões → { $dest }
-}
-card-summary-folder = Como estava em { $date } → { $dest }
-selection-empty = Ainda não há nada para restaurar. Marque arquivos ou pastas na árvore: cada um aparece aqui com suas versões ou sua data, e com o destino.
-folder-as-of = Como estava em:
-folder-as-of-hint = A pasta volta inteira, com tudo o que continha naquela data.
-folder-size = { $size } naquela data
-dest-overwrite = Substituir o original
-dest-folder-missing = outra pasta, ainda não escolhida
+selection-empty = Ainda não há nada para restaurar. Marque arquivos ou pastas na árvore.
 restore-to-hint = Para onde vai tudo o que está marcado.
-restore-conflict = Outra versão substitui o mesmo original: deixe "Substituir o original" em apenas uma versão.
-restore-conflict-hint = Duas versões substituiriam o mesmo arquivo original: altere o destino de uma delas.
+restore-conflict = Dois itens marcados substituiriam o mesmo arquivo original: desmarque um deles.
+restore-conflict-hint = Dois itens marcados substituiriam o mesmo arquivo original: desmarque um deles.
 restore-wait-versions = Lendo as versões dos arquivos marcados…
 restore-summary = { $files ->
         [one] { $files } arquivo
        *[other] { $files } arquivos
-    }, { $versions ->
-        [one] { $versions } versão
-       *[other] { $versions } versões
     }, { $folders ->
         [one] { $folders } pasta
        *[other] { $folders } pastas
@@ -529,9 +506,9 @@ doc-large-body = Um arquivo grande que muda pouco (uma caixa de correio, o disco
 doc-large-complete = Os backups completos continuam guardando cada arquivo inteiro, como zip, cópia simples ou zip criptografado, então podem ser restaurados só com o 7-Zip; apenas os backups incrementais seguintes contêm partes. A restauração junta as partes de novo e confere cada uma; a verificação de integridade lê todas as partes.
 doc-large-upgrade = Os backups feitos por versões anteriores ficam como estão e continuam legíveis. As partes começam com o próximo backup completo: num destino assim, o próximo backup automático é completo.
 doc-restore-title = Restauração de arquivos
-doc-restore-body = Abra a guia Backups do perfil (ou Backup > Restaurar arquivos…): "Restaurar arquivos" mostra uma única árvore com todos os arquivos e pastas que os backups já salvaram; arquivos que não estão mais na origem aparecem marcados com { $deleted-icon } excluído e ainda podem ser restaurados. Marque arquivos ou pastas na árvore ou nos resultados da pesquisa (a caixa de pesquisa encontra um arquivo pelo nome). Cada item marcado aparece à direita; { $remove-icon } o remove.
-doc-restore-versions = Um arquivo marcado lista suas versões, da mais recente para a mais antiga, cada uma com um conteúdo diferente: a mais recente vem marcada e você pode marcar outras. Uma pasta marcada volta inteira, como estava na data escolhida em "Como estava em" (a mais recente, a menos que você a altere).
-doc-restore-where = No alto do painel direito escolha para onde vai tudo: ao lado do original, com a data no nome (relatorio.docx volta como "relatorio (2026-11-02 21.30).docx" e o arquivo atual não é alterado), o local original ou outra pasta; os arquivos existentes só são substituídos se você marcar "Substituir arquivos que já existem". Várias versões de um arquivo enviadas para a mesma pasta recebem cada uma sua data no nome; apenas uma versão de um arquivo pode substituir o original. Restaurar traz tudo de volta em uma única operação. "Limpar seleção", ao lado, desmarca tudo.
+doc-restore-body = Abra a guia Backups do perfil (ou Backup > Restaurar arquivos…): "Restaurar arquivos" mostra uma única árvore com todos os arquivos e pastas que os backups já salvaram; arquivos que não estão mais na origem aparecem marcados com { $deleted-icon } excluído e ainda podem ser restaurados. Marque arquivos ou pastas na árvore ou nos resultados da pesquisa (a caixa de pesquisa encontra um arquivo pelo nome).
+doc-restore-versions = Um arquivo marcado volta na versão mais recente; uma pasta marcada volta inteira, como estava no backup mais recente que a contém.
+doc-restore-where = No alto do painel direito escolha para onde vai tudo: ao lado do original, com a data no nome (relatorio.docx volta como "relatorio (2026-11-02 21.30).docx" e o arquivo atual não é alterado), o local original ou outra pasta; os arquivos existentes só são substituídos se você marcar "Substituir arquivos que já existem". Restaurar traz tudo de volta em uma única operação. "Limpar seleção", ao lado, desmarca tudo.
 doc-verify-title = Verificação de integridade e teste de restauração
 doc-verify-body = A verificação completa relê cada arquivo guardado de cada backup e o compara com sua impressão digital; o teste de restauração relê aleatoriamente alguns arquivos do backup mais recente, como faria uma restauração, sem gravá-los em lugar nenhum. Inicie-os na seção Verificações das configurações do perfil (ou em Backup > Verificar backups agora), ou faça com que sejam executados a cada poucos dias após um backup agendado. Se forem encontrados problemas, faça um backup completo e verifique o disco de destino.
 doc-activity-title = Guia Atividade

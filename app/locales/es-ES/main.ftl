@@ -149,9 +149,6 @@ results = { $count ->
    *[other] { $count } archivos encontrados
 }
 close = Cerrar
-versions-hint = Cada versión es un contenido distinto del archivo, de la más reciente a la más antigua.
-version-modified = Modificado el { $date }
-version-detail = Guardado por la copia del { $backup } · { $size }
 restore-to = Restaurar en:
 target-beside = Junto al original, con la fecha
 target-beside-hint = informe.docx se restaura como "informe (2026-11-02 21.30).docx": el archivo actual no se toca.
@@ -175,41 +172,21 @@ restore-tree-count = { $files ->
     } en las copias · eliminados en el origen: { $deleted }
 restore-tree-hint = Marca archivos o carpetas para restaurarlos; la búsqueda encuentra un archivo por nombre. Los archivos marcados con { $deleted-icon } eliminado ya no están en el origen y aún se pueden restaurar.
 deleted-label = eliminado
-deleted-since = No está en la copia más reciente: eliminado en el origen.
 tree-deleted-file = No está en la copia más reciente: eliminado en el origen. Márcalo para restaurar una de sus versiones.
 tree-deleted-folder = No está en la copia más reciente: eliminada en el origen. Márcala para restaurarla tal como estaba en una fecha.
-remove-from-selection = Quitar de la selección
 tick-in-folder = Se restaura con la carpeta marcada { $folder }. Desmárcalo para dejarlo fuera.
 tick-not-in-folder-date = No está en la copia con la que vuelve la carpeta marcada { $folder }: no se restaura. Desmarca esa carpeta para elegirlo por separado.
 tick-partial = Hay algo marcado dentro, o excluido de la carpeta marcada. Haz clic para marcar toda la carpeta.
 tick-full = Todo lo que contiene está marcado uno por uno. Haz clic para desmarcarlo todo.
 tick-left-out = Excluido de la carpeta marcada { $folder }: no se restaura. Márcalo para restaurarlo con la carpeta.
-folder-left-out = { $count ->
-    [one] { $count } elemento desmarcado dentro: no se restaura.
-   *[other] { $count } elementos desmarcados dentro: no se restauran.
-}
-card-show-options = Haz clic para ver y cambiar sus versiones, fecha y destino.
-card-summary-file = { $versions ->
-    [one] 1 versión → { $dest }
-   *[other] { $versions } versiones → { $dest }
-}
-card-summary-folder = Como estaba el { $date } → { $dest }
-selection-empty = Aún no hay nada que restaurar. Marca archivos o carpetas en el árbol: cada uno aparece aquí con sus versiones o su fecha, y con su destino.
-folder-as-of = Tal como estaba el:
-folder-as-of-hint = La carpeta vuelve entera, con todo lo que contenía en esa fecha.
-folder-size = { $size } en esa fecha
-dest-overwrite = Sobrescribir el original
-dest-folder-missing = otra carpeta, aún sin elegir
+selection-empty = Todavía no hay nada que restaurar. Marca archivos o carpetas en el árbol.
 restore-to-hint = Adónde va todo lo marcado.
-restore-conflict = Otra versión sobrescribe el mismo original: deja "Sobrescribir el original" en una sola versión.
-restore-conflict-hint = Dos versiones sobrescribirían el mismo archivo original: cambia el destino de una de ellas.
+restore-conflict = Dos elementos marcados reemplazarían el mismo archivo original: desmarca uno de ellos.
+restore-conflict-hint = Dos elementos marcados reemplazarían el mismo archivo original: desmarca uno de ellos.
 restore-wait-versions = Leyendo las versiones de los archivos marcados…
 restore-summary = { $files ->
         [one] 1 archivo
        *[other] { $files } archivos
-    }, { $versions ->
-        [one] 1 versión
-       *[other] { $versions } versiones
     }, { $folders ->
         [one] 1 carpeta
        *[other] { $folders } carpetas
@@ -529,9 +506,9 @@ doc-large-body = Un archivo grande que cambia poco (un buzón de correo, el disc
 doc-large-complete = Las copias completas siguen conservando cada archivo entero, como zip, copia simple o zip cifrado, así que se pueden restaurar solo con 7-Zip; solo las copias incrementales posteriores contienen partes. Al restaurar se vuelven a unir las partes y se comprueba cada una; la comprobación de integridad lee todas las partes.
 doc-large-upgrade = Las copias hechas por versiones anteriores se quedan como están y se siguen pudiendo leer. Las partes empiezan con la siguiente copia completa: en un destino así, la próxima copia automática es completa.
 doc-restore-title = Restaurar archivos
-doc-restore-body = Abre la pestaña Copias del perfil (o Copia de seguridad > Restaurar archivos…): "Restaurar archivos" muestra un único árbol con todos los archivos y carpetas que las copias han guardado alguna vez; los archivos que ya no están en el origen aparecen marcados con { $deleted-icon } eliminado y aún se pueden restaurar. Marca archivos o carpetas en el árbol o en los resultados de búsqueda (el cuadro de búsqueda encuentra un archivo por nombre). Cada elemento marcado aparece a la derecha; { $remove-icon } lo quita.
-doc-restore-versions = Un archivo marcado muestra sus versiones, de la más reciente a la más antigua, cada una con un contenido distinto: la más reciente está marcada y puedes marcar más. Una carpeta marcada vuelve entera, tal como estaba en la fecha elegida en "Tal como estaba el" (la más reciente, salvo que la cambies).
-doc-restore-where = Arriba del panel derecho elige adónde va todo: junto al original con la fecha en el nombre (informe.docx vuelve como "informe (2026-11-02 21.30).docx" y el archivo actual no se toca), la ubicación original u otra carpeta; los archivos existentes solo se reemplazan si marcas "Reemplazar los archivos que ya existen". Varias versiones de un archivo enviadas a la misma carpeta llevan cada una su fecha en el nombre; solo una versión de un archivo puede sobrescribir el original. Restaurar lo recupera todo en una sola operación. "Borrar selección", a su lado, lo desmarca todo.
+doc-restore-body = Abre la pestaña Copias del perfil (o Copia de seguridad > Restaurar archivos…): "Restaurar archivos" muestra un único árbol con todos los archivos y carpetas que las copias han guardado alguna vez; los archivos que ya no están en el origen aparecen marcados con { $deleted-icon } eliminado y aún se pueden restaurar. Marca archivos o carpetas en el árbol o en los resultados de búsqueda (el cuadro de búsqueda encuentra un archivo por nombre).
+doc-restore-versions = Un archivo marcado vuelve en su versión más reciente; una carpeta marcada vuelve entera, tal como estaba en la copia más reciente que la contiene.
+doc-restore-where = Arriba del panel derecho elige adónde va todo: junto al original con la fecha en el nombre (informe.docx vuelve como "informe (2026-11-02 21.30).docx" y el archivo actual no se toca), la ubicación original u otra carpeta; los archivos existentes solo se reemplazan si marcas "Reemplazar los archivos que ya existen". Restaurar lo recupera todo en una sola operación. "Borrar selección", a su lado, lo desmarca todo.
 doc-verify-title = Comprobación de integridad y prueba de restauración
 doc-verify-body = La comprobación completa vuelve a leer cada archivo guardado de cada copia y lo compara con su huella; la prueba de restauración vuelve a leer al azar algunos archivos de la copia más reciente, como haría una restauración, sin escribirlos en ningún sitio. Inícialas desde la sección Comprobaciones de la configuración del perfil (o Copia de seguridad > Comprobar copias ahora), o haz que se ejecuten cada pocos días después de una copia programada. Si se encuentran problemas, haz una copia completa y revisa el disco de destino.
 doc-activity-title = Pestaña Actividad
