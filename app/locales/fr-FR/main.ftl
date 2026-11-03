@@ -144,6 +144,11 @@ backup-as-changes = { $count ->
     [one] { $count } fichier enregistré en tant que modifications seulement
    *[other] { $count } fichiers enregistrés en tant que modifications seulement
 }
+backup-efs-clear = { $count ->
+    [one] 1 fichier chiffré par Windows (EFS) a été enregistré sans ce chiffrement
+   *[other] { $count } fichiers chiffrés par Windows (EFS) ont été enregistrés sans ce chiffrement
+}
+backup-efs-clear-hint = Pour les garder protégés, activez le chiffrement sur une nouvelle destination de ce profil.
 run-cancelled = Annulé. Rien n'a été modifié dans les sauvegardes ; une sauvegarde arrêtée reprendra là où elle s'est arrêtée la prochaine fois.
 
 # Errors
@@ -460,6 +465,7 @@ alert-stale-title = Archeion : « { $name } » non sauvegardé
 alert-stale-body = Aucune sauvegarde depuis { $days } jours (dernière le { $when }). Vérifiez que la destination est connectée, ou lancez une sauvegarde depuis Archeion.
 closing-after-run = Une opération est en cours : Archeion se fermera tout seul à la fin.
 closing-cancel = Ne pas fermer
+shutdown-reason = Une opération de sauvegarde est en cours : si Windows s’arrête maintenant, elle s’interrompt et reprendra la prochaine fois.
 
 # Notification area and Preferences window
 menu-preferences = Préférences…

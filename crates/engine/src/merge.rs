@@ -343,6 +343,7 @@ impl GroupPlan {
         let mut manifest = self.manifest.clone();
         let mut readers: Vec<Option<Reader>> = self.members.iter().map(|_| None).collect();
         for e in manifest.entries.iter_mut().filter(|e| e.stored) {
+            progress.check_stop()?;
             let Some(&j) = self.holder.get(&e.key) else { continue };
             progress.start_file(keys::path_for(&e.key).display().to_string());
             if e.chunks_only() {

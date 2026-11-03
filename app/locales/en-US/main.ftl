@@ -144,6 +144,11 @@ backup-as-changes = { $count ->
     [one] 1 file saved as changes only
    *[other] { $count } files saved as changes only
 }
+backup-efs-clear = { $count ->
+    [one] 1 file encrypted by Windows (EFS) was saved without that encryption
+   *[other] { $count } files encrypted by Windows (EFS) were saved without that encryption
+}
+backup-efs-clear-hint = Turn on encryption for a new destination of this profile to keep them protected.
 run-cancelled = Cancelled. Nothing was changed in the backups; a stopped backup goes on from where it stopped next time.
 
 # Errors
@@ -460,6 +465,7 @@ alert-stale-title = Archeion: "{ $name }" not backed up
 alert-stale-body = No backup for { $days } days (last on { $when }). Check that the destination is connected, or start a backup from Archeion.
 closing-after-run = An operation is running: Archeion will close by itself when it ends.
 closing-cancel = Do not close
+shutdown-reason = A backup operation is running: if Windows shuts down now, it stops and goes on next time.
 
 # Notification area and Preferences window
 menu-preferences = Preferences…

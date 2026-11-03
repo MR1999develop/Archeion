@@ -222,6 +222,10 @@ pub struct BackupReport {
     /// already in the destination were written.
     #[serde(default)]
     pub files_as_changes: u64,
+    /// Files encrypted by Windows (EFS) saved without that encryption, to a
+    /// destination that is not encrypted.
+    #[serde(default)]
+    pub files_efs_in_clear: u64,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

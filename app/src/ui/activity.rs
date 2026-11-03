@@ -363,7 +363,8 @@ pub fn no_space_text(tr: &Tr, op: Op, needed: u64, available: u64) -> String {
 }
 
 /// `text`, plus how many files a resumed backup kept from the interrupted
-/// run and how many were saved as changes only.
+/// run, how many were saved as changes only, and how many lost the
+/// encryption Windows gave them.
 pub fn with_resumed(tr: &Tr, text: String, r: &BackupReport) -> String {
     let mut text = text;
     if r.resumed_files > 0 {
@@ -373,6 +374,10 @@ pub fn with_resumed(tr: &Tr, text: String, r: &BackupReport) -> String {
     if r.files_as_changes > 0 {
         let extra = tr.t_args("backup-as-changes", &[("count", arg(r.files_as_changes))]);
         text = format!("{text} · {extra}");
+    }
+    if r.files_efs_in_clear > 0 {
+        let extra = tr.t_args("backup-efs-clear", &[("count", arg(r.files_efs_in_clear))]);
+        text = format!("{text} · {extra}. {}", tr.t("backup-efs-clear-hint"));
     }
     text
 }
@@ -417,5 +422,17 @@ mod tests {
         assert!(s.starts_with(r"C:\aa") && s.ends_with("report.docx") && s.contains('…'));
         assert_eq!(shorten(r"C:\short.txt"), r"C:\short.txt");
         assert!(shorten_to(&long, RECENT_PATH_CHARS).chars().count() <= RECENT_PATH_CHARS);
+    }
+
+    #[test]
+    fn the_summary_says_when_files_lost_their_windows_encryption() {
+        let tr = Tr::new(archeion_core::settings::Language::English);
+        let r = BackupReport { files_efs_in_clear: 2, ..BackupReport::default() };
+        let text = with_resumed(&tr, "Done".into(), &r);
+        assert!(
+            text.contains("2 files encrypted by Windows (EFS)") && text.contains("Turn on encryption"),
+            "{text}"
+        );
+        assert_eq!(with_resumed(&tr, "Done".into(), &BackupReport::default()), "Done");
     }
 }

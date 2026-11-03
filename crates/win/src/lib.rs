@@ -24,6 +24,15 @@ pub fn file_system(path: &Path) -> Option<String> {
     imp::file_system(path)
 }
 
+/// A program that comes with Windows, by its path below the Windows folder
+/// (`System32\schtasks.exe`, `explorer.exe`): started by full path, never
+/// looked up by name in the program's folder or the `PATH`, where a file of
+/// the same name could be waiting.
+#[must_use]
+pub fn system_program(relative: &str) -> std::path::PathBuf {
+    imp::windows_folder().join(relative)
+}
+
 /// Libraries loaded by name after this call come only from the Windows
 /// system folder or the program's own, never from the current folder or
 /// the `PATH`. Called first thing in `main`.
@@ -105,6 +114,7 @@ mod imp {
                 LOAD_LIBRARY_SEARCH_APPLICATION_DIR, LOAD_LIBRARY_SEARCH_SYSTEM32, SetDefaultDllDirectories,
             },
             Shutdown::{ShutdownBlockReasonCreate, ShutdownBlockReasonDestroy},
+            SystemInformation::GetSystemWindowsDirectoryW,
             Threading::{
                 GetCurrentProcess, PROCESS_MODE_BACKGROUND_BEGIN, PROCESS_POWER_THROTTLING_CURRENT_VERSION,
                 PROCESS_POWER_THROTTLING_EXECUTION_SPEED, PROCESS_POWER_THROTTLING_STATE,
@@ -179,6 +189,16 @@ mod imp {
         }
         let len = name.iter().position(|&c| c == 0).unwrap_or(name.len());
         Some(String::from_utf16_lossy(name.get(..len)?))
+    }
+
+    pub(super) fn windows_folder() -> std::path::PathBuf {
+        let mut buffer = [0u16; 512];
+        // SAFETY: `buffer` is writable for the length passed.
+        let len = unsafe { GetSystemWindowsDirectoryW(buffer.as_mut_ptr(), len32(&buffer)) };
+        match buffer.get(..len as usize) {
+            Some(text) if len > 0 => std::path::PathBuf::from(String::from_utf16_lossy(text)),
+            _ => std::path::PathBuf::from(r"C:\Windows"),
+        }
     }
 
     pub(super) fn restrict_library_search() {
@@ -312,6 +332,10 @@ mod imp {
         None
     }
 
+    pub(super) fn windows_folder() -> std::path::PathBuf {
+        std::path::PathBuf::from("/")
+    }
+
     pub(super) fn restrict_library_search() {}
 
     pub(super) fn allow_foreground(_pid: u32) {}
@@ -371,6 +395,16 @@ mod tests {
         std::fs::write(deep.join("f.partial"), "x").unwrap();
         rename_durably(&deep.join("f.partial"), &deep.join("f")).unwrap();
         assert!(deep.join("f").exists());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn programs_of_windows_are_found_by_full_path() {
+        for p in [r"System32\schtasks.exe", r"System32\WindowsPowerShell\v1.0\powershell.exe", "explorer.exe"]
+        {
+            let path = system_program(p);
+            assert!(path.is_absolute() && path.is_file(), "{}", path.display());
+        }
     }
 
     #[cfg(windows)]

@@ -119,6 +119,7 @@ pub fn verify(
     let chunk_reader = ChunkReader { index: &index, dirs: &dirs, form: &form, keys: repo.keys() };
     let mut readers: Vec<Option<Reader>> = archives.iter().map(|_| None).collect();
     for check in checks {
+        progress.check_stop()?;
         match check {
             Check::ChunkFile { archive, id } => {
                 let (Some(name), Some(dir)) = (archives.get(archive), dirs.get(archive)) else { continue };

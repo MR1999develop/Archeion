@@ -144,6 +144,11 @@ backup-as-changes = { $count ->
     [one] { $count } archivo guardado solo como cambios
    *[other] { $count } archivos guardados solo como cambios
 }
+backup-efs-clear = { $count ->
+    [one] 1 archivo cifrado por Windows (EFS) se guardó sin ese cifrado
+   *[other] { $count } archivos cifrados por Windows (EFS) se guardaron sin ese cifrado
+}
+backup-efs-clear-hint = Para mantenerlos protegidos, activa el cifrado en un destino nuevo de este perfil.
 run-cancelled = Cancelado. No se ha cambiado nada en las copias; una copia detenida continúa la próxima vez desde donde se quedó.
 
 # Errors
@@ -460,6 +465,7 @@ alert-stale-title = Archeion: no hay copia de "{ $name }"
 alert-stale-body = Sin copias desde hace { $days } días (la última, el { $when }). Comprueba que el destino esté conectado o inicia una copia desde Archeion.
 closing-after-run = Hay una operación en curso: Archeion se cerrará solo cuando termine.
 closing-cancel = No cerrar
+shutdown-reason = Hay una operación de copia en curso: si Windows se apaga ahora, se detiene y continúa la próxima vez.
 
 # Notification area and Preferences window
 menu-preferences = Preferencias…

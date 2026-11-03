@@ -2,22 +2,30 @@
 //! `archeion run|merge|restore <id>` process whose JSON lines are read on a
 //! background thread and applied to an [`Activity`].
 //!
-//! Cancel kills the child; the engine works in a temporary folder that the
-//! next run discards, so the archives are never left half-written.
+//! Cancel closes the child's standard input: it stops at the next file, as
+//! after an interruption (an unfinished backup resumes next time). A child
+//! still running [`STOP_GRACE`] later is killed. The engine works in a
+//! temporary folder, so the archives are never left half-written either
+//! way. The child is in a [`ChildGroup`]: it ends with the window, even
+//! when the window crashes.
 
 use crate::{
     activity::{Activity, Op, Outcome},
     history,
 };
 use archeion_core::{ProfileId, RunEvent};
+use archeion_win::ChildGroup;
 use std::{
     ffi::OsString,
     io::{BufRead as _, BufReader},
     path::PathBuf,
-    process::{Child, Command, Stdio},
+    process::{Child, ChildStdin, Command, Stdio},
     sync::mpsc,
-    time::Instant,
+    time::{Duration, Instant},
 };
+
+/// How long a child asked to stop may take before it is killed.
+const STOP_GRACE: Duration = Duration::from_secs(15);
 
 enum Msg {
     /// Boxed: a progress event carries the recent files and is large.
@@ -36,7 +44,12 @@ pub struct Job {
     pub activity: Activity,
     /// The run's log file, written by the worker.
     log: PathBuf,
-    child: Child,
+    /// Taken by `drop`, which waits for it on a thread.
+    child: Option<Child>,
+    /// Closed to ask the child to stop.
+    stdin: Option<ChildStdin>,
+    /// Ends the child with the window.
+    group: Option<ChildGroup>,
     rx: mpsc::Receiver<Msg>,
 }
 
@@ -55,11 +68,19 @@ impl Job {
             .args(extra)
             .arg("--log")
             .arg(&log)
-            .stdin(Stdio::null())
+            .arg("--stop-on-eof")
+            .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null());
         hide_console(&mut cmd);
         let mut child = cmd.spawn()?;
+        let group = ChildGroup::new();
+        if let Some(g) = &group
+            && let Err(e) = g.add(&child)
+        {
+            tracing::warn!(error = %e, "tying the backup process to the window");
+        }
+        let stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("stdout is piped");
 
         let (tx, rx) = mpsc::channel();
@@ -83,7 +104,7 @@ impl Job {
 
         let mut activity = Activity::new(profile, op, Instant::now());
         activity.log_file = Some(log.clone());
-        Ok(Self { activity, log, child, rx })
+        Ok(Self { activity, log, child: Some(child), stdin, group, rx })
     }
 
     pub fn profile(&self) -> ProfileId {
@@ -102,7 +123,10 @@ impl Job {
             match msg {
                 Msg::Event(ev) => self.activity.apply(*ev, Instant::now()),
                 Msg::StreamClosed => {
-                    let status = self.child.wait();
+                    let status = match self.child.as_mut() {
+                        Some(c) => c.wait(),
+                        None => Err(std::io::Error::other("no process")),
+                    };
                     self.activity.set_outcome(Outcome::Failed(match status {
                         Ok(s) => format!("the backup process stopped unexpectedly ({s})"),
                         Err(e) => format!("the backup process stopped unexpectedly: {e}"),
@@ -115,10 +139,9 @@ impl Job {
         false
     }
 
+    /// Asks the child to stop at the next file; see [`STOP_GRACE`].
     pub fn cancel(&mut self) {
-        if let Err(e) = self.child.kill() {
-            tracing::warn!(error = %e, "could not stop the backup process");
-        }
+        self.stdin = None;
         if self.activity.outcome.is_none() {
             let line = history::Line::cancelled(history::now_ms());
             history::Writer::append_to(&self.log, &line);
@@ -129,12 +152,33 @@ impl Job {
 }
 
 impl Drop for Job {
-    /// Closing the window stops a run started from it.
+    /// Closing the window stops a run started from it. The child is given
+    /// [`STOP_GRACE`] to stop by itself, waited for on a thread of its own
+    /// so the window never blocks; its group goes with it, so it still ends
+    /// if the window ends first.
     fn drop(&mut self) {
-        if self.activity.outcome.is_none() {
-            let _ = self.child.kill();
+        self.stdin = None;
+        let Some(mut child) = self.child.take() else { return };
+        if !matches!(child.try_wait(), Ok(None)) {
+            return;
         }
-        let _ = self.child.wait();
+        let group = self.group.take();
+        let reaped = std::thread::Builder::new().name("job-stop".into()).spawn(move || {
+            let deadline = Instant::now() + STOP_GRACE;
+            while matches!(child.try_wait(), Ok(None)) {
+                if Instant::now() >= deadline {
+                    tracing::warn!("the backup process did not stop: ending it");
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            drop(group);
+        });
+        if let Err(e) = reaped {
+            tracing::warn!(error = %e, "waiting for the backup process");
+        }
     }
 }
 

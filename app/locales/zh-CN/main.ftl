@@ -138,6 +138,11 @@ backup-resumed = { $count ->
 backup-as-changes = { $count ->
    *[other] { $count } 个文件只保存了更改部分
 }
+backup-efs-clear = { $count ->
+    [one] 1 个由 Windows (EFS) 加密的文件未带该加密保存
+   *[other] { $count } 个由 Windows (EFS) 加密的文件未带该加密保存
+}
+backup-efs-clear-hint = 要保持它们受保护，请为此配置的新目标位置开启加密。
 run-cancelled = 已取消。备份未作任何更改；已停止的备份下次会从停止处继续。
 
 # Errors
@@ -444,6 +449,7 @@ alert-stale-title = Archeion：“{ $name }”尚未备份
 alert-stale-body = 已有 { $days } 天没有备份（上次于 { $when }）。请检查目标位置是否已连接，或在 Archeion 中开始备份。
 closing-after-run = 有操作正在进行：Archeion 将在其结束后自动关闭。
 closing-cancel = 不要关闭
+shutdown-reason = 正在进行备份操作：如果现在关闭 Windows，它会停止，并在下次继续。
 
 # Notification area and Preferences window
 menu-preferences = 首选项…

@@ -1524,3 +1524,63 @@ fn a_file_too_large_for_fat32_is_skipped_with_the_reason_and_its_last_version_ke
     let report = backup_tuned(&f.profile, None, BackupMode::Auto, &Recorder::default(), exfat).unwrap();
     assert!(report.skipped.is_empty(), "{:?}", report.skipped);
 }
+
+/// A caller that asks to stop from the start.
+struct Stopper;
+
+impl EventSink for Stopper {
+    fn emit(&self, _event: RunEvent) {}
+
+    fn stop_requested(&self) -> bool {
+        true
+    }
+}
+
+#[test]
+fn a_run_asked_to_stop_ends_cleanly_and_the_next_one_works() {
+    let f = fixture(Container::ZipPerFile);
+    sleep(Duration::from_millis(1100));
+    assert!(matches!(backup(&f.profile, None, BackupMode::Auto, &Stopper), Err(EngineError::Cancelled)));
+    assert!(list_archives(&f.profile, None).unwrap().is_empty(), "nothing committed");
+    run_backup(&f.profile);
+    let name = list_archives(&f.profile, None).unwrap().remove(0).name;
+
+    let req = RestoreRequest::single(
+        &name,
+        Vec::new(),
+        &RestoreTarget::Folder { path: f.restore_to.clone() },
+        true,
+    );
+    assert!(matches!(restore(&f.profile, None, &req, &Stopper), Err(EngineError::Cancelled)));
+    assert!(!restored(&f, "a.txt").exists());
+    assert!(matches!(verify(&f.profile, None, None, &Stopper), Err(EngineError::Cancelled)));
+    restore_all(&f, &name);
+    assert_eq!(fs::read_to_string(restored(&f, "a.txt")).unwrap(), "alpha");
+}
+
+#[cfg(windows)]
+#[test]
+fn a_junction_in_a_source_is_named_in_the_log_and_not_followed() {
+    let f = fixture(Container::Folder);
+    let outside = f._dir.path().join("elsewhere");
+    fs::create_dir_all(&outside).unwrap();
+    fs::write(outside.join("far.txt"), "far").unwrap();
+    let link = f.source.join("linked");
+    let made = std::process::Command::new(archeion_win::system_program(r"System32\cmd.exe"))
+        .args(["/c", "mklink", "/J"])
+        .arg(&link)
+        .arg(&outside)
+        .output()
+        .unwrap();
+    assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stderr));
+    sleep(Duration::from_millis(1100));
+    let report = backup(&f.profile, None, BackupMode::Auto, &Recorder::default()).unwrap();
+    assert!(
+        report.skipped.iter().any(|s| s.path.ends_with("linked") && s.reason.contains("junction")),
+        "{:?}",
+        report.skipped
+    );
+    let name = list_archives(&f.profile, None).unwrap().remove(0).name;
+    restore_all(&f, &name);
+    assert!(!restored(&f, "linked/far.txt").exists());
+}

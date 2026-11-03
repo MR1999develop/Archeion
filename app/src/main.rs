@@ -47,6 +47,10 @@ struct Cli {
     /// without it a new one is created in the data folder.
     #[arg(long, global = true, hide = true)]
     log: Option<std::path::PathBuf>,
+    /// Stop at the next file once standard input is closed: the window
+    /// asks a run it started to stop this way.
+    #[arg(long, global = true, hide = true)]
+    stop_on_eof: bool,
     /// Open the window hidden in the notification area.
     #[arg(long)]
     tray: bool,
@@ -125,7 +129,12 @@ enum Kind {
 }
 
 fn main() -> ExitCode {
+    // Before anything loads a library by name (the graphics drivers).
+    archeion_win::restrict_library_search();
     let cli = Cli::parse();
+    if cli.stop_on_eof {
+        worker::stop_when_stdin_closes();
+    }
     // Needs no settings and writes none: it works on any computer.
     let command = match cli.command {
         Some(Command::Extract(args)) => return extract::run(args),
