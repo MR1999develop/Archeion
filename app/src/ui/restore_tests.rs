@@ -329,6 +329,79 @@ fn the_version_chosen_is_restored_and_the_newest_without_a_choice() {
     assert_eq!(request(&mut h).items[0].archive, oldest, "ticked first, chosen after");
 }
 
+fn shown(h: &Harness<'_, State>) -> Option<String> {
+    h.state()
+        .0
+        .shown
+        .as_deref()
+        .map(|k| keys::path_for(k).file_name().unwrap().to_string_lossy().into_owned())
+}
+
+#[test]
+fn the_arrow_keys_move_between_the_files_shown() {
+    let f = backed_up();
+    let mut h = harness(&f);
+    expand(&mut h, &folder("sub"));
+    // Files as drawn: sub/b.txt, then a.txt (folders first).
+    name(&h, &file("a.txt")).unwrap().click();
+    settle(&mut h);
+    assert_eq!(shown(&h).as_deref(), Some("a.txt"));
+    h.key_press(egui::Key::ArrowUp);
+    settle(&mut h);
+    assert_eq!(shown(&h).as_deref(), Some("b.txt"), "up: the file above");
+    h.key_press(egui::Key::ArrowUp);
+    settle(&mut h);
+    assert_eq!(shown(&h).as_deref(), Some("b.txt"), "the first stays");
+    h.key_press(egui::Key::ArrowDown);
+    settle(&mut h);
+    assert_eq!(shown(&h).as_deref(), Some("a.txt"), "down: the file below");
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::False), "moving ticks nothing");
+}
+
+#[test]
+fn a_file_inside_a_ticked_folder_can_come_back_in_another_version() {
+    let f = backed_up();
+    std::thread::sleep(Duration::from_millis(1100));
+    fs::write(f.source.join("a.txt"), "alpha, changed").unwrap();
+    archeion_engine::backup(&f.profile, None, BackupMode::Auto, &Quiet).unwrap();
+    let a = keys::key_for(&f.source.join("a.txt")).unwrap();
+    let list = archeion_engine::file_versions(&f.profile, None, &a).unwrap();
+    let oldest = list[1].archive.clone();
+
+    let mut h = harness(&f);
+    let root = symbol::with(symbol::FOLDER, f.source.display());
+    tick_box(&h, &root).click();
+    settle(&mut h);
+    name(&h, &file("a.txt")).unwrap().click();
+    settle(&mut h);
+    wait_for_versions(&mut h, 2);
+    assert_eq!(
+        versions(&h)[0].accesskit_node().toggled(),
+        Some(Toggled::True),
+        "the folder's date: the newest"
+    );
+    versions(&h)[1].click();
+    settle(&mut h);
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::True), "still ticked");
+    assert_eq!(toggled(&h, &root), Some(Toggled::True), "the folder is still whole");
+    assert_eq!(
+        versions(&h)[1].accesskit_node().toggled(),
+        Some(Toggled::True),
+        "the older one is the choice"
+    );
+
+    let req = request(&mut h);
+    assert_eq!(req.items.len(), 2, "{req:?}");
+    let folder_item = req
+        .items
+        .iter()
+        .find(|i| i.key.as_deref() == Some(keys::key_for(&f.source).unwrap().as_str()))
+        .unwrap();
+    assert_eq!(folder_item.exclude, vec![a.clone()], "the file leaves the folder");
+    let file_item = req.items.iter().find(|i| i.key.as_deref() == Some(a.as_str())).unwrap();
+    assert_eq!(file_item.archive, oldest, "and comes back in the version chosen");
+}
+
 /// Every character the interface draws (symbols in the code, texts of
 /// every language, the icons) has a glyph in the fonts the window draws
 /// with: the theme's, egui's own and the system fonts.
