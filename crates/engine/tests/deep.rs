@@ -5,7 +5,9 @@
 //! backup.
 //!
 //! `ARCHEION_SEED=<n>` replays one seed; `ARCHEION_DEEP=<n>` runs `n` seeds
-//! per test instead of the default two (slow: about a minute per seed).
+//! per test instead of the default two (slow: about twenty seconds per
+//! seed). In PowerShell: `$env:ARCHEION_DEEP = 20; cargo test -p
+//! archeion_engine --test deep`.
 
 use archeion_core::{BackupMode, Container, Destination, Profile, Retention, RunEvent, keys, run::Phase};
 use archeion_engine::{
