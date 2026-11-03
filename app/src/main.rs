@@ -13,7 +13,11 @@
 //! `archeion --tray` opens the window hidden in the notification area (how
 //! Windows starts it at sign-in); a second window is never opened: the
 //! running one is brought forward instead.
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+//!
+//! It never opens a console window, development builds included; the
+//! commands write to stdout, which callers (the window, Task Scheduler,
+//! the end-to-end tests) read through a pipe. Unit tests keep a console.
+#![cfg_attr(not(test), windows_subsystem = "windows")]
 
 mod activity;
 mod autostart;
