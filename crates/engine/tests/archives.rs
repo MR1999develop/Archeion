@@ -1584,3 +1584,65 @@ fn a_junction_in_a_source_is_named_in_the_log_and_not_followed() {
     restore_all(&f, &name);
     assert!(!restored(&f, "linked/far.txt").exists());
 }
+
+#[test]
+fn a_merge_keeps_chunks_that_only_a_later_backup_also_holds() {
+    // A large file changed in an incremental, then saved whole by a later
+    // complete backup: merging the incrementals must keep its chunks, since
+    // restoring them never reads the later backup.
+    let mut f = fixture(Container::ZipPerFile);
+    f.profile.large_files.threshold_mb = 1;
+    let big = |seed: u8| {
+        (0..2_500_000u32).map(|i| i.wrapping_mul(2_654_435_761).to_le_bytes()[1] ^ seed).collect::<Vec<u8>>()
+    };
+    fs::write(f.source.join("big.bin"), big(1)).unwrap();
+    run_backup(&f.profile);
+    fs::write(f.source.join("big.bin"), big(2)).unwrap();
+    run_backup(&f.profile);
+    fs::write(f.source.join("a.txt"), "alpha 3").unwrap();
+    run_backup(&f.profile);
+    sleep(Duration::from_millis(1100));
+    backup(&f.profile, None, BackupMode::Complete, &Recorder::default()).unwrap();
+    let mut names: Vec<String> =
+        list_archives(&f.profile, None).unwrap().into_iter().map(|a| a.name).collect();
+    names.sort();
+    merge_range(&f.profile, None, &names[1], &names[2], &Recorder::default()).unwrap();
+    let merged = list_archives(&f.profile, None)
+        .unwrap()
+        .into_iter()
+        .map(|a| a.name)
+        .find(|n| n[..17] == names[2][..17])
+        .unwrap();
+    restore_all(&f, &merged);
+    assert_eq!(fs::read(restored(&f, "big.bin")).unwrap(), big(2));
+    let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+}
+
+#[test]
+fn a_merge_does_not_look_for_the_chunks_a_later_backup_holds_itself() {
+    let mut f = fixture(Container::ZipPerFile);
+    f.profile.large_files.threshold_mb = 1;
+    let big = |seed: u8| {
+        (0..2_500_000u32).map(|i| i.wrapping_mul(2_654_435_761).to_le_bytes()[1] ^ seed).collect::<Vec<u8>>()
+    };
+    fs::write(f.source.join("big.bin"), big(1)).unwrap();
+    run_backup(&f.profile);
+    fs::write(f.source.join("big.bin"), big(2)).unwrap();
+    // The group holds chunks of its own.
+    run_backup(&f.profile);
+    fs::write(f.source.join("a.txt"), "alpha 3").unwrap();
+    run_backup(&f.profile);
+    // The next backup writes new chunks of its own.
+    fs::write(f.source.join("big.bin"), big(9)).unwrap();
+    run_backup(&f.profile);
+    let mut names: Vec<String> =
+        list_archives(&f.profile, None).unwrap().into_iter().map(|a| a.name).collect();
+    names.sort();
+    merge_range(&f.profile, None, &names[1], &names[2], &Recorder::default()).unwrap();
+    let newest = list_archives(&f.profile, None).unwrap().remove(0).name;
+    restore_all(&f, &newest);
+    assert_eq!(fs::read(restored(&f, "big.bin")).unwrap(), big(9));
+    let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+}

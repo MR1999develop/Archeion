@@ -140,6 +140,12 @@ Repository: <https://github.com/MR1999develop/archeion>.
 - **CI.** `.github/workflows/ci.yml` runs `cargo fmt --check`, clippy with
   warnings as errors and all tests on Windows for every push to `main`
   and every pull request.
+- **Deep tests.** `crates/engine/tests/deep.rs` replays random histories
+  of backups, interruptions, merges and deletions against snapshots of
+  the source, every crash state of a merge, doctored manifests and
+  damaged backups. Two seeds per test run with the others;
+  `set ARCHEION_DEEP=20` runs twenty, `set ARCHEION_SEED=<n>` replays the
+  seed a failure printed.
 - **Postponed work** goes in `TIDY.md`; user-visible changes go in
   `CHANGELOG.md` under "Unreleased".
 

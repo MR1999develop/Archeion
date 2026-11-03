@@ -37,6 +37,11 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Fixed
 
+- A merge (or the deletion of a backup, which merges it with the next)
+  could drop chunks of large files that the merged backup still needed
+  when a later backup also held them: restoring or checking the merged
+  backup then failed with "chunk … is missing". Found by the new deep
+  tests (`crates/engine/tests/deep.rs`).
 - A power cut right after a backup could leave committed files of zeros
   that later backups took as unchanged: every file is now on the disk
   before the backup is committed, and the commit renames are

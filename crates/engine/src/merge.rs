@@ -402,9 +402,13 @@ struct ChunkPlaces {
     all: ChunkIndex,
     /// Chunks readable inside the group's members.
     members: ChunkIndex,
-    /// Chunks readable outside the group, which stays as it is.
+    /// Chunks readable in the archives before the group, which stay as
+    /// they are. Only those count: a restore or a check of an archive reads
+    /// the chunks of that archive and of the earlier ones, never of later
+    /// ones (which may be merged or deleted on their own).
     outside: HashSet<ChunkId>,
-    /// Chunks listed by the manifests outside the group.
+    /// Chunks the archives after the group list and find in no archive
+    /// they can read except the group's: the merged archive must hold them.
     needed: HashSet<ChunkRef>,
 }
 
@@ -420,6 +424,10 @@ impl ChunkPlaces {
             outside: HashSet::new(),
             needed: HashSet::new(),
         };
+        let first_member = archives.iter().position(|a| members.contains(a)).unwrap_or(archives.len());
+        // Chunks of the archives after the group, up to the one being read:
+        // what each of them can read besides the earlier archives.
+        let mut after: HashSet<ChunkId> = HashSet::new();
         for (i, (name, dir)) in archives.iter().zip(&dirs).enumerate() {
             let files = form.list(dir)?;
             let m = repo.manifest(name)?;
@@ -428,10 +436,15 @@ impl ChunkPlaces {
             if members.contains(name) {
                 places.members.add_files(i, files);
                 places.members.add_whole_copies(i, &m);
-            } else {
+            } else if i < first_member {
                 places.outside.extend(files);
                 places.outside.extend(chunks::in_whole_copies(&m));
-                places.needed.extend(chunks::referenced(&m).copied());
+            } else {
+                after.extend(files);
+                after.extend(chunks::in_whole_copies(&m));
+                let missing = chunks::referenced(&m)
+                    .filter(|c| !places.outside.contains(&c.id) && !after.contains(&c.id));
+                places.needed.extend(missing.copied());
             }
         }
         places.dirs = dirs;
