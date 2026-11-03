@@ -6,6 +6,73 @@ All notable changes to Archeion are listed here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- An encrypted destination is never backed up in the clear: when its
+  description no longer says it is encrypted (removed or changed outside
+  Archeion) while the profile or its backups are, the backup stops with an
+  explanation. Turning encryption on for a destination that already has
+  plain backups is refused the same way instead of going on unencrypted.
+- With the password, only encrypted manifests and files are read: a plain
+  archive, a plain zip, or a plain wrapped key put in an encrypted
+  destination is refused.
+- The paths in a manifest are checked when it is read: a doctored backup
+  can no longer make a restore or `archeion extract` write outside the
+  folder chosen.
+- Windows programs (Task Scheduler, PowerShell, Explorer) are started by
+  full path, and libraries load only from the system and program folders:
+  files planted next to the portable executable are not used.
+- The executable carries an application manifest (runs as the user,
+  Windows 10/11, long paths, per-monitor DPI).
+- Passwords, keys and the recovery key are wiped from memory once used.
+- An imported profile no longer starts backing up on its own.
+- Notifications when an incremental backup touches far more files than
+  usual (as ransomware would), and when a destination holds older backups
+  than this computer last saw there.
+- Releases: built with the paths of the build machine removed and checked,
+  with `SHA256SUMS.txt` and a build provenance attestation; GitHub Actions
+  are pinned to commits; `cargo deny` checks advisories, licences and
+  sources in CI and in `tools\check.bat`. `SECURITY.md` and
+  `docs/threat-model.md` are new.
+
+### Fixed
+
+- A power cut right after a backup could leave committed files of zeros
+  that later backups took as unchanged: every file is now on the disk
+  before the backup is committed, and the commit renames are
+  write-through.
+- An interrupted merge could, on recovery, delete the only copy of the
+  merged backups (on exFAT, FAT32 or a share, or when the merged backup
+  was lost); now the backups moved aside get their names back unless the
+  merged one is in place, and a merge journal written in part means "no
+  merge". A merge interrupted after its last step no longer makes every
+  later run fail.
+- An interruption between a backup and the signature of the list of
+  backups no longer looks like tampering in the integrity check.
+- "The destination is inside a source" is also found when the names
+  differ in case; a scan never enters the destination folder.
+- Files of 4 GiB or more on a FAT32 destination are skipped with the
+  reason (their last version kept) instead of failing half written; the
+  settings warn about FAT32 and exFAT drives.
+- Cancel asks the run to stop at the next file instead of killing it at
+  once; runs started from the window end with it, even after a crash.
+
+### Changed
+
+- Junctions and links in a source are named in the log (they are not
+  followed); online-only OneDrive files are not downloaded (their last
+  saved version is kept, and the log says why); files encrypted by
+  Windows (EFS) saved to an unencrypted destination are counted in the
+  summary.
+- Scheduled backups and automatic merges run in Windows' background mode
+  (lower CPU, disk and energy use).
+- Shutting down during a backup started from the window shows why the
+  window is still open; starting Archeion again brings its window to the
+  front.
+- Status-bar messages are announced by screen readers.
+- Taking over the backups of a deleted profile no longer freezes the
+  window on a slow share.
+
 ### Added
 
 - Merging backups keeps the files deleted at the source between the
@@ -27,7 +94,8 @@ All notable changes to Archeion are listed here. The format follows
   brings that profile back.
 - File > Export profile… saves every rule of the selected profile to a
   readable `.archeion-profile` file (never the password); File > Import
-  profile… adds it, with its scheduled tasks. On another computer the
+  profile… adds it, with its schedule paused until it is turned on in
+  its settings ("Turn on the schedule"). On another computer the
   imported profile keeps its id and so finds its backups at the
   destination; imported twice on the same one it becomes a copy with
   "(2)" in its name. Files of another kind, too large or of a later

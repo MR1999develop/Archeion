@@ -4,10 +4,10 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` ripulito dai file non più necessari (ramo `chore/tidy-files`
-unito; `tools\check.bat` verde: fmt,
-clippy, 343 test, 2 ignorati: le schermate e l'anteprima dell'icona). La build di rilascio è stata controllata con la nuova icona
-(nessun percorso locale nell'exe).
+`main` con i cinque rami della revisione completa (tutte le skill):
+`fix/destination-trust`, `fix/durable-data`, `fix/windows-integration`,
+`fix/profiles-and-ui`, `chore/release-and-docs`; `tools\check.bat` verde
+(fmt, clippy, test, cargo deny). Non ancora inviato su GitHub.
 
 ## Lavoro in corso
 
@@ -15,7 +15,13 @@ clippy, 343 test, 2 ignorati: le schermate e l'anteprima dell'icona). La build d
 
 ## Punti aperti
 
-- Nessuno.
+- Provare a mano: Annulla durante un backup (si ferma al file successivo),
+  spegnimento con un backup in corso (messaggio di Windows), seconda
+  apertura che porta avanti la finestra, profilo importato con la
+  pianificazione in pausa, avviso sulle unità FAT32/exFAT.
+- Misurare su un disco USB lento il costo del flush per file (TIDY).
+- Il workflow di rilascio con azioni fissate per commit e l'attestazione
+  non è ancora stato eseguito su GitHub.
 
 ## Decisioni
 
@@ -160,3 +166,25 @@ clippy, 343 test, 2 ignorati: le schermate e l'anteprima dell'icona). La build d
   `tools\first-commit.txt` (il repository esiste), le chiavi di traduzione
   delle funzioni rimosse. Resta `tools\github_publish.bat`: il repository
   non ha ancora un remote.
+- Revisione con tutte le skill (3 novembre): la destinazione non è fidata.
+  Con le chiavi si leggono solo manifest e file cifrati; un profilo
+  cifrato o archivi con manifest cifrati non vanno mai avanti in chiaro
+  (`EncryptionMissing`); le chiavi dei manifest sono controllate in
+  lettura (`keys::check`).
+- Il codice `unsafe` sta solo in `crates/win` (lint propri:
+  `undocumented_unsafe_blocks`); il resto del workspace lo vieta.
+- Durabilità: flush di ogni file prima del commit e rinomine write-through
+  ai punti di commit; il recupero dei merge non cancella mai un `.old`
+  se l'archivio unito non è al suo posto.
+- Annulla chiude lo stdin del worker (`--stop-on-eof`): il motore si
+  ferma al file successivo (`EventSink::stop_requested`); kill dopo 15 s.
+  I worker della finestra stanno in un job object.
+- Un profilo importato ha la pianificazione in pausa (`schedule_paused`)
+  finché l'utente non la attiva.
+- `destinations.json` nella cartella dati ricorda l'ultimo backup visto
+  per profilo: se la destinazione torna indietro arriva una notifica (non
+  un blocco). Anche un incrementale con molti più file cambiati del
+  solito è notificato.
+- `ROW_GAP` resta 6 (non multiplo di 4) per non far scorrere le
+  impostazioni.
+

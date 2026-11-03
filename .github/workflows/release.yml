@@ -1,5 +1,9 @@
 # Pushing a tag vX.Y.Z builds archeion.exe and publishes a GitHub release
-# with the portable zip. The tag must match the version in Cargo.toml.
+# with the portable zip, its SHA-256 and a build provenance attestation.
+# The tag must match the version in Cargo.toml. As tools\release.ps1, the
+# build rewrites the runner's folders in the paths the compiler embeds and
+# checks that none is left in the executable. Actions are pinned to a
+# commit (the tag in the comment).
 name: Release
 
 on:
@@ -7,7 +11,7 @@ on:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,10 +19,17 @@ env:
 jobs:
   release:
     runs-on: windows-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.99.1
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: 1.99.1
       - name: Check that the tag matches the version
         shell: pwsh
         run: |
@@ -30,18 +41,43 @@ jobs:
       - name: Tests
         run: cargo test --workspace --locked
       - name: Build
-        run: cargo build --release --locked -p archeion
-      - name: Portable zip
+        shell: pwsh
+        run: |
+          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { Join-Path $HOME '.cargo' }
+          $remaps = @("--remap-path-prefix=$env:GITHUB_WORKSPACE=archeion", "--remap-path-prefix=$cargoHome=cargo",
+            '-Clink-arg=/PDBALTPATH:%_PDB%')
+          $env:CARGO_ENCODED_RUSTFLAGS = $remaps -join [char]0x1f
+          cargo build --release --locked -p archeion
+          if ($LASTEXITCODE -ne 0) { throw "build failed" }
+          $exe = 'target/release/archeion.exe'
+          $text = [System.Text.Encoding]::GetEncoding(28591).GetString([System.IO.File]::ReadAllBytes($exe))
+          foreach ($p in @($env:GITHUB_WORKSPACE, $HOME, $cargoHome)) {
+            if ($text.IndexOf($p, [StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+                $text.IndexOf($p.Replace('\', '/'), [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+              throw "Local path in the executable: $p"
+            }
+          }
+      - name: Portable zip and checksums
         shell: pwsh
         run: |
           $name = "Archeion-$env:GITHUB_REF_NAME-windows-x64-portable"
           $dir = "dist/$name"
           New-Item -ItemType Directory -Force $dir | Out-Null
-          Copy-Item target/release/archeion.exe, README.md, CHANGELOG.md, LICENSE $dir
+          Copy-Item target/release/archeion.exe, README.md, CHANGELOG.md, LICENSE, SECURITY.md $dir
           # portable.txt keeps settings and logs in a data folder next to the exe.
           Set-Content "$dir/portable.txt" "Settings and logs are kept in the data folder next to archeion.exe."
           Compress-Archive -Path "$dir/*" -DestinationPath "dist/$name.zip"
-      - uses: softprops/action-gh-release@v3
+          Get-ChildItem dist/*.zip | ForEach-Object {
+            "$((Get-FileHash -Algorithm SHA256 $_).Hash.ToLowerInvariant())  $($_.Name)"
+          } | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+      - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
-          files: dist/*.zip
+          subject-path: |
+            dist/*.zip
+            target/release/archeion.exe
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
+        with:
+          files: |
+            dist/*.zip
+            dist/SHA256SUMS.txt
           generate_release_notes: true

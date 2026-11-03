@@ -64,7 +64,9 @@ trigger it. Remove an item when it is done or no longer applies.
 - **Integrity checks run only after scheduled backups**: a profile backed
   up by hand gets its checks only from the buttons. A separate scheduled
   task would cover it.
-- **Check problems are in English** (they come from the engine as text);
+- **Check problems are in English** (they come from the engine as text),
+  and so are the technical details after some translated errors (taking
+  over a destination, reading an imported profile, "the run failed");
   give them a kind and translate them.
 - **No notification** when a scheduled check finds problems: it shows in
   the operations log only. Comes with the tray icon and notifications.
@@ -96,9 +98,6 @@ trigger it. Remove an item when it is done or no longer applies.
   log of hundreds of thousands of files is built in memory as one string
   (tens of MB) before it is written. Revisit if a log grows too large to
   open comfortably.
-- **Ticking a folder** restores the whole folder as it was at the date
-  chosen on its card; a "restore only what this backup saved" option
-  would need its own request field.
 
 ## Free space and resumed copies
 
@@ -124,8 +123,9 @@ trigger it. Remove an item when it is done or no longer applies.
   notifications on errors, hourly retry when the destination is missing.
 - **Remote copy (cloud, SFTP)**: undecided. Proposal: mirror the per-file
   zips with rclone after each backup and merge.
-- **Installer and portable zip**, Segoe UI font, application icon (`.ico`
-  with 16/24/32/48/256 px).
+- **Installer**: the portable zip and the application icon are done; an
+  installer would also give toasts their own name (see "Notifications come
+  from Windows PowerShell").
 - **7z per file** as an alternative to zip, if the Rust 7z crates prove
   reliable enough.
 
@@ -143,10 +143,9 @@ trigger it. Remove an item when it is done or no longer applies.
 - **Format lock check reads the destination** in a background thread each
   time a profile is opened; on a slow or offline share the radios show
   "checking" until it answers. Acceptable; cache per profile if annoying.
-- **Cancel kills the worker process**: a cancelled backup is resumed by
-  the next one, but a cancelled restore may leave the files it
-  already wrote. Document it in the restore dialog or restore into a
-  staging folder first.
+- **A cancelled restore keeps the files it already wrote** (Cancel stops
+  the worker at the next file; a backup resumes, a restore does not).
+  Restore into a staging folder first if it confuses.
 - **`app/src/ui/app.rs` is the hotspot**: split status bar and menus into
   their own modules when it next grows.
 
@@ -180,8 +179,6 @@ trigger it. Remove an item when it is done or no longer applies.
   idle period.
 - **"No backup for N days"** ignores profiles never backed up and warns at
   most once a day per profile; it reads only the newest 500 logs.
-- **Legacy texts** `schedule-daily` and `schedule-weekly` are unused in the
-  locales; remove them with the next locale clean-up.
 
 ## Fixes of 01/11 afternoon
 
@@ -260,12 +257,6 @@ trigger it. Remove an item when it is done or no longer applies.
 
 ## Large files as chunks, `archeion extract` (added 01/11 night)
 
-- **Not compiled with the real crates**: written in a container without
-  crates.io. The chunker and the planning logic were tested with plain
-  `rustc --test`; core and engine (with their tests) were type-checked and
-  linted (`cargo clippy -D warnings`) against stub crates that mirror the
-  APIs used. The app changes (`extract.rs`, editor, help) were reviewed by
-  hand only. First `tools\check.bat` on Windows: expect small fixes.
 - **Manifests repeat chunk lists**: each archive's manifest carries the
   full chunk list of every file it stores (~80 bytes per chunk), and the
   window reads every manifest; 1 TB of chunked data in one complete
@@ -283,11 +274,6 @@ trigger it. Remove an item when it is done or no longer applies.
   at output offsets if it ever matters.
 - **Unused chunk files outside a merge group** stay until their own
   archive is merged; a "compact" command could collect them.
-- **Chunk files are not flushed one by one** before the commit rename,
-  like whole copies. A resumed backup re-reads the chunks it reuses, but
-  a power cut right after a commit could leave a chunk file of zeros:
-  the integrity check finds it. A flush of the volume at commit would
-  close this (it needs care on network shares).
 - **`archeion extract` texts are English** and its output goes nowhere
   when started from a Command Prompt without `start /wait` or a pipe,
   because `archeion.exe` is a GUI-subsystem program (attaching to the
@@ -306,13 +292,6 @@ trigger it. Remove an item when it is done or no longer applies.
   destination (✎), the folder date combo, the conflict with two
   "Overwrite the original", the Restore reason texts, and Manage backups
   (merge, delete). The egui code was type-checked against stubs only.
-- **A ticked folder does not tick what it holds**: its files keep their
-  own checkboxes, and a file ticked separately is restored twice (with
-  dates in the names when both go to the same folder). Show the children
-  as included, or warn, if it confuses.
-- **Names of a folder's files** are decided by the engine: the card shows
-  the name only for ticked file versions. A folder and a version of a file
-  inside it sent to the same place both get dates in the names.
 - **The tree reads every manifest** once per profile (kept until a backup,
   merge or deletion, or ⟳); the versions of each ticked file read them
   again. Keep the versions in the catalog if that is slow on destinations
@@ -320,7 +299,37 @@ trigger it. Remove an item when it is done or no longer applies.
 - **`archeion_engine::search` and `SearchHit`** are no longer used by the
   window (the search runs on the tree); remove them or use them for a
   command-line search.
-- **A folder override to another folder never replaces** existing files
-  there (the default's "Replace files that already exist" applies only to
-  what follows the default). Add a checkbox to the override menu if asked.
-- **Search matches file names only**, as before; folders could match too.
+
+## Review with all the design skills (added 03/11)
+
+- **A flush per file** before each commit: safe after a power cut, but on
+  a slow USB disk a first backup of many small files takes longer. Measure
+  on a real disk; if it hurts, flush the written files in a batch at the
+  commit (by then the lazy writer has written most of them).
+- **Renames of restored files are not write-through**: a power cut right
+  after a restore may lose the last ones; the next restore brings them
+  back. Only the commit points (archives, journal, descriptor, key file,
+  signature, settings) use `rename_durably`.
+- **Online-only cloud files are never read** (OneDrive "online only"):
+  their last saved version is kept. An option to download and back them
+  up would need a warning about space and time.
+- **Files of 4 GiB or more on FAT32** are skipped with the reason; storing
+  them as chunks there would need complete archives without whole copies.
+- **Encrypted (EFS) files** are counted when saved in the clear, not kept
+  encrypted (`ReadEncryptedFileRaw` would keep them so but they could only
+  be restored by hand on this account).
+- **Alternate data streams and sparse files** are not backed up (streams)
+  or are copied full (sparse): say so in the guide.
+- **Older backups than last seen** and **unusual changes** only notify;
+  refusing the backup would need a way to accept a destination put back
+  on purpose.
+- **The signed list of archives** covers their names, not their content:
+  an archive swapped for an older copy of itself is noticed only by its
+  hashes when restored or checked.
+- **ROW_GAP is 6**, not a multiple of 4 as Windows suggests: 8 made the
+  settings scroll. Revisit with the next layout change.
+- **The shutdown message** is shown while a run started from the window
+  goes on; the window does not refuse the shutdown itself.
+- **No screen-reader test by hand** yet of the status bar's live region
+  (Narrator, NVDA).
+

@@ -22,8 +22,9 @@ The name is the ancient Greek ἀρχεῖον, "archive".
 | `crates/core` | Domain model: profiles, archive names, manifests, path keys, merge planning, restore requests and restored file names, run events. No I/O. |
 | `crates/engine` | Archive engine: backup (with free-space check and resume), automatic and manual merge, deletion, restore of several items in one run, catalog of every file ever saved, versions, search, verify, encryption, destination lock and crash recovery. |
 | `crates/scheduler` | Windows Task Scheduler tasks (XML generation + `schtasks.exe`), one for backups and one for merges per profile. |
+| `crates/win` | The few Windows calls the standard library does not make (write-through renames, file system of a drive, library search, job objects, background mode, shutdown message), behind safe functions: the only crate allowed `unsafe`. |
 | `app` | `archeion.exe`: egui window and headless worker (`archeion run|merge|delete|verify|restore <profile id>`, `archeion extract`). |
-| `tools` | `check.bat` (fmt, clippy, tests), `release.bat` and the git scripts (`git_status`, `git_commit`, `git_push`, `github_publish`), each writing a `.log`. |
+| `tools` | `check.bat` (fmt, clippy, tests, `cargo deny` when installed), `release.bat` and the git scripts (`git_status`, `git_commit`, `git_push`, `github_publish`), each writing a `.log`. |
 
 ## On disk
 
@@ -116,8 +117,10 @@ Rust 1.99.1, MSVC toolchain (`rust-toolchain.toml`: rustup installs it
 on demand).
 
 ```
-tools\check.bat      formats, lints and tests, step by step on screen and in
-                     tools\check.log (-Verbose: cargo --verbose; -NoPause)
+tools\check.bat      formats, lints and tests, and checks the dependencies
+                     with cargo deny (deny.toml) when it is installed; step
+                     by step on screen and in tools\check.log (-Verbose:
+                     cargo --verbose; -NoPause)
 tools\release.bat    optimised build, step by step on screen and in
                      tools\release.log (same options)
 ```
@@ -181,6 +184,11 @@ changes at every commit, and `git add -A` would otherwise commit it.
    version, runs the tests, builds `archeion.exe` and publishes a GitHub
    release with `Archeion-v0.2.0-windows-x64-portable.zip`.
 
+## Security
+
+How to report a problem, and what Archeion protects and does not:
+[SECURITY.md](SECURITY.md); the threat model: [docs/threat-model.md](docs/threat-model.md).
+
 ## License
 
 Copyright (C) 2026 MR
@@ -193,3 +201,8 @@ This program is distributed in the hope that it will be useful, but
 WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
 or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for
 more details.
+
+The executable also contains egui's fallback fonts (Hack, under the SIL
+Open Font License 1.1, and Ubuntu, under the Ubuntu Font Licence 1.0),
+and code of the Rust crates listed in `Cargo.lock` under licences that
+`deny.toml` allows.

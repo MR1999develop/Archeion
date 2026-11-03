@@ -1,0 +1,48 @@
+# cargo deny check: dependencies with known vulnerabilities, licences that
+# do not mix with GPL-3.0-only, crates from outside crates.io, duplicates.
+# Run by CI and by tools\check.bat when cargo-deny is installed.
+
+[graph]
+targets = ["x86_64-pc-windows-msvc"]
+all-features = false
+
+[advisories]
+# Every advisory fails the check; an exception needs a line here with why.
+ignore = []
+
+[licenses]
+# Licences that can be combined with GPL-3.0-only.
+allow = [
+    "GPL-3.0-only",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "BSL-1.0",
+    "CC0-1.0",
+    "Unicode-3.0",
+    "Unlicense",
+    "MPL-2.0",
+]
+confidence-threshold = 0.9
+
+# egui's fallback fonts (data drawn, not code linked): Hack and Ubuntu.
+[[licenses.exceptions]]
+crate = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]
+
+[bans]
+# Several versions of one crate (windows-sys, say) are common: noted, not
+# refused.
+multiple-versions = "warn"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
