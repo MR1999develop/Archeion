@@ -147,6 +147,7 @@ fn restore(s: &Sandbox, items: Vec<RestoreItem>, password: Option<&str>) -> Outp
 
 fn item(archive: &str, key: String, to: &Path, exclude: Vec<String>) -> RestoreItem {
     RestoreItem {
+        with_deleted: false,
         archive: archive.to_owned(),
         key: Some(key),
         target: RestoreTarget::Folder { path: to.to_path_buf() },
@@ -318,6 +319,23 @@ fn a_merge_keeps_the_files_deleted_between_its_backups() {
 #[test]
 fn a_merge_with_drop_deleted_drops_them() {
     assert!(!merge_with_a_deleted_file(true), "dropped when asked");
+}
+
+#[test]
+fn a_restore_brings_back_deleted_files_marked() {
+    let s = sandbox(Container::ZipPerFile, false);
+    write(&s.source.join("gone.txt"), b"short-lived");
+    backup(&s, None);
+    fs::remove_file(s.source.join("gone.txt")).unwrap();
+    backup(&s, None);
+    let names = archives(&s, None);
+    let to = s.root.join("restored");
+    let mut it = item(&names[0], key(&s, ""), &to, vec![]);
+    it.with_deleted = true;
+    ok(&restore(&s, vec![it], None));
+    let files = restored(&s, &to);
+    assert!(files.contains_key("_deleted_gone.txt"), "{:?}", files.keys());
+    assert!(!files.contains_key("gone.txt"));
 }
 
 #[test]

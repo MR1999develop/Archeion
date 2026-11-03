@@ -45,6 +45,24 @@ pub struct RestoreItem {
     /// unticked inside a ticked folder.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exclude: Vec<String>,
+    /// A folder also brings back what it held in earlier backups and no
+    /// longer at its date (deleted at the source), each as last saved; and
+    /// every file no longer in the newest backup is named with
+    /// [`DELETED_PREFIX`] first. Off for requests written before.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub with_deleted: bool,
+}
+
+/// Put before the name of a restored file that is no longer at the source.
+pub const DELETED_PREFIX: &str = "_deleted_";
+
+/// `path` with [`DELETED_PREFIX`] before its file name.
+#[must_use]
+pub fn deleted_name(path: &Path) -> PathBuf {
+    match path.file_name() {
+        Some(name) => path.with_file_name(format!("{DELETED_PREFIX}{}", name.to_string_lossy())),
+        None => path.to_path_buf(),
+    }
 }
 
 impl RestoreItem {
@@ -103,6 +121,7 @@ impl RestoreRequest {
             target: target.clone(),
             overwrite,
             exclude: Vec::new(),
+            with_deleted: false,
         };
         let items =
             if keys.is_empty() { vec![item(None)] } else { keys.into_iter().map(Some).map(item).collect() };
@@ -318,6 +337,7 @@ mod tests {
             target: RestoreTarget::Original,
             overwrite: false,
             exclude: vec!["C/Docs/old".into(), "C/Docs/b.txt".into()],
+            with_deleted: false,
         };
         assert!(item.wants("C/Docs"));
         assert!(item.wants("C/Docs/a.txt"));
@@ -340,6 +360,7 @@ mod tests {
                     target: RestoreTarget::Folder { path: PathBuf::from("out") },
                     overwrite: false,
                     exclude: vec!["C/Users/a.txt/x".into()],
+                    with_deleted: true,
                 },
                 RestoreItem {
                     archive: "2026-10-30_213000_I".into(),
@@ -347,6 +368,7 @@ mod tests {
                     target: RestoreTarget::Original,
                     overwrite: true,
                     exclude: Vec::new(),
+                    with_deleted: false,
                 },
             ],
         };

@@ -40,6 +40,9 @@ trigger it. Remove an item when it is done or no longer applies.
   and stops there, so that one archive is lost. Checking the size against
   the Recycle Bin's limit needs `SHQueryRecycleBinW` (no `unsafe` in our
   crates: a small crate would do).
+- **Restore summary without deleted files** (3 November): the size above
+  Restore counts a ticked folder's files at its date, not the deleted ones
+  it now brings back too. Add them when the folder's files are read.
 - **Screenshots not compared automatically** (2 November): the views are
   rendered with `cargo test -p archeion --bin archeion screens -- --ignored`
   into `target/ui-screens` and looked at, with no stored references: add
