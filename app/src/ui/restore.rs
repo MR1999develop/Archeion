@@ -37,7 +37,7 @@ use archeion_engine::{FileVersion, RestoreRequest};
 use eframe::egui::{self, Context, RichText, Ui, collapsing_header::CollapsingState};
 use std::{
     collections::HashMap,
-    path::{Path, PathBuf},
+    path::PathBuf,
     time::{Duration, Instant},
 };
 
@@ -225,7 +225,7 @@ impl RestoreView {
                     Some(Load::Ready(list)) => {
                         *loading = false;
                         if let Some(v) = list.first() {
-                            versions.push(Version { archive: v.archive.clone(), size: v.size, dest: None });
+                            versions.push(Version { archive: v.archive.clone(), size: v.size });
                         }
                     }
                     Some(Load::Failed(_)) | None => *loading = false,
@@ -310,13 +310,7 @@ impl RestoreView {
             let Some(newest) = tree.dates(node).first().map(|a| a.name.clone()) else { return };
             spawn_folder_size(&mut self.folder_sizes, ctx, profile, &key, &newest);
             self.picks.retain(|p| !keys::is_within(p.key(), &key));
-            self.picks.push(Pick::Folder {
-                key,
-                archive: newest,
-                dest: None,
-                size: None,
-                exclude: Vec::new(),
-            });
+            self.picks.push(Pick::Folder { key, archive: newest, size: None, exclude: Vec::new() });
         } else {
             if self.versions.get(&key).is_none_or(|l| matches!(l, Load::Failed(_))) {
                 let (p, k) = (profile.clone(), key.clone());
@@ -386,8 +380,9 @@ impl RestoreView {
         egui::Panel::top("restore-default").show(ui, |ui| default_ui(ui, tr, &mut self.default));
         let mut request = None;
         egui::Panel::bottom("restore-go").show(ui, |ui| {
-            request = go_ui(ui, tr, &plan);
-            if !self.picks.is_empty() && ui.link(tr.t("clear-selection")).clicked() {
+            let (go, clear) = go_ui(ui, tr, &plan, !self.picks.is_empty());
+            request = go;
+            if clear {
                 self.picks.clear();
                 self.focused = None;
             }
@@ -434,7 +429,6 @@ impl RestoreView {
                             card_body(
                                 ui,
                                 tr,
-                                &self.default,
                                 plan,
                                 card,
                                 pick,
@@ -478,7 +472,7 @@ impl RestoreView {
                         // Ticked versions stay newest first, like the list.
                         let position = |archive: &str| list.iter().position(|l| l.archive == archive);
                         let at = versions.iter().filter(|t| position(&t.archive) < Some(index)).count();
-                        versions.insert(at, Version { archive: v.archive.clone(), size: v.size, dest: None });
+                        versions.insert(at, Version { archive: v.archive.clone(), size: v.size });
                     } else {
                         versions.retain(|t| t.archive != v.archive);
                     }
@@ -715,12 +709,11 @@ fn card_header(ui: &mut Ui, tr: &Tr, key: &str, node: Option<&Node>, focused: Op
     click
 }
 
-/// The options of the highlighted card: versions or date, and destination.
+/// The options of the highlighted card: its versions or its date.
 #[expect(clippy::too_many_arguments, reason = "one card: its parts are drawn together")]
 fn card_body(
     ui: &mut Ui,
     tr: &Tr,
-    default: &DefaultDest,
     plan: &Plan,
     card: usize,
     pick: &mut Pick,
@@ -731,9 +724,9 @@ fn card_body(
 ) {
     match pick {
         Pick::File { key, versions: ticked, .. } => {
-            file_card(ui, tr, default, plan, card, versions.get(key.as_str()), ticked, edits);
+            file_card(ui, tr, plan, card, versions.get(key.as_str()), ticked, edits);
         }
-        Pick::Folder { key, archive, dest, size, exclude } => {
+        Pick::Folder { key, archive, size, exclude } => {
             folder_card(ui, tr, card, archive, dates, edits);
             match folder_sizes.get(&(key.clone(), archive.clone())) {
                 Some(Load::Ready(_)) => {
@@ -746,7 +739,6 @@ fn card_body(
             if !exclude.is_empty() {
                 ui.weak(tr.t_args("folder-left-out", &[("count", arg(exclude.len()))]));
             }
-            dest_ui(ui, tr, dest, default, None);
         }
     }
 }
@@ -758,42 +750,30 @@ fn card_summary(
     pick: &Pick,
     dates: &[&archeion_engine::CatalogArchive],
 ) -> String {
-    let dest_of = |dest: Option<&Dest>| match dest {
-        None => default_text(tr, default),
-        Some(d) => symbol::with(symbol::EDITED, dest_text(tr, d)),
-    };
+    let dest = || arg(default_text(tr, default));
     match pick {
         Pick::File { versions, .. } => {
-            let dest = match versions.split_first() {
-                None => default_text(tr, default),
-                Some((first, rest)) if rest.iter().all(|v| v.dest == first.dest) => {
-                    dest_of(first.dest.as_ref())
-                }
-                Some(_) => symbol::with(symbol::EDITED, tr.t("dest-several")),
-            };
-            tr.t_args("card-summary-file", &[("versions", arg(versions.len())), ("dest", arg(dest))])
+            tr.t_args("card-summary-file", &[("versions", arg(versions.len())), ("dest", dest())])
         }
-        Pick::Folder { archive, dest, .. } => {
+        Pick::Folder { archive, .. } => {
             let date = dates
                 .iter()
                 .find(|a| a.name == *archive)
                 .map_or_else(|| archive.clone(), |a| a.label.clone());
-            tr.t_args("card-summary-folder", &[("date", arg(date)), ("dest", arg(dest_of(dest.as_ref())))])
+            tr.t_args("card-summary-folder", &[("date", arg(date)), ("dest", dest())])
         }
     }
 }
 
-/// The versions of a ticked file, each tickable; under a ticked one, its
-/// destination and the name it will take.
-#[expect(clippy::too_many_arguments, reason = "one card: its parts are drawn together")]
+/// The versions of a ticked file, each tickable; under a ticked one, the
+/// name it will take.
 fn file_card(
     ui: &mut Ui,
     tr: &Tr,
-    default: &DefaultDest,
     plan: &Plan,
     card: usize,
     read: Option<&Load<Vec<FileVersion>>>,
-    ticked: &mut [Version],
+    ticked: &[Version],
     edits: &mut Vec<CardEdit>,
 ) {
     let Some(read) = read else { return };
@@ -813,11 +793,10 @@ fn file_card(
         if widgets::checkbox(ui, &mut on, label).on_hover_text(hint).changed() {
             edits.push(CardEdit::Version { card, index, on });
         }
-        if let Some(n) = position
-            && let Some(t) = ticked.get_mut(n)
-        {
-            ui.indent(("dest", index), |ui| {
-                dest_ui(ui, tr, &mut t.dest, default, plan.output(card, n));
+        if let Some(path) = position.and_then(|n| plan.output(card, n)) {
+            ui.indent(("output", index), |ui| {
+                let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                ui.label(format!("→ {name}")).on_hover_text(path.display().to_string());
             });
         }
     }
@@ -853,44 +832,6 @@ fn folder_card(
     });
 }
 
-/// Where a version or folder goes: the file name it takes (for a version)
-/// and a menu to change the destination; a changed one is marked ✎.
-fn dest_ui(ui: &mut Ui, tr: &Tr, dest: &mut Option<Dest>, default: &DefaultDest, output: Option<&Path>) {
-    if let Some(path) = output {
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        ui.label(format!("→ {name}")).on_hover_text(path.display().to_string());
-    }
-    let text = match dest {
-        None => tr.t_args("dest-default", &[("dest", arg(default_text(tr, default)))]),
-        Some(d) => symbol::with(symbol::EDITED, dest_text(tr, d)),
-    };
-    ui.menu_button(text, |ui| {
-        if ui.button(tr.t("dest-follow-default")).clicked() {
-            *dest = None;
-            ui.close();
-        }
-        if ui.button(tr.t("target-beside")).clicked() {
-            *dest = Some(Dest::Beside);
-            ui.close();
-        }
-        if ui.button(tr.t("dest-overwrite")).on_hover_text(tr.t("replace-warning")).clicked() {
-            *dest = Some(Dest::Original { replace: true });
-            ui.close();
-        }
-        if ui.button(tr.t("dest-folder")).clicked() {
-            if let Some(path) = rfd::FileDialog::new().pick_folder() {
-                *dest = Some(Dest::Folder { path, replace: false });
-            }
-            ui.close();
-        }
-    })
-    .response
-    .on_hover_text(tr.t_args("dest-change-hint", &symbol::args()));
-    if dest.as_ref().is_some_and(Dest::overwrites_original) {
-        ui.colored_label(ui.visuals().warn_fg_color, symbol::with(symbol::WARNING, tr.t("replace-warning")));
-    }
-}
-
 fn default_text(tr: &Tr, default: &DefaultDest) -> String {
     match default.resolve() {
         Some(d) => dest_text(tr, &d),
@@ -907,7 +848,7 @@ fn dest_text(tr: &Tr, dest: &Dest) -> String {
     }
 }
 
-/// The default destination, at the top of the selection.
+/// The destination of the whole selection, at its top.
 fn default_ui(ui: &mut Ui, tr: &Tr, default: &mut DefaultDest) {
     ui.add_space(theme::SPACE_S);
     widgets::section_title(ui, tr.t("restore-to"));
@@ -938,8 +879,9 @@ fn default_ui(ui: &mut Ui, tr: &Tr, default: &mut DefaultDest) {
     ui.add_space(theme::SPACE_S);
 }
 
-/// Summary and the Restore button, with the reason when it waits.
-fn go_ui(ui: &mut Ui, tr: &Tr, plan: &Plan) -> Option<RestoreRequest> {
+/// Summary, the Restore button with "Clear selection" beside it, and the
+/// reason Restore waits. Returns the request and whether to clear.
+fn go_ui(ui: &mut Ui, tr: &Tr, plan: &Plan, any: bool) -> (Option<RestoreRequest>, bool) {
     ui.add_space(theme::SPACE_S);
     let s = plan.summary;
     let mut size = tr.bytes(s.bytes);
@@ -964,8 +906,13 @@ fn go_ui(ui: &mut Ui, tr: &Tr, plan: &Plan) -> Option<RestoreRequest> {
             Blocker::Busy => "busy-hint",
         })
     });
-    let button = widgets::primary_button(ui, tr.t("restore-selected"));
-    let resp = ui.add_enabled(why.is_none(), button);
+    let (resp, clear) = ui
+        .horizontal(|ui| {
+            let resp = ui.add_enabled(why.is_none(), widgets::primary_button(ui, tr.t("restore-selected")));
+            let clear = ui.add_enabled(any, egui::Button::new(tr.t("clear-selection"))).clicked();
+            (resp, clear)
+        })
+        .inner;
     let mut request = None;
     match &why {
         Some(w) => {
@@ -975,7 +922,7 @@ fn go_ui(ui: &mut Ui, tr: &Tr, plan: &Plan) -> Option<RestoreRequest> {
         None if resp.clicked() => request = Some(plan.request.clone()),
         None => {}
     }
-    request
+    (request, clear)
 }
 
 #[cfg(test)]

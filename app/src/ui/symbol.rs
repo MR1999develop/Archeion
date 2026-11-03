@@ -8,7 +8,6 @@ pub const DELETED: &str = "\u{E74D}";
 pub const REMOVE: &str = "\u{E711}";
 pub const REFRESH: &str = "\u{E72C}";
 pub const RUNNING: &str = "\u{E895}";
-pub const EDITED: &str = "\u{E70F}";
 pub const WARNING: &str = "\u{E7BA}";
 pub const ERROR: &str = "\u{EA39}";
 pub const DONE: &str = "\u{E73E}";
@@ -24,8 +23,8 @@ pub const CURRENT: &str = "\u{EA3B}";
 /// Every icon, for the test that each has a glyph.
 #[cfg(test)]
 pub const ALL: &[&str] = &[
-    FOLDER, FILE, DELETED, REMOVE, REFRESH, RUNNING, EDITED, WARNING, ERROR, DONE, LOCKED, KEY, TAG, PATTERN,
-    WAIT, PENDING, CURRENT,
+    FOLDER, FILE, DELETED, REMOVE, REFRESH, RUNNING, WARNING, ERROR, DONE, LOCKED, KEY, TAG, PATTERN, WAIT,
+    PENDING, CURRENT,
 ];
 
 /// `icon` and `text` with the gap the interface uses between them.
@@ -35,6 +34,6 @@ pub fn with(icon: &str, text: impl std::fmt::Display) -> String {
 
 /// The icons texts name (`{ $deleted-icon }` in "Files marked … deleted"),
 /// as arguments of [`crate::i18n::Tr::t_args`].
-pub fn args() -> [(&'static str, fluent_templates::fluent_bundle::FluentValue<'static>); 3] {
-    [("deleted-icon", DELETED.into()), ("edited-icon", EDITED.into()), ("remove-icon", REMOVE.into())]
+pub fn args() -> [(&'static str, fluent_templates::fluent_bundle::FluentValue<'static>); 2] {
+    [("deleted-icon", DELETED.into()), ("remove-icon", REMOVE.into())]
 }
