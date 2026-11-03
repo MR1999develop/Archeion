@@ -233,9 +233,15 @@ pub fn run(storage: &Storage, id: ProfileId, work: Work, scheduled: bool, log: O
         std::env::var(crate::extract::PASSWORD_VAR).ok().filter(|p| !p.is_empty()).and_then(Password::new)
     });
     let pw = password.as_ref();
+    let changes_archives = matches!(work, Work::Backup { .. } | Work::Merge { .. } | Work::Delete { .. });
+    if matches!(work, Work::Backup { .. } | Work::Verify { .. }) {
+        warn_if_went_back(storage, &tr, &profile, pw);
+    }
     // The engine reports progress and the final summary itself.
     let result = match work {
-        Work::Backup { mode } => archeion_engine::backup(&profile, pw, mode, &sink).map(|_| ()),
+        Work::Backup { mode } => archeion_engine::backup(&profile, pw, mode, &sink).map(|report| {
+            warn_if_unusual(storage, &tr, &profile, &log_path, &report);
+        }),
         Work::Merge { range, drop_deleted } => {
             let mut profile = profile.clone();
             profile.merge.keep_deleted &= !drop_deleted;
@@ -256,6 +262,12 @@ pub fn run(storage: &Storage, id: ProfileId, work: Work, scheduled: bool, log: O
         },
         Work::Verify { sample } => archeion_engine::verify(&profile, pw, sample, &sink).map(|_| ()),
     };
+    if changes_archives
+        && result.is_ok()
+        && let Some(newest) = newest_backup(&profile, pw)
+    {
+        crate::seen::record(storage.dir(), profile.id, newest.as_deref());
+    }
     // After a scheduled backup, the checks that are due run in the same
     // process, each with its own log.
     if after_scheduled_backup && result.is_ok() {
@@ -331,6 +343,50 @@ pub fn run(storage: &Storage, id: ProfileId, work: Work, scheduled: bool, log: O
             fail(&sink, &e.to_string())
         }
     }
+}
+
+/// The newest backup at the destination: `Some(None)` when there is none,
+/// `None` when the destination cannot be read now.
+fn newest_backup(profile: &archeion_core::Profile, pw: Option<&Password>) -> Option<Option<String>> {
+    archeion_engine::list_archives(profile, pw).ok().map(|list| list.into_iter().next().map(|a| a.name))
+}
+
+/// Warns when the destination holds older backups than this computer last
+/// saw there ([`crate::seen`]), then remembers what it holds now.
+fn warn_if_went_back(storage: &Storage, tr: &Tr, profile: &archeion_core::Profile, pw: Option<&Password>) {
+    let Some(newest) = newest_backup(profile, pw) else { return };
+    let seen = crate::seen::load(storage.dir());
+    let remembered = seen.get(&profile.id).map(String::as_str);
+    if !crate::seen::went_back(remembered, newest.as_deref()) {
+        return;
+    }
+    tracing::warn!(?remembered, ?newest, "the destination holds older backups than last seen");
+    let title = tr.t_args("alert-went-back-title", &[("name", crate::i18n::arg(profile.name.clone()))]);
+    notify::toast(&title, &tr.t("alert-went-back-body"));
+    crate::seen::record(storage.dir(), profile.id, newest.as_deref());
+}
+
+/// After an incremental backup that touched far more files than usual
+/// ([`history::unusual_changes`]): a notification, whoever started it.
+fn warn_if_unusual(
+    storage: &Storage,
+    tr: &Tr,
+    profile: &archeion_core::Profile,
+    log: &std::path::Path,
+    report: &archeion_core::BackupReport,
+) {
+    if report.complete {
+        return;
+    }
+    let current = report.files_new.saturating_add(report.files_changed).saturating_add(report.files_deleted);
+    let runs = history::list(storage.dir(), history::KEEP_LOGS);
+    if !history::unusual_changes(current, &history::incremental_changes(&runs, profile.id, log)) {
+        return;
+    }
+    tracing::warn!(files = current, "far more files changed than usual");
+    let title = tr.t_args("alert-unusual-title", &[("name", crate::i18n::arg(profile.name.clone()))]);
+    let body = tr.t_args("alert-unusual-body", &[("count", crate::i18n::arg(current))]);
+    notify::toast(&title, &body);
 }
 
 fn fail(sink: &Sink, message: &str) -> ExitCode {

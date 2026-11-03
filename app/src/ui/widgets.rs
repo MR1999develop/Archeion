@@ -6,6 +6,19 @@ use eframe::egui::{
     self, Align2, Button, Response, RichText, Sense, Stroke, Ui, WidgetInfo, accesskit::Role,
 };
 
+/// A message of the status bar (an outcome, an Undo offer): a label that a
+/// screen reader announces when it appears or changes (a polite live
+/// region), in the warning colour when `warn`.
+pub fn status_text(ui: &mut Ui, text: impl Into<String>, warn: bool) -> Response {
+    let text = text.into();
+    let rich = RichText::new(text.as_str());
+    let rich = if warn { rich.color(ui.visuals().warn_fg_color) } else { rich };
+    let resp = ui.add(egui::Label::new(rich).sense(Sense::hover()));
+    resp.widget_info(|| WidgetInfo::labeled(Role::Label, true, text.as_str()));
+    ui.ctx().accesskit_node_builder(resp.id, |node| node.set_live(egui::accesskit::Live::Polite));
+    resp
+}
+
 /// Title of a group of controls: semibold body text.
 pub fn section_title(ui: &mut Ui, text: impl Into<String>) -> Response {
     ui.label(section_text(text))
@@ -51,7 +64,10 @@ pub fn tabs<T: PartialEq + Copy>(
                 f32::INFINITY,
                 egui::TextStyle::Button,
             );
-            let (rect, resp) = ui.allocate_exact_size(galley.size() + egui::vec2(0.0, 10.0), Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(
+                galley.size() + egui::vec2(0.0, theme::TAB_EXTRA_HEIGHT),
+                Sense::click(),
+            );
             let resp = match hint {
                 Some(h) => resp.on_hover_text(h.as_str()),
                 None => resp,
@@ -181,11 +197,7 @@ pub fn list_item(ui: &mut Ui, selected: bool, title: RichText, detail: Option<&s
             ui.painter().rect_filled(rect, theme::RADIUS, fill);
         }
         if selected {
-            let mark = egui::Rect::from_center_size(
-                egui::pos2(rect.left() + 1.5, rect.center().y),
-                egui::vec2(3.0, (height * 0.5).min(16.0)),
-            );
-            ui.painter().rect_filled(mark, 1.5, t.accent);
+            accent_mark(ui, rect, height * 0.5, t.accent);
         }
         let top = egui::pos2(rect.left() + pad.x, rect.center().y - text_height / 2.0);
         let below = top + egui::vec2(0.0, title_galley.size().y);
@@ -215,19 +227,25 @@ pub fn chosen_name(ui: &mut Ui, selected: bool, text: impl Into<egui::WidgetText
     }
     resp.widget_info(|| WidgetInfo::selected(Role::ListItem, true, selected, &name));
     let rect = egui::Rect::from_min_max(
-        resp.rect.min - egui::vec2(theme::SPACE_S, 2.0),
-        resp.rect.max + egui::vec2(theme::SPACE_XS, 2.0),
+        resp.rect.min - egui::vec2(theme::SPACE_S, theme::CHOSEN_PAD_Y),
+        resp.rect.max + egui::vec2(theme::SPACE_XS, theme::CHOSEN_PAD_Y),
     );
     let fill = if selected { Some(t.selected) } else { resp.hovered().then_some(t.control_hover) };
     if let Some(fill) = fill {
         ui.painter().set(behind, egui::Shape::rect_filled(rect, theme::RADIUS, fill));
     }
     if selected {
-        let mark = egui::Rect::from_center_size(
-            egui::pos2(rect.left() + 1.5, rect.center().y),
-            egui::vec2(3.0, (rect.height() * 0.6).min(16.0)),
-        );
-        ui.painter().rect_filled(mark, 1.5, t.accent);
+        accent_mark(ui, rect, rect.height() * 0.6, t.accent);
     }
     resp
+}
+
+/// The accent mark at the left edge of `rect`, `height` high at most.
+fn accent_mark(ui: &Ui, rect: egui::Rect, height: f32, color: egui::Color32) {
+    let half = theme::ACCENT_MARK_WIDTH / 2.0;
+    let mark = egui::Rect::from_center_size(
+        egui::pos2(rect.left() + half, rect.center().y),
+        egui::vec2(theme::ACCENT_MARK_WIDTH, height.min(theme::ACCENT_MARK_MAX_HEIGHT)),
+    );
+    ui.painter().rect_filled(mark, half, color);
 }

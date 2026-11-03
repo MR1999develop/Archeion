@@ -74,13 +74,15 @@ pub struct Drafts {
 
 impl Drafts {
     /// Forgets the typed passwords (after saving, or on another profile).
+    /// Forgets what was typed, overwriting the memory it used.
     pub fn clear_password(&mut self) {
-        self.password.clear();
-        self.password_again.clear();
+        use zeroize::Zeroize as _;
+        self.password.zeroize();
+        self.password_again.zeroize();
         self.password_ack = false;
-        self.current_password.clear();
+        self.current_password.zeroize();
         self.recovery_open = false;
-        self.recovery_password.clear();
+        self.recovery_password.zeroize();
     }
 }
 
@@ -219,6 +221,17 @@ pub fn show(
         large_files(ui, tr, p, format, &mut out);
     });
     section(ui, "schedule", &tr.t("schedule"), true, false, |ui| {
+        if p.schedule_paused {
+            ui.colored_label(
+                ui.visuals().warn_fg_color,
+                symbol::with(symbol::WARNING, tr.t("schedule-paused")),
+            );
+            if ui.button(tr.t("schedule-resume")).clicked() {
+                p.schedule_paused = false;
+                out.changed = true;
+                out.schedule_changed = true;
+            }
+        }
         schedule(ui, tr, "backup", &mut p.schedule, &mut out);
         if p.schedule.is_automatic() {
             ui.weak(tr.t("schedule-hint"));
@@ -642,7 +655,7 @@ fn recovery_ui(ui: &mut Ui, tr: &Tr, password: &PasswordStatus, drafts: &mut Dra
             drafts.recovery_open = false;
             egui::Frame::group(ui.style()).show(ui, |ui| {
                 widgets::section_title(ui, tr.t("recovery-title"));
-                ui.label(RichText::new(key).monospace().size(16.0));
+                ui.label(RichText::new(key).monospace().size(theme::FONT_KEY));
                 ui.weak(tr.t("recovery-hint"));
                 ui.colored_label(
                     ui.visuals().warn_fg_color,

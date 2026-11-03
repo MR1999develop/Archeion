@@ -107,6 +107,9 @@ pub struct ArcheionApp {
     preferences: Preferences,
     /// Backups of a deleted profile being deleted, or the outcome.
     wipe: Option<Wipe>,
+    /// Taking over a destination, on a thread of its own (a share may be
+    /// slow): its result.
+    adopting: Option<mpsc::Receiver<Result<(), String>>>,
     /// When the window took a size not saved yet: it is saved once the
     /// resizing stops.
     resized_at: Option<Instant>,
@@ -204,6 +207,7 @@ impl ArcheionApp {
             preferences: Preferences::default(),
             resized_at: None,
             wipe: None,
+            adopting: None,
             fitted: false,
         }
     }
@@ -508,9 +512,31 @@ impl ArcheionApp {
     }
 
     /// Gives the backups of a deleted profile at the destination to `id`.
-    fn adopt_destination(&mut self, id: ProfileId) {
+    fn adopt_destination(&mut self, ctx: &egui::Context, id: ProfileId) {
         let Some(p) = self.settings.profile(id).cloned() else { return };
-        match archeion_engine::adopt_destination(&p) {
+        if self.adopting.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let ctx = ctx.clone();
+        let spawned = std::thread::Builder::new().name("adopt-destination".into()).spawn(move || {
+            let _ = tx.send(archeion_engine::adopt_destination(&p).map_err(|e| e.to_string()));
+            ctx.request_repaint();
+        });
+        match spawned {
+            Ok(_) => self.adopting = Some(rx),
+            Err(e) => {
+                self.error = Some(self.tr.t_args("dest-adopt-failed", &[("detail", arg(e.to_string()))]))
+            }
+        }
+    }
+
+    /// The result of [`Self::adopt_destination`], once there.
+    fn poll_adopting(&mut self) {
+        let Some(rx) = &self.adopting else { return };
+        let Ok(result) = rx.try_recv() else { return };
+        self.adopting = None;
+        match result {
             Ok(()) => {
                 self.format.invalidate();
                 self.restore.invalidate();
@@ -518,7 +544,7 @@ impl ArcheionApp {
             }
             Err(e) => {
                 tracing::error!(error = %e, "taking over the destination");
-                self.error = Some(self.tr.t_args("dest-adopt-failed", &[("detail", arg(e.to_string()))]));
+                self.error = Some(self.tr.t_args("dest-adopt-failed", &[("detail", arg(e))]));
             }
         }
     }
@@ -862,7 +888,7 @@ impl ArcheionApp {
                 self.verify(&ctx, id, sample);
             }
             Some(editor::Command::Delete { backups }) => self.delete(id, backups),
-            Some(editor::Command::AdoptDestination) => self.adopt_destination(id),
+            Some(editor::Command::AdoptDestination) => self.adopt_destination(&ui.ctx().clone(), id),
             None => {}
         }
     }
@@ -964,18 +990,18 @@ impl ArcheionApp {
                         ui.label(self.tr.t_args("delete-backups-running", &[("name", arg(name.clone()))]));
                     }
                     Wipe::Done { text, warn } => {
-                        if *warn {
-                            ui.colored_label(ui.visuals().warn_fg_color, text);
-                        } else {
-                            ui.label(text);
-                        }
+                        widgets::status_text(ui, text.as_str(), *warn);
                         if widgets::icon_button(ui, symbol::REMOVE, self.tr.t("close")).clicked() {
                             self.wipe = None;
                         }
                     }
                 }
             } else if let Some(removed) = &self.removed {
-                ui.label(self.tr.t_args("profile-removed", &[("name", arg(removed.name.clone()))]));
+                widgets::status_text(
+                    ui,
+                    self.tr.t_args("profile-removed", &[("name", arg(removed.name.clone()))]),
+                    false,
+                );
                 if ui.button(self.tr.t("undo")).clicked() {
                     self.undo_delete();
                 }
@@ -990,11 +1016,7 @@ impl ArcheionApp {
             {
                 let name = self.settings.profile(a.profile).map(|p| p.name.clone()).unwrap_or_default();
                 let (text, warn) = outcome_text(&self.tr, &name, a.op, outcome);
-                if warn {
-                    ui.colored_label(ui.visuals().warn_fg_color, text);
-                } else {
-                    ui.label(text);
-                }
+                widgets::status_text(ui, text, warn);
                 if self.tab != Tab::Activity && ui.link(self.tr.t("show-details")).clicked() {
                     self.tab = Tab::Activity;
                 }
@@ -1173,6 +1195,9 @@ impl PasswordState {
     }
 
     fn hide_recovery(&mut self) {
+        if let Some((_, key)) = &mut self.recovery {
+            zeroize::Zeroize::zeroize(key);
+        }
         self.recovery = None;
         self.recovery_error = None;
     }
@@ -1328,6 +1353,7 @@ impl eframe::App for ArcheionApp {
         self.window_events(&ctx);
         self.remember_size(&ctx);
         self.poll_wipe(&ctx);
+        self.poll_adopting();
         self.poll();
         self.update_tray();
         if self.close_after_run && self.job.is_none() {
@@ -1387,7 +1413,7 @@ impl eframe::App for ArcheionApp {
 /// by events.
 fn task_specs(p: &Profile, exe: &std::path::Path, user: &str) -> [TaskSpec; 3] {
     [
-        (TaskKind::Backup, p.schedule.clone()),
+        (TaskKind::Backup, if p.schedule_paused { Schedule::Manual } else { p.schedule.clone() }),
         // Merges run from the window now: a merge task left by an older
         // version is removed.
         (TaskKind::Merge, Schedule::Manual),

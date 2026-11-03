@@ -283,6 +283,39 @@ pub fn last_backup(runs: &[RunLog], profile: ProfileId) -> Option<i64> {
         .max()
 }
 
+/// Files new, changed or deleted by each finished incremental backup of
+/// `profile` in `runs` (newest first), leaving out the run logged in
+/// `except`.
+pub fn incremental_changes(runs: &[RunLog], profile: ProfileId, except: &Path) -> Vec<u64> {
+    runs.iter()
+        .filter(|r| r.header.profile == profile && r.header.op == Op::Backup && r.path != except)
+        .filter_map(|r| match r.end().and_then(|l| l.event.as_ref()) {
+            Some(RunEvent::Finished { summary: archeion_core::Summary::Backup(b) }) if !b.complete => {
+                Some(b.files_new.saturating_add(b.files_changed).saturating_add(b.files_deleted))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Fewest earlier backups to compare with, and fewest files for a warning.
+const UNUSUAL_HISTORY: usize = 3;
+const UNUSUAL_MIN_FILES: u64 = 200;
+
+/// True when an incremental backup touched far more files than usual
+/// (`current` against the `earlier` ones): at least 200 and ten times the
+/// usual number. Many files encrypted or deleted at once is what
+/// ransomware does; the user is warned before the old versions age out.
+pub fn unusual_changes(current: u64, earlier: &[u64]) -> bool {
+    if earlier.len() < UNUSUAL_HISTORY || current < UNUSUAL_MIN_FILES {
+        return false;
+    }
+    let mut sorted: Vec<u64> = earlier.iter().copied().take(20).collect();
+    sorted.sort_unstable();
+    let usual = sorted.get(sorted.len() / 2).copied().unwrap_or(0).max(20);
+    current >= usual.saturating_mul(10)
+}
+
 /// Which check is due now: `Some(None)` the full check, `Some(Some(n))` a
 /// restore test of `n` files, `None` nothing. A full check also counts as
 /// a restore test. Every-0-days means never.
@@ -549,5 +582,16 @@ mod tests {
     #[test]
     fn times_are_shown_locally_to_the_second() {
         assert_eq!(local_time(now_ms()).len(), "2026-10-30 12:31:05".len());
+    }
+
+    #[test]
+    fn far_more_changes_than_usual_are_unusual() {
+        let usual = [12, 30, 8, 25, 40];
+        assert!(!unusual_changes(150, &usual), "below the minimum");
+        assert!(!unusual_changes(240, &usual), "busy, not ten times the usual (25)");
+        assert!(unusual_changes(4000, &usual));
+        assert!(!unusual_changes(4000, &[10, 10]), "too few earlier backups to judge");
+        // A profile that always changes a lot.
+        assert!(!unusual_changes(4000, &[900, 1200, 1000]));
     }
 }

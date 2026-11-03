@@ -6,7 +6,10 @@ use crate::storage::Storage;
 use archeion_core::{BackupMode, Container, Destination, Language, Profile, RunEvent, Settings};
 use archeion_engine::EventSink;
 use eframe::egui::{self, accesskit::Role};
-use egui_kittest::{Harness, kittest::Queryable as _};
+use egui_kittest::{
+    Harness,
+    kittest::{NodeT as _, Queryable as _},
+};
 use std::{
     fs,
     path::PathBuf,
@@ -134,7 +137,68 @@ fn deleting_a_profile_alone_keeps_its_backups_and_offers_undo() {
     steps(&mut h);
     assert!(storage.load().unwrap().profiles.is_empty());
     assert!(backups.join("archeion.json").exists(), "the backups stay");
+    // The message is announced to screen readers.
+    let message = h
+        .query_all_by(|n| n.value().is_some_and(|v| v.contains("Docs") && v.contains("deleted")))
+        .next()
+        .expect("the status message");
+    assert_eq!(message.accesskit_node().live(), egui::accesskit::Live::Polite);
     button(&h, "Undo").click();
     steps(&mut h);
     assert_eq!(storage.load().unwrap().profiles.len(), 1);
+}
+
+#[test]
+fn a_paused_schedule_registers_no_backup_task() {
+    let mut p = Profile::new("Imported");
+    p.schedule =
+        archeion_core::Schedule::Monthly { day: 3, at: archeion_core::TimeOfDay::new(21, 30).unwrap() };
+    p.schedule_paused = true;
+    let exe = std::path::Path::new(r"C:\Archeion\archeion.exe");
+    let backup = super::task_specs(&p, exe, "user")
+        .into_iter()
+        .find(|s| s.kind == archeion_scheduler::TaskKind::Backup);
+    assert_eq!(backup.unwrap().schedule, archeion_core::Schedule::Manual);
+    p.schedule_paused = false;
+    let backup = super::task_specs(&p, exe, "user")
+        .into_iter()
+        .find(|s| s.kind == archeion_scheduler::TaskKind::Backup);
+    assert!(backup.unwrap().schedule.is_automatic());
+}
+
+#[test]
+fn the_backups_of_a_deleted_profile_are_taken_over_without_blocking_the_window() {
+    let (_dir, storage, backups) = sandbox();
+    // The owner is gone; another profile points at its backups.
+    let mut settings = storage.load().unwrap();
+    let old = settings.profiles.remove(0);
+    let mut heir = Profile::new("Heir");
+    heir.sources = old.sources.clone();
+    heir.destination = old.destination.clone();
+    heir.container = Container::Folder;
+    let heir_id = heir.id;
+    settings.profiles.push(heir.clone());
+    storage.save(&settings).unwrap();
+
+    let mut h = harness(storage);
+    let started = Instant::now();
+    while h
+        .query_all_by(|n| {
+            n.role() == Role::Button && n.label().as_deref() == Some("Use these backups for this profile")
+        })
+        .next()
+        .is_none()
+    {
+        assert!(started.elapsed() < Duration::from_secs(20), "no offer to take the backups over");
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+    button(&h, "Use these backups for this profile").click();
+    let started = Instant::now();
+    while archeion_engine::destination_owner(&heir).ok().flatten() != Some(heir_id) {
+        assert!(started.elapsed() < Duration::from_secs(20), "not taken over");
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+    assert!(backups.exists());
 }

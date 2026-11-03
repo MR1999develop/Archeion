@@ -162,7 +162,7 @@ fn run(
     sink.emit(RunEvent::Phase { phase: Phase::Scanning });
     let mut report = BackupReport { complete: kind == ArchiveKind::Complete, ..BackupReport::default() };
     let excludes = Excluder::new(&profile.excludes)?;
-    let mut scan = Scan::new(previous.as_ref(), &excludes, kind == ArchiveKind::Complete);
+    let mut scan = Scan::new(previous.as_ref(), &excludes, repo.root(), kind == ArchiveKind::Complete);
     let mut scanning = Progress::new(sink, 0, 0);
     for source in top_level_sources(&profile.sources) {
         scan.walk(&source, sink, &mut scanning, &mut report);
@@ -731,6 +731,8 @@ impl Change {
 struct Scan<'a> {
     previous: HashMap<&'a str, &'a Entry>,
     excludes: &'a Excluder,
+    /// The destination folder: left out.
+    destination: &'a Path,
     /// Copy unchanged files too (complete backup).
     copy_all: bool,
     entries: Vec<Entry>,
@@ -742,10 +744,24 @@ struct Scan<'a> {
 }
 
 impl<'a> Scan<'a> {
-    fn new(previous: Option<&'a Manifest>, excludes: &'a Excluder, copy_all: bool) -> Self {
+    fn new(
+        previous: Option<&'a Manifest>,
+        excludes: &'a Excluder,
+        destination: &'a Path,
+        copy_all: bool,
+    ) -> Self {
         let previous =
             previous.map(|m| m.entries.iter().map(|e| (e.key.as_str(), e)).collect()).unwrap_or_default();
-        Self { previous, excludes, copy_all, entries: Vec::new(), efs: 0, to_copy: Vec::new(), unchanged: 0 }
+        Self {
+            previous,
+            excludes,
+            destination,
+            copy_all,
+            entries: Vec::new(),
+            efs: 0,
+            to_copy: Vec::new(),
+            unchanged: 0,
+        }
     }
 
     /// Walks `source`; `scanning` counts the files found and shows the
@@ -761,12 +777,18 @@ impl<'a> Scan<'a> {
             skip(sink, report, source, "folder not found".to_owned());
             return;
         }
-        let excludes = self.excludes;
+        let (excludes, destination) = (self.excludes, self.destination);
+        // The destination is never backed up into itself, whatever the
+        // profile says (the settings refuse it, a path typed otherwise may
+        // still lead there).
         let walker = walkdir::WalkDir::new(source)
             .follow_links(false)
             .sort_by_file_name()
             .into_iter()
-            .filter_entry(|e| !excludes.excludes(e.path(), e.file_type().is_dir()));
+            .filter_entry(move |e| {
+                !excludes.excludes(e.path(), e.file_type().is_dir())
+                    && !(e.file_type().is_dir() && archeion_core::profile::path_within(e.path(), destination))
+            });
         for item in walker {
             let item = match item {
                 Ok(i) => i,

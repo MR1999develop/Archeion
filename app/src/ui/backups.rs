@@ -120,14 +120,15 @@ impl BackupsView {
                         }
                         let selected = self.selected.as_deref() == Some(a.name.as_str());
                         let text = format!("{}  ·  {kind}  ·  {}", a.time_label, tr.bytes(a.bytes_stored));
-                        let resp = ui.selectable_label(selected, text).on_hover_text(tr.t_args(
-                            "archive-tooltip",
-                            &[
-                                ("files", arg(a.files_total)),
-                                ("stored", arg(a.files_stored)),
-                                ("size", arg(tr.bytes(a.bytes_stored))),
-                            ],
-                        ));
+                        let resp = widgets::list_item(ui, selected, egui::RichText::new(text), None)
+                            .on_hover_text(tr.t_args(
+                                "archive-tooltip",
+                                &[
+                                    ("files", arg(a.files_total)),
+                                    ("stored", arg(a.files_stored)),
+                                    ("size", arg(tr.bytes(a.bytes_stored))),
+                                ],
+                            ));
                         if resp.clicked() {
                             clicked = Some(a.name.clone());
                         }

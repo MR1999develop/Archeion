@@ -62,8 +62,9 @@ const ARGON_MEMORY_RANGE: std::ops::RangeInclusive<u32> = (8 * 1024)..=(1024 * 1
 const ARGON_PASSES_RANGE: std::ops::RangeInclusive<u32> = 1..=20;
 const ARGON_LANES_RANGE: std::ops::RangeInclusive<u32> = 1..=16;
 
-/// A destination password. Its `Debug` output never shows it.
-#[derive(Clone, PartialEq, Eq)]
+/// A destination password. Its `Debug` output never shows it, and its
+/// memory is wiped when it is dropped.
+#[derive(Clone, PartialEq, Eq, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub struct Password(String);
 
 impl Password {
@@ -101,7 +102,8 @@ struct KeyFile {
 }
 
 /// An unlocked encrypted destination.
-#[derive(Clone)]
+/// Wiped from memory when dropped.
+#[derive(Clone, zeroize::Zeroize, zeroize::ZeroizeOnDrop)]
 pub(crate) struct Keys {
     master: [u8; 32],
     /// The master key as hex: the password of every zip.

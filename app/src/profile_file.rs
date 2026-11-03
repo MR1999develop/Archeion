@@ -79,7 +79,11 @@ pub fn import(path: &Path) -> Result<Profile, ImportError> {
 /// id, so on another computer it finds its own backups at the destination;
 /// a profile already here with that id (the same file imported twice)
 /// makes it a copy, with a new id and a name of its own.
+///
+/// Its schedule does not run until the user turns it on: a file from
+/// elsewhere decides what is backed up and where.
 pub fn add(settings: &mut Settings, mut profile: Profile) -> ProfileId {
+    profile.schedule_paused = profile.schedule.is_automatic() || profile.events.any();
     if settings.profile(profile.id).is_some() {
         profile.id = ProfileId::new_random();
     }
@@ -166,6 +170,22 @@ mod tests {
         assert_eq!(settings.profile(copy).unwrap().name, "Documenti (2)");
         let third = add(&mut settings, p);
         assert_eq!(settings.profile(third).unwrap().name, "Documenti (3)");
+    }
+
+    #[test]
+    fn an_imported_schedule_waits_to_be_turned_on() {
+        let mut settings = Settings::default();
+        let p = sample();
+        assert!(p.schedule.is_automatic());
+        let id = add(&mut settings, p);
+        let imported = settings.profile(id).unwrap();
+        assert!(imported.schedule_paused && !imported.backs_up_automatically());
+        assert!(imported.schedule.is_automatic(), "kept for when it is turned on");
+
+        let mut manual = sample();
+        manual.schedule = Schedule::Manual;
+        let id = add(&mut settings, manual);
+        assert!(!settings.profile(id).unwrap().schedule_paused, "nothing to wait for");
     }
 
     #[test]
