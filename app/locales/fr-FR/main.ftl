@@ -142,8 +142,8 @@ unexpected-stop = L'opération s'est arrêtée de façon inattendue.
 # Restore browser
 dates = Dates des sauvegardes
 archive-tooltip = { $files } fichiers, { $stored } enregistrés dans cette sauvegarde ({ $size })
-search-hint = Rechercher un fichier par nom dans toutes les sauvegardes…
-no-results = Aucun fichier portant ce nom.
+search-hint = Rechercher un fichier ou un dossier par nom dans toutes les sauvegardes…
+no-results = Aucun fichier ni dossier portant ce nom.
 results = { $count ->
     [one] { $count } fichier trouvé
    *[other] { $count } fichiers trouvés
@@ -170,7 +170,7 @@ restore-tree-count = { $files ->
         [one] { $files } fichier
        *[other] { $files } fichiers
     } dans les sauvegardes · supprimés à la source : { $deleted }
-restore-tree-hint = Cochez des fichiers ou des dossiers pour les restaurer ; la recherche trouve un fichier par son nom. Les fichiers marqués { $deleted-icon } supprimé ne sont plus à la source et peuvent encore être restaurés.
+restore-tree-hint = Cochez des fichiers ou des dossiers pour les restaurer ; la recherche trouve un fichier ou un dossier par son nom, majuscules ou minuscules. Les fichiers marqués { $deleted-icon } supprimé ne sont plus à la source et peuvent encore être restaurés.
 deleted-label = supprimé
 tree-deleted-file = Absent de la sauvegarde la plus récente : supprimé à la source. Cochez-le pour restaurer l'une de ses versions.
 tree-deleted-folder = Absent de la sauvegarde la plus récente : supprimé à la source. Cochez-le pour le restaurer tel qu'il était à une date.
@@ -506,7 +506,7 @@ doc-large-body = Un gros fichier qui change peu (une boîte aux lettres, le disq
 doc-large-complete = Les sauvegardes complètes conservent toujours chaque fichier entier, en zip, en copie simple ou en zip chiffré, et peuvent donc être restaurées avec 7-Zip seul ; seules les sauvegardes incrémentielles qui les suivent contiennent des morceaux. La restauration réassemble les morceaux et vérifie chacun ; la vérification d'intégrité lit tous les morceaux.
 doc-large-upgrade = Les sauvegardes faites par les versions précédentes restent telles quelles et toujours lisibles. Les morceaux commencent avec la prochaine sauvegarde complète : sur une telle destination, la prochaine sauvegarde automatique est complète.
 doc-restore-title = Restauration des fichiers
-doc-restore-body = Ouvrez l'onglet Sauvegardes du profil (ou Sauvegarde > Restaurer des fichiers…) : « Restaurer des fichiers » montre une seule arborescence de tous les fichiers et dossiers jamais sauvegardés ; les fichiers qui ne sont plus à la source sont marqués { $deleted-icon } supprimé et peuvent encore être restaurés. Cochez des fichiers ou des dossiers dans l'arborescence ou dans les résultats de recherche (le champ de recherche trouve un fichier par son nom).
+doc-restore-body = Ouvrez l'onglet Sauvegardes du profil (ou Sauvegarde > Restaurer des fichiers…) : « Restaurer des fichiers » montre une seule arborescence de tous les fichiers et dossiers jamais sauvegardés ; les fichiers qui ne sont plus à la source sont marqués { $deleted-icon } supprimé et peuvent encore être restaurés. Cochez des fichiers ou des dossiers dans l'arborescence ou dans les résultats de recherche (le champ de recherche trouve un fichier ou un dossier par son nom, majuscules ou minuscules).
 doc-restore-versions = Un fichier coché revient dans sa version la plus récente ; un dossier coché revient en entier, tel qu’il était dans la sauvegarde la plus récente qui le contient.
 doc-restore-where = En haut du panneau de droite, choisissez où tout va : à côté de l'original avec la date dans le nom (rapport.docx revient sous le nom « rapport (2026-11-02 21.30).docx » et le fichier actuel n'est pas modifié), à l'emplacement d'origine ou dans un autre dossier ; les fichiers existants ne sont remplacés que si vous cochez « Remplacer les fichiers qui existent déjà ». Restaurer ramène ensuite tout en une seule opération. « Effacer la sélection », à côté, décoche tout.
 doc-verify-title = Contrôle d'intégrité et test de restauration

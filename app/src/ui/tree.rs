@@ -206,8 +206,8 @@ impl Tree {
         }
     }
 
-    /// Files whose name contains `query` (case-insensitive), in key order,
-    /// at most `limit`.
+    /// Files and folders whose name contains `query`, whatever the case,
+    /// in key order (a folder before what it holds), at most `limit`.
     pub fn search(&self, query: &str, limit: usize) -> Vec<usize> {
         let needle = query.trim().to_lowercase();
         if needle.is_empty() {
@@ -216,7 +216,6 @@ impl Tree {
         self.nodes
             .iter()
             .enumerate()
-            .filter(|(_, n)| !n.is_dir())
             .filter(|(_, n)| n.label.to_lowercase().contains(&needle))
             .map(|(i, _)| i)
             .take(limit)
@@ -275,14 +274,19 @@ mod tests {
     }
 
     #[test]
-    fn search_matches_file_names_only() {
+    fn search_matches_file_and_folder_names_whatever_the_case() {
         let t = Tree::build(catalog(vec![
-            entry("C/Report", EntryKind::Dir, vec![(0, 2)]),
-            entry("C/Report/notes.txt", EntryKind::File, vec![(0, 2)]),
-            entry("C/Report/REPORT.docx", EntryKind::File, vec![(0, 2)]),
+            entry("C/Docs", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/Report", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/Report/notes.txt", EntryKind::File, vec![(0, 2)]),
+            entry("C/Docs/Report/REPORT.docx", EntryKind::File, vec![(0, 2)]),
+            entry("C/Docs/JPEG", EntryKind::Dir, vec![(0, 2)]),
+            entry("C/Docs/JPEG/Città.jpg", EntryKind::File, vec![(0, 2)]),
         ]));
-        let hits: Vec<&str> = t.search(" report ", 10).iter().map(|&i| t.nodes[i].key()).collect();
-        assert_eq!(hits, vec!["C/Report/REPORT.docx"]);
+        let hits = |q: &str| -> Vec<&str> { t.search(q, 10).iter().map(|&i| t.nodes[i].key()).collect() };
+        assert_eq!(hits(" report "), vec!["C/Docs/Report", "C/Docs/Report/REPORT.docx"]);
+        assert_eq!(hits("Jpeg"), vec!["C/Docs/JPEG"], "a folder, any case");
+        assert_eq!(hits("CITTÀ"), vec!["C/Docs/JPEG/Città.jpg"], "accented capitals");
         assert!(t.search("", 10).is_empty());
         assert_eq!(t.search("t", 1).len(), 1);
     }

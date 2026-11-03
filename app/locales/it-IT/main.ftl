@@ -142,8 +142,8 @@ unexpected-stop = L'operazione si è interrotta in modo inatteso.
 # Restore browser
 dates = Date dei backup
 archive-tooltip = { $files } file, { $stored } salvati in questo backup ({ $size })
-search-hint = Cerca un file per nome in tutti i backup…
-no-results = Nessun file con questo nome.
+search-hint = Cerca un file o una cartella per nome in tutti i backup…
+no-results = Nessun file o cartella con questo nome.
 results = { $count ->
     [one] 1 file trovato
    *[other] { $count } file trovati
@@ -170,7 +170,7 @@ restore-tree-count = { $files ->
         [one] 1 file
        *[other] { $files } file
     } nei backup · eliminati dall'origine: { $deleted }
-restore-tree-hint = Spunta file o cartelle per ripristinarli; la ricerca trova un file per nome. I file segnati { $deleted-icon } eliminato non sono più nell'origine e si possono comunque ripristinare.
+restore-tree-hint = Spunta file o cartelle per ripristinarli; la ricerca trova un file o una cartella per nome, con maiuscole o minuscole. I file segnati { $deleted-icon } eliminato non sono più nell'origine e si possono comunque ripristinare.
 deleted-label = eliminato
 tree-deleted-file = Non è nel backup più recente: eliminato dall'origine. Spuntalo per ripristinarne una versione.
 tree-deleted-folder = Non è nel backup più recente: eliminata dall'origine. Spuntala per ripristinarla com'era in una data.
@@ -506,7 +506,7 @@ doc-large-body = Un file grande che cambia di poco (una casella di posta, il dis
 doc-large-complete = I backup completi conservano comunque ogni file intero, come zip, copia semplice o zip cifrato, così si possono ripristinare con il solo 7-Zip; solo i backup incrementali che li seguono contengono pezzi. Il ripristino rimette insieme i pezzi e controlla ognuno; il controllo di integrità legge ogni pezzo.
 doc-large-upgrade = I backup fatti dalle versioni precedenti restano come sono e si leggono ancora. I pezzi iniziano con il backup completo successivo: in una destinazione così il prossimo backup automatico è completo.
 doc-restore-title = Ripristino dei file
-doc-restore-body = Apri la scheda Backup del profilo (o Backup > Ripristina file…): "Ripristina file" mostra un unico albero di tutti i file e le cartelle mai salvati dai backup; i file che non sono più nell'origine sono segnati { $deleted-icon } eliminato e si possono comunque ripristinare. Spunta file o cartelle nell'albero o nei risultati della ricerca (la casella di ricerca trova un file per nome).
+doc-restore-body = Apri la scheda Backup del profilo (o Backup > Ripristina file…): "Ripristina file" mostra un unico albero di tutti i file e le cartelle mai salvati dai backup; i file che non sono più nell'origine sono segnati { $deleted-icon } eliminato e si possono comunque ripristinare. Spunta file o cartelle nell'albero o nei risultati della ricerca (la casella di ricerca trova un file o una cartella per nome, con maiuscole o minuscole).
 doc-restore-versions = Un file spuntato torna nella sua versione più recente; una cartella spuntata torna per intero, com'era nel backup più recente che la contiene.
 doc-restore-where = In cima al pannello di destra scegli dove va tutto: accanto all'originale con la data nel nome (relazione.docx torna come "relazione (2026-11-02 21.30).docx" e il file attuale non viene toccato), nella posizione originale o in un'altra cartella; i file già presenti vengono sostituiti solo se spunti "Sostituisci i file già presenti". Ripristina poi riporta tutto in un'unica operazione. "Togli selezione", accanto, toglie tutte le spunte.
 doc-verify-title = Controllo di integrità e prova di ripristino

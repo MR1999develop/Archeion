@@ -142,8 +142,8 @@ unexpected-stop = The operation stopped unexpectedly.
 # Restore browser
 dates = Backup dates
 archive-tooltip = { $files } files, { $stored } saved in this backup ({ $size })
-search-hint = Search a file by name in every backup…
-no-results = No file with that name.
+search-hint = Search a file or folder by name in every backup…
+no-results = No file or folder with that name.
 results = { $count ->
     [one] 1 file found
    *[other] { $count } files found
@@ -170,7 +170,7 @@ restore-tree-count = { $files ->
         [one] 1 file
        *[other] { $files } files
     } in the backups · deleted at the source: { $deleted }
-restore-tree-hint = Tick files or folders to restore them; the search finds a file by name. Files marked { $deleted-icon } deleted are no longer at the source and can still be restored.
+restore-tree-hint = Tick files or folders to restore them; the search finds a file or folder by name, whatever the case. Files marked { $deleted-icon } deleted are no longer at the source and can still be restored.
 deleted-label = deleted
 tree-deleted-file = Not in the newest backup: deleted at the source. Tick it to restore one of its versions.
 tree-deleted-folder = Not in the newest backup: deleted at the source. Tick it to restore it as it was on a date.
@@ -506,7 +506,7 @@ doc-large-body = A large file that changes a little (a mailbox, a virtual machin
 doc-large-complete = Complete backups still keep every file whole, as a zip, a plain copy or an encrypted zip, so they can be restored with 7-Zip alone; only the incremental backups after them hold pieces. Restoring puts the pieces back together and checks each one; the integrity check reads every piece.
 doc-large-upgrade = Backups made by earlier versions stay as they are and remain readable. Pieces start with the next complete backup: on such a destination the next automatic backup is complete.
 doc-restore-title = Restoring files
-doc-restore-body = Open the Backups tab of the profile (or Backup > Restore files…): "Restore files" shows one tree of every file and folder the backups ever saved; files no longer at the source are marked { $deleted-icon } deleted and can still be restored. Tick files or folders in the tree or in the search results (the search box finds a file by name).
+doc-restore-body = Open the Backups tab of the profile (or Backup > Restore files…): "Restore files" shows one tree of every file and folder the backups ever saved; files no longer at the source are marked { $deleted-icon } deleted and can still be restored. Tick files or folders in the tree or in the search results (the search box finds a file or folder by name, whatever the case).
 doc-restore-versions = A ticked file comes back as its newest version; a ticked folder comes back whole, as it was in the newest backup that holds it.
 doc-restore-where = At the top of the right panel choose where everything goes: next to the original with the date in the name (report.docx comes back as "report (2026-11-02 21.30).docx" and the current file is not touched), the original location, or another folder; existing files are replaced only if you tick "Replace files that already exist". Restore then brings everything back in one run. "Clear selection", beside it, unticks everything.
 doc-verify-title = Integrity check and restore test

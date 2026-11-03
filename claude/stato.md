@@ -4,7 +4,7 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con il ripristino senza schede (ramo `feature/restore-no-cards`
+`main` con la ricerca anche delle cartelle (ramo `feature/search-folders`
 unito; `tools\check.bat` verde: fmt, clippy, 321
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
