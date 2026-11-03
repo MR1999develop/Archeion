@@ -349,6 +349,12 @@ fn the_arrow_keys_move_between_the_files_shown() {
     h.key_press(egui::Key::ArrowUp);
     settle(&mut h);
     assert_eq!(shown(&h).as_deref(), Some("b.txt"), "up: the file above");
+    assert_eq!(
+        name(&h, &file("b.txt")).unwrap().accesskit_node().toggled(),
+        Some(Toggled::True),
+        "it stands out"
+    );
+    assert_eq!(name(&h, &file("a.txt")).unwrap().accesskit_node().toggled(), Some(Toggled::False));
     h.key_press(egui::Key::ArrowUp);
     settle(&mut h);
     assert_eq!(shown(&h).as_deref(), Some("b.txt"), "the first stays");
@@ -400,6 +406,51 @@ fn a_file_inside_a_ticked_folder_can_come_back_in_another_version() {
     assert_eq!(folder_item.exclude, vec![a.clone()], "the file leaves the folder");
     let file_item = req.items.iter().find(|i| i.key.as_deref() == Some(a.as_str())).unwrap();
     assert_eq!(file_item.archive, oldest, "and comes back in the version chosen");
+}
+
+#[test]
+fn a_deleted_file_can_be_ticked_inside_a_ticked_folder() {
+    let f = backed_up();
+    std::thread::sleep(Duration::from_millis(1100));
+    fs::remove_file(f.source.join("a.txt")).unwrap();
+    archeion_engine::backup(&f.profile, None, BackupMode::Auto, &Quiet).unwrap();
+    let a = keys::key_for(&f.source.join("a.txt")).unwrap();
+    let root_key = keys::key_for(&f.source).unwrap();
+
+    let mut h = harness(&f);
+    let root = symbol::with(symbol::FOLDER, f.source.display());
+    tick_box(&h, &root).click();
+    settle(&mut h);
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::False), "the folder's date lacks it");
+    assert!(!tick_box(&h, &file("a.txt")).accesskit_node().is_disabled(), "but it can be ticked");
+
+    tick_box(&h, &file("a.txt")).click();
+    settle(&mut h);
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::True));
+    assert_eq!(toggled(&h, &root), Some(Toggled::True), "the folder is still whole");
+    // Replacing the originals: the folder does not hold it, so no conflict.
+    h.state_mut().0.default = crate::restore_plan::DefaultDest {
+        kind: crate::restore_plan::DestKind::Original,
+        folder: None,
+        replace: true,
+    };
+    let req = request(&mut h);
+    assert_eq!(req.items.len(), 2, "{req:?}");
+    assert!(req.items.iter().any(|i| i.key.as_deref() == Some(a.as_str())), "the deleted file comes back");
+
+    // Unticked again: as before, and the folder alone.
+    let mut h = harness(&f);
+    tick_box(&h, &root).click();
+    settle(&mut h);
+    tick_box(&h, &file("a.txt")).click();
+    settle(&mut h);
+    tick_box(&h, &file("a.txt")).click();
+    settle(&mut h);
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::False));
+    let req = request(&mut h);
+    assert_eq!(req.items.len(), 1);
+    assert_eq!(req.items[0].key.as_deref(), Some(root_key.as_str()));
+    assert!(req.items[0].exclude.is_empty(), "{:?}", req.items[0].exclude);
 }
 
 /// Every character the interface draws (symbols in the code, texts of

@@ -245,6 +245,14 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Fixed
 
+- Restore files: the file whose versions are shown now stands out in the
+  tree (the fill and accent mark of a selected list item) also when the
+  pointer is elsewhere, so the arrow keys can be followed; its name no
+  longer keeps the keyboard focus.
+- Restore files: inside a ticked folder, files deleted at the source
+  before the folder's date were greyed and could not be ticked. They can
+  now, and come back in their last version (or the one chosen) along with
+  the folder, without a conflict with it.
 - Restore files: the search also finds folders by name (it found only
   files, so a folder named "JPEG" seemed missed by a search for "jpeg");
   capitals and accented letters still match either way.
