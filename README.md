@@ -143,9 +143,12 @@ Repository: <https://github.com/MR1999develop/archeion>.
 - **Deep tests.** `crates/engine/tests/deep.rs` replays random histories
   of backups, interruptions, merges and deletions against snapshots of
   the source, every crash state of a merge, doctored manifests and
-  damaged backups. Two seeds per test run with the others;
-  `set ARCHEION_DEEP=20` runs twenty, `set ARCHEION_SEED=<n>` replays the
-  seed a failure printed.
+  damaged backups. Two seeds per test run with the others; in PowerShell
+  `$env:ARCHEION_DEEP = 20; cargo test -p archeion_engine --test deep`
+  runs twenty, `$env:ARCHEION_SEED = <n>` replays the seed a failure
+  printed (in the Command Prompt: `set ARCHEION_DEEP=20`, then the
+  command on its own line). Close the PowerShell window, or
+  `Remove-Item Env:ARCHEION_DEEP`, to go back to two.
 - **Postponed work** goes in `TIDY.md`; user-visible changes go in
   `CHANGELOG.md` under "Unreleased".
 
