@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con la casella "Includi i file eliminati" sopra l'albero (ramo
-`feature/include-deleted-toggle` unito; `tools\check.bat` verde: fmt,
+`main` ripulito dai file non più necessari (ramo `chore/tidy-files`
+unito; `tools\check.bat` verde: fmt,
 clippy, 343 test, 2 ignorati: le schermate e l'anteprima dell'icona). La build di rilascio è stata controllata con la nuova icona
 (nessun percorso locale nell'exe).
 
@@ -156,3 +156,7 @@ clippy, 343 test, 2 ignorati: le schermate e l'anteprima dell'icona). La build d
   l'albero (`RestoreView::skip_deleted`, attiva per default, tenuta come la
   destinazione): vale per tutte le cartelle spuntate, subito; arriva al
   motore come `with_deleted` delle cartelle (i file restano marcati).
+- Tolti `tools\probe.bat` (esperimenti iniziali), `tools\git_init.bat` e
+  `toolsirst-commit.txt` (il repository esiste), le chiavi di traduzione
+  delle funzioni rimosse. Resta `tools\github_publish.bat`: il repository
+  non ha ancora un remote.

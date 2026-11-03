@@ -125,7 +125,7 @@ function Write-Start([string]$title) {
     }
     Write-Log ("git:       " + (Get-GitValue @('--version')))
     if (-not (Test-Path -LiteralPath (Join-Path $root '.git'))) {
-        Write-Log 'No git repository here yet: run tools\git_init.bat first.' 'Red'
+        Write-Log 'No git repository here: clone it, or create it with git init.' 'Red'
         Stop-Script 1
     }
 }
