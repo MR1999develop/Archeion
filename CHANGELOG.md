@@ -51,6 +51,12 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Changed
 
+- Restore files: only the tick boxes tick. Clicking a file's name lists
+  its versions on the right, newest first, to choose the one to restore
+  (before or after ticking it); without a choice the newest is restored.
+  A file inside a ticked folder comes back as that folder's date says.
+  Clicking a folder's name does nothing (its arrow opens it).
+
 - Restore files: everything ticked goes to the one destination chosen at
   the top (next to the original with the date, original location, another
   folder); a version or folder no longer has a destination menu of its

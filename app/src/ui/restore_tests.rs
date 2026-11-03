@@ -67,7 +67,7 @@ fn harness(f: &Fixture) -> Harness<'static, State> {
     );
     // The tree is read on a background thread.
     let started = Instant::now();
-    while h.query_by_label_contains(&file("a.txt")).is_none() {
+    while h.query_all_by_label_contains(&file("a.txt")).next().is_none() {
         assert!(started.elapsed() < Duration::from_secs(10), "the tree was not read");
         std::thread::sleep(Duration::from_millis(20));
         h.step();
@@ -81,8 +81,6 @@ fn settle(h: &mut Harness<'_, State>) {
     h.run_steps(4);
 }
 
-/// The tick box of the tree whose label contains `label` (the cards on
-/// the right repeat names, not boxes).
 /// The label of a file or folder row of the tree.
 fn file(name: &str) -> String {
     symbol::with(symbol::FILE, name)
@@ -120,6 +118,9 @@ fn expand(h: &mut Harness<'_, State>, label: &str) {
 }
 
 fn request(h: &mut Harness<'_, State>) -> archeion_engine::RestoreRequest {
+    // A frame first: a click counts on the button as last drawn, which may
+    // have been disabled until the versions were read.
+    settle(h);
     h.get_by_label("Restore").click();
     settle(h);
     match h.state_mut().1.take() {
@@ -227,6 +228,105 @@ fn clear_selection_beside_restore_unticks_everything() {
     for item in [root, folder("sub"), file("a.txt")] {
         assert_eq!(toggled(&h, &item), Some(Toggled::False), "{item}");
     }
+}
+
+/// The name of a file or folder row, beside its box.
+fn name<'h>(h: &'h Harness<'_, State>, label: &'h str) -> Option<egui_kittest::Node<'h>> {
+    h.query_by(move |n| {
+        n.role() != egui::accesskit::Role::CheckBox && n.label().is_some_and(|l| l.contains(label))
+    })
+}
+
+fn click_at(h: &mut Harness<'_, State>, pos: egui::Pos2) {
+    for pressed in [true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    settle(h);
+}
+
+/// The versions shown on the right, newest first.
+fn versions<'h>(h: &'h Harness<'_, State>) -> Vec<egui_kittest::Node<'h>> {
+    h.query_all_by(|n| {
+        n.role() == egui::accesskit::Role::RadioButton
+            && n.label().is_some_and(|l| l.starts_with("Backup of"))
+    })
+    .collect()
+}
+
+fn wait_for_versions(h: &mut Harness<'_, State>, count: usize) {
+    let started = Instant::now();
+    while versions(h).len() < count {
+        assert!(started.elapsed() < Duration::from_secs(10), "the versions were not read");
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+}
+
+#[test]
+fn a_click_on_a_name_ticks_nothing_and_a_file_shows_its_versions() {
+    let f = backed_up();
+    let mut h = harness(&f);
+    // A folder's name is plain text: a click right of its box.
+    let box_rect = tick_box(&h, &folder("sub")).rect();
+    click_at(&mut h, egui::pos2(box_rect.right() + 30.0, box_rect.center().y));
+    assert_eq!(toggled(&h, &folder("sub")), Some(Toggled::False), "a folder's name does not tick");
+    assert!(versions(&h).is_empty(), "nor shows versions");
+
+    name(&h, &file("a.txt")).expect("the file's name").click();
+    settle(&mut h);
+    wait_for_versions(&mut h, 1);
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::False), "a file's name does not tick");
+    assert_eq!(versions(&h)[0].accesskit_node().toggled(), Some(Toggled::True), "the newest is the choice");
+}
+
+#[test]
+fn the_version_chosen_is_restored_and_the_newest_without_a_choice() {
+    let f = backed_up();
+    std::thread::sleep(Duration::from_millis(1100));
+    fs::write(f.source.join("a.txt"), "alpha, changed").unwrap();
+    archeion_engine::backup(&f.profile, None, BackupMode::Auto, &Quiet).unwrap();
+    let list =
+        archeion_engine::file_versions(&f.profile, None, &keys::key_for(&f.source.join("a.txt")).unwrap())
+            .unwrap();
+    let (newest, oldest) = (list[0].archive.clone(), list[1].archive.clone());
+
+    // Without a choice: the newest.
+    let mut h = harness(&f);
+    tick_box(&h, &file("a.txt")).click();
+    settle(&mut h);
+    let started = Instant::now();
+    while h.state().0.picks.iter().any(|p| matches!(p, super::Pick::File { loading: true, .. })) {
+        assert!(started.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+    assert_eq!(request(&mut h).items[0].archive, newest);
+
+    // The older one, chosen before ticking.
+    let mut h = harness(&f);
+    name(&h, &file("a.txt")).unwrap().click();
+    settle(&mut h);
+    wait_for_versions(&mut h, 2);
+    versions(&h)[1].click();
+    settle(&mut h);
+    tick_box(&h, &file("a.txt")).click();
+    settle(&mut h);
+    assert_eq!(request(&mut h).items[0].archive, oldest, "chosen first, ticked after");
+
+    // Chosen after ticking: the ticked file takes it.
+    let mut h = harness(&f);
+    tick_box(&h, &file("a.txt")).click();
+    name(&h, &file("a.txt")).unwrap().click();
+    settle(&mut h);
+    wait_for_versions(&mut h, 2);
+    versions(&h)[1].click();
+    settle(&mut h);
+    assert_eq!(request(&mut h).items[0].archive, oldest, "ticked first, chosen after");
 }
 
 /// Every character the interface draws (symbols in the code, texts of

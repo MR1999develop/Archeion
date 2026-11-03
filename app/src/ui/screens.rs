@@ -90,6 +90,17 @@ fn screens() {
                 n.click();
             }
             shot(&mut h, &out, &name("3-restore-ticked"));
+            // The versions of a file, on the right, after a click on its name.
+            let note = super::symbol::with(super::symbol::FILE, "note.txt");
+            if let Some(n) = h
+                .query_all_by(|n| {
+                    n.role() == egui::accesskit::Role::Button && n.label().is_some_and(|l| l.contains(&note))
+                })
+                .next()
+            {
+                n.click();
+            }
+            shot(&mut h, &out, &name("3b-restore-versions"));
             h.state_mut().restore.open_manage();
             shot(&mut h, &out, &name("4-manage"));
             h.state_mut().tab = Tab::Activity;

@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con l'unione che mantiene i file eliminati (ramo
-`feature/merge-keep-deleted` unito; `tools\check.bat` verde: fmt, clippy, 332
+`main` con la scelta della versione dal nome del file (ramo
+`feature/restore-versions` unito; `tools\check.bat` verde: fmt, clippy, 334
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -122,3 +122,9 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   propria, che parte dal valore del profilo; `--drop-deleted` la spegne
   per quell'unione). L'eliminazione di un singolo backup scarta sempre
   ciò che conteneva solo lui.
+- Albero di ripristino: la casella è senza testo (nome accessibile per i
+  lettori di schermo) e sola a spuntare; il nome di un file è un pulsante
+  che mostra a destra le sue versioni (`RestoreView::shown`), la scelta
+  è in `RestoreView::chosen` e vale anche se fatta prima di spuntare. Nei
+  test, un clic su un pulsante appena attivato va fatto un fotogramma
+  dopo (egui verifica i clic sul fotogramma precedente).
