@@ -187,4 +187,10 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
   solito è notificato.
 - `ROW_GAP` resta 6 (non multiplo di 4) per non far scorrere le
   impostazioni.
+- Test profondi (`crates/engine/tests/deep.rs`, 3 novembre): storie
+  casuali con seme stampato, interruzioni a ogni file, tutti gli stati di
+  crash di un merge, fuzz dei manifest, dati danneggiati; proprietà delle
+  chiavi in `keys.rs`. Le fughe del fuzz atterrano nella cartella
+  temporanea: un primo giro con il controllo delle chiavi tolto per
+  prova aveva creato cartelle vuote in `C:\` (tolte subito).
 

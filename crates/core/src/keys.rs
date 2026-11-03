@@ -209,4 +209,75 @@ mod tests {
         let p = path_under(Path::new("base"), "C/x/y.txt");
         assert_eq!(p, Path::new("base").join("C").join("x").join("y.txt"));
     }
+
+    /// Random keys made of pieces Windows reads as paths: whenever one
+    /// passes [`check`], it stays below the base folder, one plain name per
+    /// segment, and a drive key comes back from its own path.
+    #[test]
+    fn checked_keys_always_stay_below_their_folder() {
+        const PIECES: [&str; 22] = [
+            "a",
+            "Docs",
+            "ü è",
+            ".hidden",
+            "..",
+            ".",
+            "",
+            "C:",
+            r"C:\x",
+            r"\\host\s",
+            r"a\b",
+            "x/..",
+            "CON",
+            "nul.txt",
+            "trailing.",
+            "sp ace ",
+            "\u{0}",
+            "?",
+            "*",
+            "UNC",
+            "ROOT",
+            "D",
+        ];
+        let mut state = 0x2545_F491_4F6C_DD1D_u64;
+        let mut next = |n: usize| {
+            state ^= state >> 12;
+            state ^= state << 25;
+            state ^= state >> 27;
+            usize::try_from(state.wrapping_mul(0x9E37_79B9_7F4A_7C15) % n as u64).unwrap()
+        };
+        let base = Path::new(r"E:\Restore here");
+        let mut passed = 0;
+        for _ in 0..50_000 {
+            let n = 1 + next(5);
+            let key = (0..n).map(|_| PIECES[next(PIECES.len())]).collect::<Vec<_>>().join("/");
+            if check(&key).is_err() {
+                continue;
+            }
+            passed += 1;
+            let under = path_under(base, &key);
+            let rest = under.strip_prefix(base).unwrap_or_else(|_| panic!("{key:?} left the folder"));
+            assert!(rest.components().all(|c| matches!(c, Component::Normal(_))), "{key:?}");
+            assert_eq!(rest.components().count(), key.split('/').count(), "{key:?}");
+            #[cfg(windows)]
+            if key.len() > 1 && key.as_bytes()[1] == b'/' && key.as_bytes()[0].is_ascii_uppercase() {
+                assert_eq!(key_for(&path_for(&key)).as_deref(), Ok(key.as_str()), "{key:?}");
+            }
+        }
+        assert!(passed > 1000, "enough keys pass to mean something ({passed})");
+    }
+
+    /// Keys of real paths always pass.
+    #[test]
+    fn keys_of_paths_always_pass_the_check() {
+        let paths: &[&str] = if cfg!(windows) {
+            &[r"C:\Users\user\Docs\a b\ü.txt", r"d:\x\.y\z.tar.gz", r"\\server\share\deep\er\f", r"C:\"]
+        } else {
+            &["/home/user/a b/ü.txt", "/", "/x/.y"]
+        };
+        for p in paths {
+            let key = key_for(Path::new(p)).unwrap();
+            assert_eq!(check(&key), Ok(()), "{p} -> {key}");
+        }
+    }
 }
