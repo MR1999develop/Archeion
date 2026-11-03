@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con il file mostrato evidenziato e i file eliminati spuntabili
-dentro una cartella spuntata (ramo `fix/shown-and-deleted` unito; `tools\check.bat` verde: fmt, clippy, 337
+`main` con i file eliminati ripristinati con la cartella e marcati
+"_deleted_" (ramo `feature/restore-deleted` unito; `tools\check.bat` verde: fmt, clippy, 341
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -140,3 +140,10 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   cartella spuntata: spuntabile da solo; entra nelle esclusioni della
   cartella (niente conflitto quando si sostituisce l'originale) e ne esce
   quando lo si toglie.
+- `RestoreItem::with_deleted` (la finestra lo mette sempre, la riga di
+  comando no): una cartella aggiunge ciò che i backup precedenti alla sua
+  data elencavano e lei no, ciascuno dal più recente che lo elenca; ogni
+  file assente dal backup più recente prende il prefisso
+  `restore::DELETED_PREFIX` ("_deleted_"). Nell'albero un file salvato
+  prima della data della cartella risulta spuntato con lei. Il totale
+  sopra Ripristina non conta ancora i file eliminati (in `TIDY.md`).

@@ -409,7 +409,7 @@ fn a_file_inside_a_ticked_folder_can_come_back_in_another_version() {
 }
 
 #[test]
-fn a_deleted_file_can_be_ticked_inside_a_ticked_folder() {
+fn a_ticked_folder_ticks_its_deleted_files_too() {
     let f = backed_up();
     std::thread::sleep(Duration::from_millis(1100));
     fs::remove_file(f.source.join("a.txt")).unwrap();
@@ -421,36 +421,21 @@ fn a_deleted_file_can_be_ticked_inside_a_ticked_folder() {
     let root = symbol::with(symbol::FOLDER, f.source.display());
     tick_box(&h, &root).click();
     settle(&mut h);
-    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::False), "the folder's date lacks it");
-    assert!(!tick_box(&h, &file("a.txt")).accesskit_node().is_disabled(), "but it can be ticked");
-
-    tick_box(&h, &file("a.txt")).click();
-    settle(&mut h);
-    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::True));
-    assert_eq!(toggled(&h, &root), Some(Toggled::True), "the folder is still whole");
-    // Replacing the originals: the folder does not hold it, so no conflict.
-    h.state_mut().0.default = crate::restore_plan::DefaultDest {
-        kind: crate::restore_plan::DestKind::Original,
-        folder: None,
-        replace: true,
-    };
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::True), "deleted, it comes back with the folder");
     let req = request(&mut h);
-    assert_eq!(req.items.len(), 2, "{req:?}");
-    assert!(req.items.iter().any(|i| i.key.as_deref() == Some(a.as_str())), "the deleted file comes back");
+    assert_eq!(req.items.len(), 1);
+    assert!(req.items[0].with_deleted && req.items[0].exclude.is_empty(), "{:?}", req.items[0]);
 
-    // Unticked again: as before, and the folder alone.
+    // Unticked inside: left out of the folder.
     let mut h = harness(&f);
     tick_box(&h, &root).click();
     settle(&mut h);
     tick_box(&h, &file("a.txt")).click();
     settle(&mut h);
-    tick_box(&h, &file("a.txt")).click();
-    settle(&mut h);
     assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::False));
     let req = request(&mut h);
-    assert_eq!(req.items.len(), 1);
     assert_eq!(req.items[0].key.as_deref(), Some(root_key.as_str()));
-    assert!(req.items[0].exclude.is_empty(), "{:?}", req.items[0].exclude);
+    assert_eq!(req.items[0].exclude, vec![a]);
 }
 
 /// Every character the interface draws (symbols in the code, texts of

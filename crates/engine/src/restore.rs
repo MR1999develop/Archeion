@@ -18,7 +18,7 @@ pub use archeion_core::restore::{RestoreItem, RestoreRequest, RestoreTarget};
 use archeion_core::{
     ArchiveName, Chunks, Entry, EntryKind, FileAction, Manifest, Phase, Profile, RestoreReport, RunEvent,
     Skipped, Summary,
-    restore::{Output, date_tag, make_distinct, output_path, precise_date_tag},
+    restore::{Output, date_tag, deleted_name, make_distinct, output_path, precise_date_tag},
 };
 use std::{
     collections::{BTreeMap, HashMap, HashSet, hash_map},
@@ -81,9 +81,18 @@ pub(crate) fn restore_from(
     let dirs: Vec<PathBuf> = archives.iter().map(|a| root.join(a.to_string())).collect();
     let positions =
         request.items.iter().map(|i| position(&archives, &i.archive)).collect::<Result<Vec<usize>>>()?;
-    // The manifest of every date restored, read once.
+    // The manifest of every date restored, read once; with deleted files,
+    // every earlier one too (where they were last seen), and the newest
+    // (what is still at the source).
+    let mut wanted_dates: Vec<usize> = positions.clone();
+    for (item, &k) in request.items.iter().zip(&positions) {
+        if item.with_deleted {
+            wanted_dates.extend(0..k);
+            wanted_dates.extend(archives.len().checked_sub(1));
+        }
+    }
     let mut chosen: BTreeMap<usize, Manifest> = BTreeMap::new();
-    for &k in &positions {
+    for k in wanted_dates {
         if let (false, Some(name), Some(dir)) = (chosen.contains_key(&k), archives.get(k), dirs.get(k)) {
             chosen.insert(k, read_manifest(dir, name, keys)?);
         }
@@ -196,7 +205,10 @@ fn position(archives: &[ArchiveName], archive: &str) -> Result<usize> {
 /// Every file and folder the items ask for, with where it goes. The same
 /// file of the same archive asked twice for the same place is written
 /// once; files that would land on the same path get distinct names
-/// ([`make_distinct`]).
+/// ([`make_distinct`]). An item `with_deleted` adds what its folder held
+/// in earlier archives and no longer at its date, each from the newest
+/// archive listing it, and names every file the newest archive no longer
+/// lists with the deleted prefix.
 fn select<'a>(
     request: &RestoreRequest,
     positions: &[usize],
@@ -205,13 +217,34 @@ fn select<'a>(
 ) -> Vec<Planned<'a>> {
     let mut planned: Vec<Planned<'a>> = Vec::new();
     let mut seen: HashMap<(usize, &'a str, PathBuf), usize> = HashMap::new();
+    // At the source still: listed by the newest archive.
+    let newest = archives.len().checked_sub(1).and_then(|n| chosen.get(&n));
     for (item, &k) in request.items.iter().zip(positions) {
         let Some(manifest) = chosen.get(&k) else { continue };
-        let tag = archives.get(k).map(|a| date_tag(&a.to_string())).unwrap_or_default();
         let original = item.target == RestoreTarget::Original;
-        let wanted = |e: &&Entry| item.wants(&e.key);
-        for entry in manifest.entries.iter().filter(wanted) {
-            let dest = output_path(&entry.key, entry.kind, &item.target, &tag);
+        let wanted = |e: &&'a Entry| item.wants(&e.key);
+        // (archive read from, entry): the item's date, then for a folder
+        // with its deleted files what earlier dates listed and it does not.
+        let mut entries: Vec<(usize, &'a Entry)> =
+            manifest.entries.iter().filter(wanted).map(|e| (k, e)).collect();
+        if item.with_deleted && item.key.is_some() {
+            let mut listed: HashSet<&str> = manifest.entries.iter().map(|e| e.key.as_str()).collect();
+            for j in (0..k).rev() {
+                let Some(older) = chosen.get(&j) else { continue };
+                for e in older.entries.iter().filter(wanted) {
+                    if listed.insert(e.key.as_str()) {
+                        entries.push((j, e));
+                    }
+                }
+            }
+        }
+        for (k, entry) in entries {
+            let tag = archives.get(k).map(|a| date_tag(&a.to_string())).unwrap_or_default();
+            let mut dest = output_path(&entry.key, entry.kind, &item.target, &tag);
+            let gone = newest.is_some_and(|m| m.get(&entry.key).is_none());
+            if item.with_deleted && gone && entry.kind == EntryKind::File {
+                dest = deleted_name(&dest);
+            }
             match seen.entry((k, entry.key.as_str(), dest.clone())) {
                 hash_map::Entry::Occupied(o) => {
                     if let Some(p) = planned.get_mut(*o.get()) {

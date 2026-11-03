@@ -200,6 +200,7 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
                         target,
                         overwrite,
                         exclude: Vec::new(),
+                        with_deleted: true,
                     });
                 }
             }
@@ -220,6 +221,7 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
                     target,
                     overwrite,
                     exclude: exclude.clone(),
+                    with_deleted: true,
                 });
             }
         }

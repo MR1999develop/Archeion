@@ -96,6 +96,7 @@ pub fn extract(request: &ExtractRequest, sink: &dyn EventSink) -> Result<Restore
     };
     let restore = RestoreRequest {
         items: vec![RestoreItem {
+            with_deleted: false,
             archive: archive.to_string(),
             key,
             target: RestoreTarget::Folder { path: request.to.clone() },

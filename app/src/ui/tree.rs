@@ -154,10 +154,14 @@ impl Tree {
             if h.exclude.iter().any(|x| keys::is_within(key, x)) {
                 return Tick::LeftOut { folder };
             }
-            let listed =
-                self.archives.iter().position(|a| Some(a.name.as_str()) == h.folder_archive).is_some_and(
-                    |pos| node.entry.present.iter().any(|&(first, last)| (first..=last).contains(&pos)),
-                );
+            // The folder brings back what it held at its date and what it
+            // held before (deleted at the source since): anything saved up
+            // to its date.
+            let listed = self
+                .archives
+                .iter()
+                .position(|a| Some(a.name.as_str()) == h.folder_archive)
+                .is_some_and(|pos| node.entry.present.iter().any(|&(first, _)| first <= pos));
             if !listed {
                 return Tick::NotInFolderDate { folder };
             }
@@ -359,7 +363,7 @@ mod tests {
     }
 
     #[test]
-    fn a_ticked_folder_ticks_what_it_held_at_its_date() {
+    fn a_ticked_folder_ticks_what_it_held_up_to_its_date() {
         let t = Tree::build(catalog(vec![
             entry("C/Docs", EntryKind::Dir, vec![(0, 2)]),
             entry("C/Docs/old.txt", EntryKind::File, vec![(0, 0)]),
@@ -372,7 +376,11 @@ mod tests {
         assert_eq!(tick_of(&t, "C/Docs", &ticked), Tick::On);
         assert_eq!(tick_of(&t, "C/Docs/sub", &ticked), Tick::InFolder { folder: docs });
         assert_eq!(tick_of(&t, "C/Docs/sub/a.txt", &ticked), Tick::InFolder { folder: docs });
-        assert_eq!(tick_of(&t, "C/Docs/old.txt", &ticked), Tick::NotInFolderDate { folder: docs });
+        assert_eq!(
+            tick_of(&t, "C/Docs/old.txt", &ticked),
+            Tick::InFolder { folder: docs },
+            "deleted before: it comes back too"
+        );
         assert_eq!(tick_of(&t, "C/Docs2/b.txt", &ticked), Tick::Off, "a sibling sharing the prefix");
 
         // At the oldest date, old.txt is there and a.txt is not.

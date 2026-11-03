@@ -306,6 +306,60 @@ fn a_merge_from_the_first_complete_keeps_deleted_files_in_the_new_complete() {
     assert!(v.problems.is_empty(), "{:?}", v.problems);
 }
 
+/// `sub/ünicode è.txt` and `a.txt` backed up, then `gone.txt` created and
+/// backed up, then `gone.txt` and the whole `sub` deleted at the source and
+/// backed up again: the newest backup lists neither.
+fn files_deleted_since() -> (Fixture, String) {
+    let f = fixture(Container::ZipPerFile);
+    fs::write(f.source.join("gone.txt"), "short-lived").unwrap();
+    run_backup(&f.profile);
+    fs::remove_file(f.source.join("gone.txt")).unwrap();
+    fs::remove_dir_all(f.source.join("sub")).unwrap();
+    run_backup(&f.profile);
+    let newest = list_archives(&f.profile, None).unwrap().remove(0).name;
+    (f, newest)
+}
+
+#[test]
+fn a_folder_with_its_deleted_files_brings_them_back_marked() {
+    let (f, newest) = files_deleted_since();
+    let mut it = item(&newest, &key_of(&f, ""), &RestoreTarget::Folder { path: f.restore_to.clone() }, false);
+    it.with_deleted = true;
+    restore(&f.profile, None, &RestoreRequest { items: vec![it] }, &Recorder::default()).unwrap();
+    let root = restored(&f, "a.txt");
+    let dir = root.parent().unwrap();
+    assert_eq!(fs::read_to_string(dir.join("a.txt")).unwrap(), "alpha", "still at the source: its own name");
+    assert_eq!(fs::read_to_string(dir.join("_deleted_gone.txt")).unwrap(), "short-lived");
+    assert!(!dir.join("gone.txt").exists());
+    assert_eq!(
+        fs::read_to_string(dir.join("sub").join("_deleted_ünicode è.txt")).unwrap(),
+        "beta",
+        "in a deleted folder too"
+    );
+}
+
+#[test]
+fn without_deleted_files_a_folder_comes_back_as_at_its_date() {
+    let (f, newest) = files_deleted_since();
+    let it = item(&newest, &key_of(&f, ""), &RestoreTarget::Folder { path: f.restore_to.clone() }, false);
+    restore(&f.profile, None, &RestoreRequest { items: vec![it] }, &Recorder::default()).unwrap();
+    let dir = restored(&f, "a.txt").parent().unwrap().to_path_buf();
+    assert!(dir.join("a.txt").exists());
+    assert!(!dir.join("_deleted_gone.txt").exists() && !dir.join("gone.txt").exists());
+}
+
+#[test]
+fn a_deleted_file_restored_alone_is_marked() {
+    let (f, _) = files_deleted_since();
+    let oldest = list_archives(&f.profile, None).unwrap().pop().unwrap().name;
+    let mut it =
+        item(&oldest, &key_of(&f, "gone.txt"), &RestoreTarget::Folder { path: f.restore_to.clone() }, false);
+    it.with_deleted = true;
+    restore(&f.profile, None, &RestoreRequest { items: vec![it] }, &Recorder::default()).unwrap();
+    let dir = restored(&f, "gone.txt").parent().unwrap().to_path_buf();
+    assert_eq!(fs::read_to_string(dir.join("_deleted_gone.txt")).unwrap(), "short-lived");
+}
+
 #[test]
 fn manual_merge_needs_two_backups() {
     let f = four_backups();
@@ -608,6 +662,7 @@ fn versions_list_only_real_changes_and_each_restores_beside_the_original() {
 
 fn item(archive: &str, key: &str, target: &RestoreTarget, overwrite: bool) -> RestoreItem {
     RestoreItem {
+        with_deleted: false,
         archive: archive.to_owned(),
         key: Some(key.to_owned()),
         target: target.clone(),
