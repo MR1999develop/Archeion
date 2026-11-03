@@ -34,6 +34,12 @@ trigger it. Remove an item when it is done or no longer applies.
 - **Unused translation keys** (`schedule-daily`, `schedule-weekly`,
   `back-up-now`, `advanced`, `events-*`): left from removed features;
   remove them in every language.
+- **A Recycle Bin too small for the backups** (3 November): Windows may
+  delete outright an item larger than the Recycle Bin allows, and the
+  engine finds out only afterwards (the item is not in the Recycle Bin)
+  and stops there, so that one archive is lost. Checking the size against
+  the Recycle Bin's limit needs `SHQueryRecycleBinW` (no `unsafe` in our
+  crates: a small crate would do).
 - **Screenshots not compared automatically** (2 November): the views are
   rendered with `cargo test -p archeion --bin archeion screens -- --ignored`
   into `target/ui-screens` and looked at, with no stored references: add

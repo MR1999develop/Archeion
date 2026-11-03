@@ -317,49 +317,82 @@ fn destination_in_use_is_busy() {
     assert!(!backup_engine_busy(&f.profile));
 }
 
-#[test]
-fn deleting_the_backups_removes_what_archeion_wrote_and_the_empty_folder() {
-    let f = fixture(Container::ZipPerFile);
-    run_backup(&f.profile);
-    run_backup(&f.profile);
-    let root = f.profile.destination.path().to_path_buf();
-    let done = archeion_engine::delete_destination(&f.profile).unwrap();
-    assert_eq!(done, archeion_engine::DestinationDeleted { folder_removed: true, left: Vec::new() });
-    assert!(!root.exists());
-    assert!(f.source.join("a.txt").exists(), "the source is not touched");
-    // Done again: nothing left to do.
-    assert!(archeion_engine::delete_destination(&f.profile).unwrap().folder_removed);
+/// Empties from the Recycle Bin what a test put there from `dir`: the
+/// tests use the user's real one.
+struct RecycledUnder(PathBuf);
+
+impl Drop for RecycledUnder {
+    fn drop(&mut self) {
+        let under = self.0.to_string_lossy().to_lowercase();
+        let Ok(items) = trash::os_limited::list() else { return };
+        let ours: Vec<_> = items
+            .into_iter()
+            .filter(|i| i.original_parent.to_string_lossy().to_lowercase().starts_with(&under))
+            .collect();
+        let _ = trash::os_limited::purge_all(ours);
+    }
+}
+
+fn recycled(dir: &std::path::Path, name: &str) -> bool {
+    let parent = dir.to_string_lossy().to_lowercase();
+    trash::os_limited::list().unwrap().iter().any(|i| {
+        i.name.to_string_lossy() == name && i.original_parent.to_string_lossy().to_lowercase() == parent
+    })
 }
 
 #[test]
-fn deleting_the_backups_leaves_other_files_and_their_folder() {
-    let f = fixture(Container::Folder);
+fn trashing_the_backups_moves_the_whole_folder_to_the_recycle_bin() {
+    let f = fixture(Container::ZipPerFile);
+    let _clean = RecycledUnder(f._dir.path().to_path_buf());
+    run_backup(&f.profile);
     run_backup(&f.profile);
     let root = f.profile.destination.path().to_path_buf();
+    let done = archeion_engine::trash_destination(&f.profile).unwrap();
+    assert_eq!(done, archeion_engine::DestinationTrashed { folder_trashed: true, left: Vec::new() });
+    assert!(!root.exists());
+    assert!(recycled(f._dir.path(), "backups"), "the folder is in the Recycle Bin");
+    let probes = trash::os_limited::list().unwrap();
+    assert!(
+        !probes.iter().any(|i| i.name.to_string_lossy().starts_with("archeion.recycle-probe")),
+        "probe left"
+    );
+    assert!(f.source.join("a.txt").exists(), "the source is not touched");
+}
+
+#[test]
+fn trashing_the_backups_leaves_other_files_and_their_folder() {
+    let f = fixture(Container::Folder);
+    let _clean = RecycledUnder(f._dir.path().to_path_buf());
+    run_backup(&f.profile);
+    let root = f.profile.destination.path().to_path_buf();
+    let archive = list_archives(&f.profile, None).unwrap().remove(0).name;
     fs::write(root.join("notes.txt"), "mine").unwrap();
     fs::create_dir(root.join("Photos")).unwrap();
-    let done = archeion_engine::delete_destination(&f.profile).unwrap();
-    assert!(!done.folder_removed);
+    let done = archeion_engine::trash_destination(&f.profile).unwrap();
+    assert!(!done.folder_trashed);
     assert_eq!(done.left, vec!["Photos".to_owned(), "notes.txt".to_owned()]);
     let mut names: Vec<String> =
         fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     names.sort();
     assert_eq!(names, vec!["Photos", "notes.txt"], "only what Archeion did not write");
+    assert!(recycled(&root, &archive), "the archive is in the Recycle Bin");
+    assert!(recycled(&root, "archeion.json"));
 }
 
 #[test]
-fn the_backups_of_another_profile_or_in_use_are_not_deleted() {
+fn the_backups_of_another_profile_or_in_use_are_not_moved() {
     let f = fixture(Container::Folder);
+    let _clean = RecycledUnder(f._dir.path().to_path_buf());
     run_backup(&f.profile);
     let root = f.profile.destination.path().to_path_buf();
     let mut other = Profile::new("Other");
     other.destination = f.profile.destination.clone();
-    assert!(matches!(archeion_engine::delete_destination(&other), Err(EngineError::ForeignDestination)));
+    assert!(matches!(archeion_engine::trash_destination(&other), Err(EngineError::ForeignDestination)));
     let lock = fs::File::options().write(true).open(root.join("archeion.lock")).unwrap();
     lock.lock().unwrap();
-    assert!(matches!(archeion_engine::delete_destination(&f.profile), Err(EngineError::Busy)));
+    assert!(matches!(archeion_engine::trash_destination(&f.profile), Err(EngineError::Busy)));
     drop(lock);
-    assert_eq!(list_archives(&f.profile, None).unwrap().len(), 1, "nothing was deleted");
+    assert_eq!(list_archives(&f.profile, None).unwrap().len(), 1, "nothing was moved");
 
     // A folder without backups is left alone.
     let mut empty = Profile::new("Empty");
@@ -367,9 +400,34 @@ fn the_backups_of_another_profile_or_in_use_are_not_deleted() {
     fs::create_dir(&plain).unwrap();
     fs::write(plain.join("x.txt"), "x").unwrap();
     empty.destination = Destination::Local { path: plain.clone() };
-    let done = archeion_engine::delete_destination(&empty).unwrap();
+    let done = archeion_engine::trash_destination(&empty).unwrap();
     assert_eq!(done.left, vec!["x.txt".to_owned()]);
     assert!(plain.join("x.txt").exists());
+}
+
+/// Windows deletes what is on a share instead of recycling it, and says
+/// it recycled it: nothing must be moved there.
+#[cfg(windows)]
+#[test]
+fn on_a_share_without_a_recycle_bin_nothing_is_moved() {
+    let mut f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    let local = f.profile.destination.path().to_path_buf();
+    let text = local.to_string_lossy().into_owned();
+    let Some(rest) = text.strip_prefix(r"C:\") else { return };
+    let unc = PathBuf::from(format!(r"\\localhost\C$\{rest}"));
+    if !unc.join("archeion.json").exists() {
+        // No administrative share here: nothing to test.
+        return;
+    }
+    f.profile.destination = Destination::Network { unc: unc.to_string_lossy().into_owned() };
+    assert!(matches!(archeion_engine::trash_destination(&f.profile), Err(EngineError::NoRecycleBin(_))));
+    assert_eq!(list_archives(&f.profile, None).unwrap().len(), 1, "the backups are all there");
+    let left: Vec<String> = fs::read_dir(&local)
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(!left.iter().any(|n| n.starts_with("archeion.recycle-probe")), "no probe left: {left:?}");
 }
 
 fn backup_engine_busy(p: &Profile) -> bool {

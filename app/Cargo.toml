@@ -46,6 +46,8 @@ egui_kittest = { version = "0.37", features = ["eframe", "snapshot", "wgpu"] }
 # The system fonts eframe draws with (icons, Hindi, Japanese, Chinese).
 egui_system_font_provider = "0.37"
 tempfile = { workspace = true }
+# The window tests empty from the Recycle Bin what they put there.
+trash = "5"
 
 [lints]
 workspace = true

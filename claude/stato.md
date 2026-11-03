@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con l'eliminazione dei backup insieme al profilo (ramo
-`feature/delete-backups` unito; `tools\check.bat` verde: fmt, clippy, 326
+`main` con i backup del profilo eliminato nel Cestino (ramo
+`feature/backups-to-trash` unito; `tools\check.bat` verde: fmt, clippy, 327
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -106,10 +106,12 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   torna nella versione più recente, una cartella com'era nel backup più
   recente che la contiene. Una versione o una data più vecchia non si
   sceglie più dalla finestra.
-- Eliminare i backup con il profilo (`archeion_engine::delete_destination`):
-  solo se il descrittore della cartella è di quel profilo; si cancellano
-  i nomi scritti da Archeion (`archeion.*`, cartelle d'archivio, `chunks`,
-  `partial`, `merging`, `old`, `deleting`, `merge.journal`), il
-  descrittore per ultimo, poi la cartella se è vuota. Niente Annulla; la
-  password salvata si toglie subito. Test nel motore e nella finestra
-  (`app/src/ui/app_tests.rs`).
+- Backup del profilo eliminato nel Cestino (`archeion_engine::trash_destination`,
+  crate `trash`): solo se il descrittore è di quel profilo; la cartella
+  intera se contiene solo ciò che ha scritto Archeion, altrimenti ogni
+  nome di Archeion (descrittore per ultimo). Windows cancella senza dirlo
+  ciò che non può cestinare (condivisioni di rete, dischi rimovibili): un
+  file di prova va prima nel Cestino e dev'esserci, e ogni elemento
+  spostato si cerca nel Cestino; al primo che manca ci si ferma. Niente
+  Annulla per il profilo; la password salvata si toglie subito. I test
+  svuotano dal Cestino ciò che vi mettono.

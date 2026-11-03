@@ -16,6 +16,8 @@ argon2 = { version = "0.6", default-features = false, features = ["alloc"] }
 globset = { workspace = true }
 fs4 = "1"
 getrandom = "0.4"
+# Deleted backups go to the Windows Recycle Bin.
+trash = "5"
 jiff = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -26,6 +28,8 @@ zip = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+# The tests empty from the Recycle Bin what they put there.
+trash = "5"
 
 [lints]
 workspace = true

@@ -73,19 +73,20 @@ delete-profile = Supprimer le profil
 delete-profile-hint = Demande confirmation, puis supprime le profil et ses tâches planifiées ; les sauvegardes restent sur la destination, sauf si vous choisissez de les supprimer aussi.
 delete-profile-title = Supprimer le profil « { $name } » ?
 delete-profile-body = Le profil et ses tâches planifiées sont supprimés. Tant que vous ne fermez pas le message dans la barre d'état, Annuler les rétablit.
-delete-profile-body-backups = Le profil, ses tâches planifiées et ses sauvegardes sont supprimés.
 delete-profile-password = Le mot de passe enregistré est supprimé du Gestionnaire d'identification Windows quand l'annulation n'est plus possible : quand vous fermez ce message, supprimez un autre profil ou quittez Archeion.
 delete-profile-backups = Les sauvegardes dans { $path } ne sont pas supprimées : un nouveau profil qui utilise ce dossier peut les reprendre avec « Utiliser ces sauvegardes pour ce profil ».
-delete-profile-with-backups = Supprimer aussi les sauvegardes dans { $path }
-delete-profile-backups-gone = Les sauvegardes ne pourront plus être récupérées, et Annuler ne pourra pas rétablir le profil. Seul ce qu’Archeion a écrit est supprimé : les autres fichiers du dossier restent.
-delete-profile-and-backups = Supprimer le profil et les sauvegardes
-delete-backups-running = Suppression des sauvegardes de « { $name } »…
-delete-backups-done = Les sauvegardes de « { $name } » sont supprimées.
-delete-backups-left = Les sauvegardes de « { $name } » sont supprimées ; { $path } reste, avec { $count ->
+delete-profile-with-backups = Déplacer aussi les sauvegardes de { $path } dans la Corbeille
+delete-profile-backups-gone = Elles peuvent être restaurées depuis la Corbeille tant qu’elle n’est pas vidée, mais Annuler ne pourra plus rétablir le profil. Seul ce qu’Archeion a écrit part : les autres fichiers du dossier restent. Un partage réseau ou un lecteur amovible n’a pas de Corbeille : rien n’y est déplacé.
+delete-profile-and-backups = Supprimer le profil, sauvegardes à la Corbeille
+delete-profile-body-backups = Le profil et ses tâches planifiées sont supprimés, et ses sauvegardes vont dans la Corbeille.
+delete-backups-running = Déplacement des sauvegardes de « { $name } » dans la Corbeille…
+delete-backups-done = Les sauvegardes de « { $name } » sont dans la Corbeille.
+delete-backups-left = Les sauvegardes de « { $name } » sont dans la Corbeille ; { $path } reste, avec { $count ->
     [one] 1 élément
    *[other] { $count } éléments
 } qu’Archeion n’a pas écrits.
-delete-backups-failed = Impossible de supprimer les sauvegardes de « { $name } » : { $detail }
+delete-backups-failed = Les sauvegardes de « { $name } » n’ont pas toutes pu aller dans la Corbeille : { $detail }
+delete-backups-no-bin = { $path } n’a pas de Corbeille (partage réseau ou lecteur amovible) : les sauvegardes de « { $name } » n’ont pas été touchées. Supprimez-les à la main si vous n’en avez plus besoin.
 
 day-monday = lundi
 day-tuesday = mardi
@@ -496,7 +497,7 @@ doc-profiles-title = Profils
 doc-profiles-body = Un profil indique quoi sauvegarder, où et quand. Créez-en un avec Fichier > Nouveau profil (Ctrl+N) et remplissez son onglet Paramètres : un nom, les dossiers à sauvegarder et la destination, un dossier, un disque externe ou un partage réseau. Utilisez chaque dossier de destination pour un seul profil.
 doc-profiles-exclusions = Les exclusions laissent de côté ce dont vous n'avez pas besoin : un dossier et tout son contenu, un fichier, ou tous les fichiers d'un type comme .tmp. Avec « Exclure des motifs », vous pouvez ajouter des motifs, comparés au chemin complet sans tenir compte de la casse : * correspond à n'importe quel texte dans un nom, ** à n'importe quels dossiers, ? à un caractère. Par exemple **/node_modules ou **/cache/**.
 doc-profiles-format = Le format de stockage (un zip par fichier ou copies simples) et le chiffrement doivent être choisis avant la première sauvegarde : une fois que la destination contient des sauvegardes, ils ne peuvent plus changer. Pour en changer, choisissez une destination vide.
-doc-profiles-delete = Supprimer le profil demande confirmation, puis supprime le profil et ses tâches planifiées ; les sauvegardes restent sur la destination. Juste après, Annuler dans la barre d'état rétablit le profil. Un profil qui utilise ce dossier plus tard peut les reprendre avec « Utiliser ces sauvegardes pour ce profil ». Dans la confirmation, « Supprimer aussi les sauvegardes » les supprime aussi, définitivement et sans Annuler : seul ce qu’Archeion a écrit dans ce dossier disparaît, ainsi que le dossier lui-même s’il ne contient plus rien d’autre.
+doc-profiles-delete = Supprimer le profil demande confirmation, puis supprime le profil et ses tâches planifiées ; les sauvegardes restent sur la destination. Juste après, Annuler dans la barre d'état rétablit le profil. Un profil qui utilise ce dossier plus tard peut les reprendre avec « Utiliser ces sauvegardes pour ce profil ». Dans la confirmation, « Déplacer aussi les sauvegardes dans la Corbeille » les y déplace aussi, sans Annuler pour le profil : seul ce qu’Archeion a écrit dans ce dossier part, et le dossier entier s’il ne contient rien d’autre. Un partage réseau ou un lecteur amovible n’a pas de Corbeille : rien n’y est déplacé.
 doc-auto-title = Sauvegardes automatiques
 doc-auto-schedule = Sous « Sauvegarde automatique », choisissez quand les sauvegardes s'exécutent toutes seules : les jours choisis à une ou plusieurs heures, toutes les quelques heures entre deux heures, ou une fois par mois un jour de 1 à 28. Archeion enregistre la planification dans le Planificateur de tâches Windows, si bien que les sauvegardes s'exécutent même quand Archeion n'est pas ouvert.
 doc-auto-missed = Si l'ordinateur est éteint à l'heure prévue, la sauvegarde s'exécute dès qu'il est rallumé.
