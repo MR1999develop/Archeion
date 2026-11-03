@@ -2,7 +2,11 @@
 
 use crate::{Destination, Exclusion, FullBackupRule, LargeFiles, Retention, Schedule};
 use serde::{Deserialize, Serialize};
-use std::{fmt, path::PathBuf, str::FromStr};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 use uuid::Uuid;
 
 /// Stable identifier of a profile; also the name of its scheduled tasks.
@@ -167,6 +171,10 @@ pub struct Profile {
     /// Automatic backups.
     #[serde(default)]
     pub schedule: Schedule,
+    /// The schedule is kept but does not run: an imported profile waits for
+    /// the user to look at it and turn it on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub schedule_paused: bool,
     /// Backups started by events (logon, idle, drive connected).
     #[serde(default)]
     pub events: EventTriggers,
@@ -215,6 +223,7 @@ impl Profile {
             merge: MergePolicy::default(),
             verification: Verification::default(),
             alerts: Alerts::default(),
+            schedule_paused: false,
         }
     }
 
@@ -222,7 +231,7 @@ impl Profile {
     /// event.
     #[must_use]
     pub fn backs_up_automatically(&self) -> bool {
-        self.schedule.is_automatic() || self.events.any()
+        !self.schedule_paused && (self.schedule.is_automatic() || self.events.any())
     }
 
     /// Checks that the profile can run. Returns all broken rules.
@@ -236,7 +245,7 @@ impl Profile {
         }
         if self.destination.is_empty() {
             errors.push(ProfileError::NoDestination);
-        } else if self.sources.iter().any(|s| self.destination.path().starts_with(s)) {
+        } else if self.sources.iter().any(|s| path_within(self.destination.path(), s)) {
             errors.push(ProfileError::DestinationInsideSource);
         }
         if self.encrypted && self.container != Container::ZipPerFile {
@@ -244,6 +253,20 @@ impl Profile {
         }
         if errors.is_empty() { Ok(()) } else { Err(errors) }
     }
+}
+
+/// True when `path` is `base` or inside it, comparing names as Windows
+/// does: `D:\data\backup` is inside `D:\Data`.
+#[must_use]
+pub fn path_within(path: &Path, base: &Path) -> bool {
+    let folded = |p: &Path| -> Vec<String> {
+        p.components()
+            .filter(|c| matches!(c, std::path::Component::Prefix(_) | std::path::Component::Normal(_)))
+            .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+            .collect()
+    };
+    let (path, base) = (folded(path), folded(base));
+    !base.is_empty() && path.len() >= base.len() && path.iter().zip(&base).all(|(a, b)| a == b)
 }
 
 #[cfg(test)]
@@ -276,6 +299,15 @@ mod tests {
         let mut p = valid();
         p.destination = Destination::Local { path: r"C:\Users\me\Documents\Backup".into() };
         assert_eq!(p.validate(), Err(vec![ProfileError::DestinationInsideSource]));
+        // Windows names ignore case.
+        let mut q = valid();
+        q.sources = vec![r"D:\Data".into()];
+        q.destination = Destination::Local { path: r"d:\data\Backup".into() };
+        assert_eq!(q.validate(), Err(vec![ProfileError::DestinationInsideSource]), "case");
+        q.destination = Destination::Local { path: r"D:\Data\.ackups".into() };
+        assert_eq!(q.validate(), Err(vec![ProfileError::DestinationInsideSource]), "a dot");
+        q.destination = Destination::Local { path: r"D:\Database".into() };
+        assert_eq!(q.validate(), Ok(()), "a name that only begins the same");
     }
 
     #[test]

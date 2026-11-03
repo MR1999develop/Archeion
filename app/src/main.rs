@@ -30,6 +30,7 @@ mod job;
 mod notify;
 mod profile_file;
 mod restore_plan;
+mod seen;
 mod storage;
 mod ui;
 mod worker;

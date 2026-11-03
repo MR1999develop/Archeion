@@ -368,3 +368,13 @@ fn the_executable_carries_its_manifest() {
         assert!(exe.windows(needed.len()).any(|w| w == needed.as_bytes()), "no {needed}");
     }
 }
+
+#[test]
+fn a_backup_remembers_the_newest_backup_it_left() {
+    let s = sandbox(Container::Folder, false);
+    backup(&s, None);
+    backup(&s, None);
+    let seen: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(s.data.join("destinations.json")).unwrap()).unwrap();
+    assert_eq!(seen[s.profile.id.to_string()].as_str(), Some(archives(&s, None)[0].as_str()));
+}

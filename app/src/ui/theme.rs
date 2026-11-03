@@ -17,7 +17,8 @@ pub const SPACE_S: f32 = 8.0;
 pub const SPACE_M: f32 = 16.0;
 pub const SPACE_L: f32 = 24.0;
 /// Between rows of controls, and the height of a control: compact, so a
-/// profile's settings fit the window without scrolling.
+/// profile's settings fit the window without scrolling. 6, not a multiple
+/// of 4 as Windows suggests: 8 made the settings scroll.
 pub const ROW_GAP: f32 = 6.0;
 pub const CONTROL_HEIGHT: f32 = 24.0;
 /// Form width: long lines are hard to read.
@@ -35,6 +36,17 @@ pub const RADIUS_WINDOW: u8 = 8;
 pub const FONT_BODY: f32 = 14.0;
 pub const FONT_SMALL: f32 = 12.0;
 pub const FONT_TITLE: f32 = 20.0;
+/// The recovery key: larger, to copy it by eye.
+pub const FONT_KEY: f32 = 16.0;
+
+/// The accent mark of a selected list item (as in Windows lists): width,
+/// and height at most.
+pub const ACCENT_MARK_WIDTH: f32 = 3.0;
+pub const ACCENT_MARK_MAX_HEIGHT: f32 = 16.0;
+/// Added to the height of a tab's text.
+pub const TAB_EXTRA_HEIGHT: f32 = 10.0;
+/// Above and below a name chosen in place, for its fill.
+pub const CHOSEN_PAD_Y: f32 = 2.0;
 
 /// The semibold face: section and page titles, selected tabs.
 pub fn semibold() -> FontFamily {
