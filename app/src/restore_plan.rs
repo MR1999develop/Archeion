@@ -1,9 +1,9 @@
 //! What the "Restore files" view restores, decided without egui.
 //!
 //! The selection is a list of [`Pick`]s: ticked files, each with the
-//! versions ticked, and ticked folders, each with the date chosen. Every
-//! version and folder goes to the default destination unless it has its
-//! own. [`plan`] turns that into one [`RestoreRequest`], with the name each
+//! versions ticked, and ticked folders, each with the date chosen. All of
+//! it goes to the one destination chosen at the top of the panel. [`plan`]
+//! turns that into one [`RestoreRequest`], with the name each
 //! version will take, the conflicts, the summary, and why the Restore
 //! button waits.
 
@@ -19,7 +19,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-/// Where a version or a folder goes.
+/// Where the selection goes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Dest {
     /// Next to the original, with the backup date in the name.
@@ -48,7 +48,7 @@ impl Dest {
     }
 }
 
-/// The three choices of the default destination.
+/// The three choices of the destination.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum DestKind {
     #[default]
@@ -57,8 +57,8 @@ pub enum DestKind {
     Folder,
 }
 
-/// The default destination as chosen at the top of the panel; "another
-/// folder" may still lack its folder.
+/// The destination as chosen at the top of the panel; "another folder"
+/// may still lack its folder.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DefaultDest {
     pub kind: DestKind,
@@ -85,8 +85,6 @@ pub struct Version {
     /// Archive that first stores this content.
     pub archive: String,
     pub size: u64,
-    /// Its own destination; `None` follows the default.
-    pub dest: Option<Dest>,
 }
 
 /// One card of the selection.
@@ -104,8 +102,6 @@ pub enum Pick {
         key: String,
         /// Archive of the date chosen.
         archive: String,
-        /// Its own destination; `None` follows the default.
-        dest: Option<Dest>,
         /// Bytes of its files at that date, once known.
         size: Option<u64>,
         /// Keys unticked inside it, left out with what they hold.
@@ -142,8 +138,7 @@ pub enum Blocker {
     Nothing,
     /// The versions of a ticked file are still being read.
     Loading,
-    /// The default is "another folder" with no folder yet, and something
-    /// follows the default.
+    /// The destination is "another folder" with no folder yet.
     NoFolder,
     /// Two different versions would overwrite the same original.
     Conflict,
@@ -198,9 +193,9 @@ impl Claim<'_> {
 /// of a ticked folder holding it, is a conflict.
 #[must_use]
 pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
-    let fallback = default.resolve();
+    let dest = default.resolve();
     let mut out = Plan::default();
-    let mut missing_folder = false;
+    let missing_folder = dest.is_none();
     let mut loading = false;
     let mut claims: Vec<Claim<'_>> = Vec::new();
     // (card, version) and the file each version writes.
@@ -213,10 +208,7 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
                 for (n, v) in versions.iter().enumerate() {
                     out.summary.versions += 1;
                     out.summary.bytes = out.summary.bytes.saturating_add(v.size);
-                    let Some(dest) = v.dest.clone().or_else(|| fallback.clone()) else {
-                        missing_folder = true;
-                        continue;
-                    };
+                    let Some(dest) = &dest else { continue };
                     if dest.overwrites_original() {
                         claims.push(Claim { card, key, archive: &v.archive, exclude: &[] });
                     }
@@ -235,16 +227,13 @@ pub fn plan(picks: &[Pick], default: &DefaultDest, busy: bool) -> Plan {
                     });
                 }
             }
-            Pick::Folder { key, archive, dest, size, exclude } => {
+            Pick::Folder { key, archive, size, exclude } => {
                 out.summary.folders += 1;
                 match size {
                     Some(b) => out.summary.bytes = out.summary.bytes.saturating_add(*b),
                     None => out.summary.partial = true,
                 }
-                let Some(dest) = dest.clone().or_else(|| fallback.clone()) else {
-                    missing_folder = true;
-                    continue;
-                };
+                let Some(dest) = &dest else { continue };
                 if dest.overwrites_original() {
                     claims.push(Claim { card, key, archive, exclude });
                 }
@@ -297,27 +286,31 @@ mod tests {
     const NEW: &str = "2026-11-01_183300_I";
     const KEY: &str = "C/Docs/report.docx";
 
-    fn version(archive: &str, dest: Option<Dest>) -> Version {
-        Version { archive: archive.into(), size: 10, dest }
+    fn version(archive: &str) -> Version {
+        Version { archive: archive.into(), size: 10 }
     }
 
     fn file(key: &str, versions: Vec<Version>) -> Pick {
         Pick::File { key: key.into(), loading: false, versions }
     }
 
-    fn folder(key: &str, archive: &str, dest: Option<Dest>, size: Option<u64>) -> Pick {
-        Pick::Folder { key: key.into(), archive: archive.into(), dest, size, exclude: Vec::new() }
+    fn folder(key: &str, archive: &str, size: Option<u64>) -> Pick {
+        Pick::Folder { key: key.into(), archive: archive.into(), size, exclude: Vec::new() }
+    }
+
+    /// The original place, replacing the current files.
+    fn overwrite() -> DefaultDest {
+        DefaultDest { kind: DestKind::Original, folder: None, replace: true }
     }
 
     #[test]
     fn a_file_left_out_of_a_folder_does_not_conflict_with_it() {
-        let overwrite = Some(Dest::Original { replace: true });
-        let mut docs = folder("C/Docs", OLD, overwrite.clone(), None);
+        let mut docs = folder("C/Docs", OLD, None);
         if let Pick::Folder { exclude, .. } = &mut docs {
             exclude.push(KEY.into());
         }
-        let picks = [file(KEY, vec![version(NEW, overwrite)]), docs];
-        let p = plan(&picks, &DefaultDest::default(), false);
+        let picks = [file(KEY, vec![version(NEW)]), docs];
+        let p = plan(&picks, &overwrite(), false);
         assert!(p.conflicts.is_empty());
         assert_eq!(p.request.items[1].exclude, vec![KEY.to_owned()], "the exclusion reaches the engine");
     }
@@ -349,11 +342,8 @@ mod tests {
     }
 
     #[test]
-    fn versions_and_folders_become_items_with_the_default_destination() {
-        let picks = [
-            file(KEY, vec![version(NEW, None), version(OLD, None)]),
-            folder("C/Photos", OLD, None, Some(1000)),
-        ];
+    fn versions_and_folders_become_items_with_the_destination() {
+        let picks = [file(KEY, vec![version(NEW), version(OLD)]), folder("C/Photos", OLD, Some(1000))];
         let p = plan(&picks, &DefaultDest::default(), false);
         assert_eq!(p.blocker, None);
         assert_eq!(p.request.items.len(), 3);
@@ -372,88 +362,71 @@ mod tests {
 
     #[test]
     fn several_versions_to_one_folder_each_take_their_date() {
-        let picks = [file(KEY, vec![version(NEW, None), version(OLD, None)])];
+        let picks = [file(KEY, vec![version(NEW), version(OLD)])];
         let p = plan(&picks, &to_folder("out"), false);
         assert_eq!(name(p.output(0, 0)), "report (2026-11-01 18.33).docx");
         assert_eq!(name(p.output(0, 1)), "report (2026-10-20 09.00).docx");
 
         // Alone, a version keeps the plain name.
-        let p = plan(&[file(KEY, vec![version(NEW, None)])], &to_folder("out"), false);
+        let p = plan(&[file(KEY, vec![version(NEW)])], &to_folder("out"), false);
         assert_eq!(name(p.output(0, 0)), "report.docx");
         assert!(p.output(0, 0).unwrap().starts_with("out"));
     }
 
     #[test]
     fn one_version_may_overwrite_the_original_two_conflict() {
-        let overwrite = Some(Dest::Original { replace: true });
-        let one = [file(KEY, vec![version(NEW, None), version(OLD, overwrite.clone())])];
-        let p = plan(&one, &DefaultDest::default(), false);
+        let p = plan(&[file(KEY, vec![version(OLD)])], &overwrite(), false);
         assert_eq!(p.blocker, None);
-        assert_eq!(name(p.output(0, 1)), "report.docx", "the overwriting version keeps the name");
-        assert!(p.request.items[1].overwrite);
+        assert_eq!(name(p.output(0, 0)), "report.docx", "the overwriting version keeps the name");
+        assert!(p.request.items[0].overwrite);
 
-        let two = [file(KEY, vec![version(NEW, overwrite.clone()), version(OLD, overwrite.clone())])];
-        let p = plan(&two, &DefaultDest::default(), false);
+        let two = [file(KEY, vec![version(NEW), version(OLD)])];
+        let p = plan(&two, &overwrite(), false);
         assert_eq!(p.blocker, Some(Blocker::Conflict));
         assert_eq!(p.conflicts, BTreeSet::from([0]));
+        // Without replace, the current file is kept: no conflict.
+        let keep = DefaultDest { replace: false, ..overwrite() };
+        assert_eq!(plan(&two, &keep, false).blocker, None);
     }
 
     #[test]
     fn a_folder_overwriting_the_original_conflicts_with_a_file_inside_it() {
-        let overwrite = Some(Dest::Original { replace: true });
-        let picks = [
-            file(KEY, vec![version(NEW, overwrite.clone())]),
-            folder("C/Docs", OLD, overwrite.clone(), None),
-        ];
-        let p = plan(&picks, &DefaultDest::default(), false);
+        let picks = [file(KEY, vec![version(NEW)]), folder("C/Docs", OLD, None)];
+        let p = plan(&picks, &overwrite(), false);
         assert_eq!(p.conflicts, BTreeSet::from([0, 1]));
         assert_eq!(p.blocker, Some(Blocker::Conflict));
 
         // The same date is the same content: no conflict.
-        let picks =
-            [file(KEY, vec![version(OLD, overwrite.clone())]), folder("C/Docs", OLD, overwrite, None)];
-        assert!(plan(&picks, &DefaultDest::default(), false).conflicts.is_empty());
+        let picks = [file(KEY, vec![version(OLD)]), folder("C/Docs", OLD, None)];
+        assert!(plan(&picks, &overwrite(), false).conflicts.is_empty());
     }
 
     #[test]
-    fn the_default_original_with_replace_counts_as_overwriting() {
-        let default = DefaultDest { kind: DestKind::Original, folder: None, replace: true };
-        let picks = [file(KEY, vec![version(NEW, None), version(OLD, Some(Dest::Beside))])];
-        assert_eq!(plan(&picks, &default, false).blocker, None);
-        let picks = [file(KEY, vec![version(NEW, None), version(OLD, None)])];
-        assert_eq!(plan(&picks, &default, false).blocker, Some(Blocker::Conflict));
-        // Without replace, the current file is kept: no conflict.
-        let keep = DefaultDest { replace: false, ..default };
-        assert_eq!(plan(&picks, &keep, false).blocker, None);
-    }
-
-    #[test]
-    fn a_missing_folder_blocks_only_what_follows_the_default() {
+    fn another_folder_without_its_folder_waits() {
         let default = DefaultDest { kind: DestKind::Folder, folder: None, replace: false };
-        let picks = [file(KEY, vec![version(NEW, None)])];
+        let picks = [file(KEY, vec![version(NEW)])];
         assert_eq!(plan(&picks, &default, false).blocker, Some(Blocker::NoFolder));
-        let picks = [file(KEY, vec![version(NEW, Some(Dest::Beside))])];
-        assert_eq!(plan(&picks, &default, false).blocker, None);
+        assert!(plan(&picks, &default, false).request.items.is_empty());
     }
 
     #[test]
     fn a_running_operation_blocks_last() {
-        let picks = [file(KEY, vec![version(NEW, None)])];
+        let picks = [file(KEY, vec![version(NEW)])];
         assert_eq!(plan(&picks, &DefaultDest::default(), true).blocker, Some(Blocker::Busy));
         assert_eq!(plan(&[], &DefaultDest::default(), true).blocker, Some(Blocker::Nothing));
     }
 
     #[test]
     fn an_unknown_folder_size_makes_the_total_partial() {
-        let picks = [folder("C/Photos", OLD, None, None), folder("C/Music", OLD, None, Some(5))];
+        let picks = [folder("C/Photos", OLD, None), folder("C/Music", OLD, Some(5))];
         let s = plan(&picks, &DefaultDest::default(), false).summary;
         assert_eq!((s.folders, s.bytes, s.partial), (2, 5, true));
     }
 
     #[test]
-    fn a_folder_override_replaces_the_default() {
-        let dest = Some(Dest::Folder { path: PathBuf::from("elsewhere"), replace: true });
-        let p = plan(&[folder("C/Photos", OLD, dest, Some(1))], &DefaultDest::default(), false);
+    fn another_folder_with_replace_reaches_the_engine() {
+        let default = DefaultDest { replace: true, ..to_folder("elsewhere") };
+        let p = plan(&[folder("C/Photos", OLD, Some(1))], &default, false);
         let item = &p.request.items[0];
         assert_eq!(item.target, RestoreTarget::Folder { path: PathBuf::from("elsewhere") });
         assert!(item.overwrite);

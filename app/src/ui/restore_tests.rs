@@ -210,6 +210,25 @@ fn a_folder_whose_items_are_all_ticked_one_by_one_shows_ticked() {
     }
 }
 
+#[test]
+fn clear_selection_beside_restore_unticks_everything() {
+    let f = backed_up();
+    let mut h = harness(&f);
+    let root = symbol::with(symbol::FOLDER, f.source.display());
+    tick_box(&h, &file("a.txt")).click();
+    tick_box(&h, &folder("sub")).click();
+    settle(&mut h);
+    assert_ne!(toggled(&h, &root), Some(Toggled::False));
+    h.get_by(|n| {
+        n.role() == egui::accesskit::Role::Button && n.label().as_deref() == Some("Clear selection")
+    })
+    .click();
+    settle(&mut h);
+    for item in [root, folder("sub"), file("a.txt")] {
+        assert_eq!(toggled(&h, &item), Some(Toggled::False), "{item}");
+    }
+}
+
 /// Every character the interface draws (symbols in the code, texts of
 /// every language, the icons) has a glyph in the fonts the window draws
 /// with: the theme's, egui's own and the system fonts.

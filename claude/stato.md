@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con la cartella spuntata quando tutto il contenuto lo è (ramo
-`fix/folder-all-ticked` unito; `tools\check.bat` verde: fmt, clippy, 322
+`main` con il ripristino a destinazione unica (ramo
+`feature/restore-simple` unito; `tools\check.bat` verde: fmt, clippy, 322
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -97,3 +97,8 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   un clic toglie tutte le spunte all'interno invece di trasformarle nella
   cartella spuntata (le versioni scelte dei file non cambiano finché
   l'utente non lo chiede).
+- Ripristino: una sola destinazione per tutta la selezione (le 3 opzioni
+  in alto, più "Sostituisci i file già presenti"); tolti il menu della
+  destinazione di ogni versione o cartella e l'icona ✎. Restano le
+  versioni di un file e la data di una cartella. "Togli selezione" è un
+  pulsante accanto a Ripristina.

@@ -34,6 +34,12 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Changed
 
+- Restore files: everything ticked goes to the one destination chosen at
+  the top (next to the original with the date, original location, another
+  folder); a version or folder no longer has a destination menu of its
+  own. Versions of a file and the date of a folder are still chosen on
+  their card. "Clear selection" is a button beside Restore.
+
 - Built with Rust 1.99.1, pinned in `rust-toolchain.toml` and in CI (the
   minimum version is 1.99). Dependencies updated, including toml 1,
   argon2 0.6 (same keys: checked against the reference implementation)
