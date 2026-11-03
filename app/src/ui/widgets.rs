@@ -94,10 +94,12 @@ pub fn modal(ctx: &egui::Context, id: egui::Id) -> egui::Modal {
 /// A checkbox whose ticked box is filled with the accent, as in Windows 11
 /// (egui only draws the tick).
 pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: impl Into<egui::WidgetText>) -> Response {
+    let text = text.into();
+    let alone = text.is_empty();
     let resp = ui.checkbox(checked, text);
     if *checked {
         let t = Tokens::current(ui);
-        let rect = tick_box_rect(ui, &resp);
+        let rect = tick_box_rect(ui, &resp, alone);
         let fill = if ui.is_enabled() { t.accent } else { t.stroke };
         ui.painter().rect_filled(rect, tick_box_radius(ui), fill);
         let inner = rect.shrink(rect.width() * 0.25);
@@ -114,8 +116,10 @@ pub fn checkbox(ui: &mut Ui, checked: &mut bool, text: impl Into<egui::WidgetTex
 /// A checkbox for "some of it": a filled accent square in an empty box,
 /// distinct from the ticked box. Clicking it reports a change.
 pub fn partial_checkbox(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Response {
+    let text = text.into();
+    let alone = text.is_empty();
     let resp = ui.add(egui::Checkbox::new(&mut false, text).indeterminate(true));
-    let rect = tick_box_rect(ui, &resp);
+    let rect = tick_box_rect(ui, &resp, alone);
     // Covers egui's dash.
     let inner = rect.shrink(1.0);
     ui.painter().rect_filled(inner, tick_box_radius(ui), ui.style().interact(&resp).bg_fill);
@@ -124,10 +128,18 @@ pub fn partial_checkbox(ui: &mut Ui, text: impl Into<egui::WidgetText>) -> Respo
     resp
 }
 
-/// The box of a checkbox drawn by egui.
-fn tick_box_rect(ui: &Ui, resp: &Response) -> egui::Rect {
+/// The box of a checkbox drawn by egui: at the left of its text, or in
+/// the middle of its room when it has none (`alone`).
+fn tick_box_rect(ui: &Ui, resp: &Response, alone: bool) -> egui::Rect {
     let size = ui.spacing().icon_width;
-    let center = egui::pos2(resp.rect.left() + size * 0.5, resp.rect.center().y);
+    // Alone, egui still leaves the gap before a text: box and gap are
+    // centred together.
+    let x = if alone {
+        resp.rect.center().x - ui.spacing().icon_spacing * 0.5
+    } else {
+        resp.rect.left() + size * 0.5
+    };
+    let center = egui::pos2(x, resp.rect.center().y);
     egui::Rect::from_center_size(center, egui::Vec2::splat(size))
 }
 
