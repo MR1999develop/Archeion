@@ -151,6 +151,8 @@ unexpected-stop = 操作が予期せず停止しました。
 dates = バックアップの日付
 archive-tooltip = { $files } 個のファイル、このバックアップで保存: { $stored } 個 ({ $size })
 search-hint = すべてのバックアップからファイル名またはフォルダー名で検索…
+include-deleted = チェックしたフォルダーに削除されたファイルを含める
+include-deleted-hint = オン: チェックしたフォルダーは、その後元の場所で削除されたファイルも、名前の前に _deleted_ を付けて戻します。オフ: その日付の時点の状態で戻ります。削除されたファイルは個別にチェックすることもできます。
 no-results = その名前のファイルまたはフォルダーはありません。
 results = { $count ->
    *[other] { $count } 個のファイルが見つかりました

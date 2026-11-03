@@ -157,6 +157,8 @@ unexpected-stop = L'opération s'est arrêtée de façon inattendue.
 dates = Dates des sauvegardes
 archive-tooltip = { $files } fichiers, { $stored } enregistrés dans cette sauvegarde ({ $size })
 search-hint = Rechercher un fichier ou un dossier par nom dans toutes les sauvegardes…
+include-deleted = Inclure les fichiers supprimés dans les dossiers cochés
+include-deleted-hint = Activée : un dossier coché ramène aussi les fichiers supprimés de la source depuis, avec _deleted_ devant le nom. Désactivée : il revient tel qu’il était à sa date ; un fichier supprimé peut toujours être coché seul.
 no-results = Aucun fichier ni dossier portant ce nom.
 results = { $count ->
     [one] { $count } fichier trouvé

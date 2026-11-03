@@ -438,6 +438,38 @@ fn a_ticked_folder_ticks_its_deleted_files_too() {
     assert_eq!(req.items[0].exclude, vec![a]);
 }
 
+#[test]
+fn the_tick_box_above_the_tree_leaves_deleted_files_out_of_folders() {
+    let f = backed_up();
+    std::thread::sleep(Duration::from_millis(1100));
+    fs::remove_file(f.source.join("a.txt")).unwrap();
+    archeion_engine::backup(&f.profile, None, BackupMode::Auto, &Quiet).unwrap();
+    let include = "Include deleted files in ticked folders";
+
+    let mut h = harness(&f);
+    let root = symbol::with(symbol::FOLDER, f.source.display());
+    assert_eq!(tick_box(&h, include).accesskit_node().toggled(), Some(Toggled::True), "on to begin with");
+    tick_box(&h, include).click();
+    settle(&mut h);
+    tick_box(&h, &root).click();
+    settle(&mut h);
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::False), "off: the deleted file stays out");
+    let req = request(&mut h);
+    assert!(!req.items[0].with_deleted, "{:?}", req.items[0]);
+
+    // On again, with the folder ticked: in at once.
+    let mut h = harness(&f);
+    tick_box(&h, &root).click();
+    settle(&mut h);
+    tick_box(&h, include).click();
+    settle(&mut h);
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::False));
+    tick_box(&h, include).click();
+    settle(&mut h);
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::True), "on: with the folder");
+    assert!(request(&mut h).items[0].with_deleted);
+}
+
 /// Every character the interface draws (symbols in the code, texts of
 /// every language, the icons) has a glyph in the fonts the window draws
 /// with: the theme's, egui's own and the system fonts.

@@ -157,6 +157,8 @@ unexpected-stop = La operación se ha detenido de forma inesperada.
 dates = Fechas de las copias
 archive-tooltip = { $files } archivos, { $stored } guardados en esta copia ({ $size })
 search-hint = Busca un archivo o una carpeta por nombre en todas las copias…
+include-deleted = Incluir los archivos eliminados en las carpetas marcadas
+include-deleted-hint = Activada: una carpeta marcada también recupera los archivos eliminados del origen desde entonces, con _deleted_ delante del nombre. Desactivada: vuelve como estaba en su fecha; un archivo eliminado aún se puede marcar por separado.
 no-results = Ningún archivo ni carpeta con ese nombre.
 results = { $count ->
     [one] { $count } archivo encontrado

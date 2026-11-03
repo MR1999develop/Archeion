@@ -41,6 +41,9 @@ pub struct Ticked<'a> {
     pub folder_archive: Option<&'a str>,
     /// For a folder, the keys unticked inside it.
     pub exclude: &'a [String],
+    /// For a folder, it also brings back what it held before its date
+    /// (deleted at the source since).
+    pub with_deleted: bool,
 }
 
 /// How the tick box of a node shows the selection.
@@ -154,14 +157,17 @@ impl Tree {
             if h.exclude.iter().any(|x| keys::is_within(key, x)) {
                 return Tick::LeftOut { folder };
             }
-            // The folder brings back what it held at its date and what it
-            // held before (deleted at the source since): anything saved up
-            // to its date.
-            let listed = self
-                .archives
-                .iter()
-                .position(|a| Some(a.name.as_str()) == h.folder_archive)
-                .is_some_and(|pos| node.entry.present.iter().any(|&(first, _)| first <= pos));
+            // The folder brings back what it held at its date, and with its
+            // deleted files what it held before too: anything saved up to
+            // its date.
+            let listed =
+                self.archives.iter().position(|a| Some(a.name.as_str()) == h.folder_archive).is_some_and(
+                    |pos| {
+                        node.entry.present.iter().any(|&(first, last)| {
+                            if h.with_deleted { first <= pos } else { (first..=last).contains(&pos) }
+                        })
+                    },
+                );
             if !listed {
                 return Tick::NotInFolderDate { folder };
             }
@@ -303,11 +309,11 @@ mod tests {
     }
 
     fn folder<'a>(key: &'a str, archive: &'a str) -> Ticked<'a> {
-        Ticked { key, folder_archive: Some(archive), exclude: &[] }
+        Ticked { key, folder_archive: Some(archive), exclude: &[], with_deleted: true }
     }
 
     fn file(key: &str) -> Ticked<'_> {
-        Ticked { key, folder_archive: None, exclude: &[] }
+        Ticked { key, folder_archive: None, exclude: &[], with_deleted: true }
     }
 
     fn idx(t: &Tree, key: &str) -> usize {
@@ -331,7 +337,8 @@ mod tests {
         let t = docs_tree();
         let docs = idx(&t, "C/Docs");
         let exclude = vec!["C/Docs/sub/b.txt".to_owned()];
-        let ticked = [Ticked { key: "C/Docs", folder_archive: Some("a2"), exclude: &exclude }];
+        let ticked =
+            [Ticked { key: "C/Docs", folder_archive: Some("a2"), exclude: &exclude, with_deleted: true }];
         assert_eq!(tick_of(&t, "C/Docs", &ticked), Tick::Partial, "the ticked folder itself");
         assert_eq!(tick_of(&t, "C/Docs/sub", &ticked), Tick::Partial, "a folder holding it");
         assert_eq!(tick_of(&t, "C/Docs/sub/b.txt", &ticked), Tick::LeftOut { folder: docs });
@@ -340,7 +347,8 @@ mod tests {
 
         // A left-out folder leaves out what it holds.
         let exclude = vec!["C/Docs/sub".to_owned()];
-        let ticked = [Ticked { key: "C/Docs", folder_archive: Some("a2"), exclude: &exclude }];
+        let ticked =
+            [Ticked { key: "C/Docs", folder_archive: Some("a2"), exclude: &exclude, with_deleted: true }];
         assert_eq!(tick_of(&t, "C/Docs/sub/deep/c.txt", &ticked), Tick::LeftOut { folder: docs });
     }
 
@@ -382,6 +390,11 @@ mod tests {
             "deleted before: it comes back too"
         );
         assert_eq!(tick_of(&t, "C/Docs2/b.txt", &ticked), Tick::Off, "a sibling sharing the prefix");
+
+        // Without its deleted files, only what it held at its date.
+        let without = [Ticked { with_deleted: false, ..folder("C/Docs", "a2") }];
+        assert_eq!(tick_of(&t, "C/Docs/old.txt", &without), Tick::NotInFolderDate { folder: docs });
+        assert_eq!(tick_of(&t, "C/Docs/sub/a.txt", &without), Tick::InFolder { folder: docs });
 
         // At the oldest date, old.txt is there and a.txt is not.
         let ticked = [folder("C/Docs", "a0")];
