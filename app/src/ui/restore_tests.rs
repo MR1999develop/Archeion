@@ -186,6 +186,30 @@ fn a_ticked_file_fills_the_folders_above_it() {
     assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::False), "a file beside it stays unticked");
 }
 
+#[test]
+fn a_folder_whose_items_are_all_ticked_one_by_one_shows_ticked() {
+    let f = backed_up();
+    let mut h = harness(&f);
+    let root = symbol::with(symbol::FOLDER, f.source.display());
+    expand(&mut h, &folder("sub"));
+    expand(&mut h, &folder("deep"));
+    for item in [file("a.txt"), file("b.txt"), file("c.txt")] {
+        assert_ne!(toggled(&h, &root), Some(Toggled::True), "not everything is ticked yet");
+        tick_box(&h, &item).click();
+        settle(&mut h);
+    }
+    assert_eq!(toggled(&h, &folder("deep")), Some(Toggled::True), "its only file is ticked");
+    assert_eq!(toggled(&h, &folder("sub")), Some(Toggled::True));
+    assert_eq!(toggled(&h, &root), Some(Toggled::True), "every item inside is ticked");
+
+    // Clicking it unticks everything inside.
+    tick_box(&h, &root).click();
+    settle(&mut h);
+    for item in [root.clone(), folder("sub"), file("a.txt"), file("b.txt"), file("c.txt")] {
+        assert_eq!(toggled(&h, &item), Some(Toggled::False), "{item}");
+    }
+}
+
 /// Every character the interface draws (symbols in the code, texts of
 /// every language, the icons) has a glyph in the fonts the window draws
 /// with: the theme's, egui's own and the system fonts.

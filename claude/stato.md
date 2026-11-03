@@ -4,8 +4,8 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` senza finestra della console anche in sviluppo (ramo
-`feature/no-console` unito; `tools\check.bat` verde: fmt, clippy, 320
+`main` con la cartella spuntata quando tutto il contenuto lo è (ramo
+`fix/folder-all-ticked` unito; `tools\check.bat` verde: fmt, clippy, 322
 test, 1 ignorato: le schermate). La build di rilascio è stata controllata al commit GPLv3
 (nessun percorso locale nell'exe).
 
@@ -92,3 +92,8 @@ test, 1 ignorato: le schermate). La build di rilascio è stata controllata al co
   tranne i test unitari): niente console accanto alla finestra; i comandi
   scrivono su stdout letto tramite pipe. Comandi a mano nel terminale
   senza output: in `TIDY.md`.
+- Albero di ripristino: una cartella non spuntata il cui contenuto è
+  tutto spuntato elemento per elemento è `Tick::Full` (casella spuntata);
+  un clic toglie tutte le spunte all'interno invece di trasformarle nella
+  cartella spuntata (le versioni scelte dei file non cambiano finché
+  l'utente non lo chiede).

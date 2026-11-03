@@ -182,6 +182,7 @@ remove-from-selection = Togli dalla selezione
 tick-in-folder = Ripristinato con la cartella spuntata { $folder }. Togli la spunta per escluderlo.
 tick-not-in-folder-date = Non è nel backup con cui torna la cartella spuntata { $folder }: non viene ripristinato. Togli la spunta a quella cartella per sceglierlo da solo.
 tick-partial = Dentro c'è qualcosa di spuntato, o di escluso dalla cartella spuntata. Fai clic per spuntare tutta la cartella.
+tick-full = Tutto ciò che contiene è spuntato elemento per elemento. Fai clic per togliere tutte le spunte.
 tick-left-out = Escluso dalla cartella spuntata { $folder }: non viene ripristinato. Spuntalo per ripristinarlo con la cartella.
 folder-left-out = { $count ->
     [one] { $count } elemento escluso all'interno: non viene ripristinato.

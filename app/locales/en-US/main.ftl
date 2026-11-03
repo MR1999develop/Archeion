@@ -182,6 +182,7 @@ remove-from-selection = Remove from the selection
 tick-in-folder = Restored with the ticked folder { $folder }. Untick it to leave it out.
 tick-not-in-folder-date = Not in the backup that the ticked folder { $folder } comes back as: it is not restored. Untick that folder to choose this item on its own.
 tick-partial = Something inside is ticked, or left out of the ticked folder. Click to tick the whole folder.
+tick-full = Everything inside is ticked one by one. Click to untick it all.
 tick-left-out = Left out of the ticked folder { $folder }: not restored. Tick it to restore it with the folder.
 folder-left-out = { $count ->
     [one] { $count } item unticked inside: not restored.

@@ -52,6 +52,9 @@ pub enum Tick {
     /// A folder with something ticked inside it, or a ticked folder with
     /// something unticked inside it.
     Partial,
+    /// A folder not ticked itself whose every item is ticked one by one:
+    /// shown ticked, and clicking it unticks them all.
+    Full,
     /// Inside a ticked folder, in the backup that folder comes back as:
     /// restored with it. `folder` is the nearest ticked folder.
     InFolder {
@@ -132,7 +135,7 @@ impl Tree {
 
     /// How `node` shows `ticked`. Its own tick wins (partial when something
     /// inside is left out); then the nearest ticked folder holding it;
-    /// then, for a folder, anything ticked inside.
+    /// then, for a folder, what is ticked inside: all of it or some.
     pub fn tick(&self, node: &Node, ticked: &[Ticked<'_>]) -> Tick {
         let key = node.key();
         if let Some(own) = ticked.iter().find(|t| t.key == key) {
@@ -161,9 +164,20 @@ impl Tree {
             return Tick::InFolder { folder };
         }
         if node.is_dir() && ticked.iter().any(|t| t.key != key && keys::is_within(t.key, key)) {
-            return Tick::Partial;
+            return if self.all_ticked(node, ticked) { Tick::Full } else { Tick::Partial };
         }
         Tick::Off
+    }
+
+    /// Every item of the folder `node` is ticked, or full itself. Stops at
+    /// the first one that is not, so a partial folder costs little.
+    fn all_ticked(&self, node: &Node, ticked: &[Ticked<'_>]) -> bool {
+        !node.children.is_empty()
+            && node
+                .children
+                .iter()
+                .filter_map(|&c| self.nodes.get(c))
+                .all(|c| matches!(self.tick(c, ticked), Tick::On | Tick::Full | Tick::InFolder { .. }))
     }
 
     /// Ticks `key` again inside a folder whose exclusions are `exclude`:
@@ -384,11 +398,30 @@ mod tests {
         ]));
         let ticked = [file("C/Docs/sub/a.txt")];
         assert_eq!(tick_of(&t, "C/Docs", &ticked), Tick::Partial);
-        assert_eq!(tick_of(&t, "C/Docs/sub", &ticked), Tick::Partial);
+        assert_eq!(tick_of(&t, "C/Docs/sub", &ticked), Tick::Full, "its only file is ticked");
         assert_eq!(tick_of(&t, "C/Docs/sub/a.txt", &ticked), Tick::On);
         assert_eq!(tick_of(&t, "C/Docs/z.txt", &ticked), Tick::Off, "a file is never partial");
         assert_eq!(tick_of(&t, "C/Other", &ticked), Tick::Off);
         assert_eq!(tick_of(&t, "C/Docs", &[]), Tick::Off);
+    }
+
+    #[test]
+    fn a_folder_whose_items_are_all_ticked_one_by_one_is_full() {
+        let t = docs_tree();
+        let mut ticked = vec![file("C/Docs/a.txt"), file("C/Docs/sub/b.txt"), file("C/Docs/sub/deep/c.txt")];
+        assert_eq!(tick_of(&t, "C/Docs/sub/deep", &ticked), Tick::Partial);
+        assert_eq!(tick_of(&t, "C/Docs", &ticked), Tick::Partial);
+        ticked.push(file("C/Docs/sub/deep/d.txt"));
+        assert_eq!(tick_of(&t, "C/Docs/sub/deep", &ticked), Tick::Full);
+        assert_eq!(tick_of(&t, "C/Docs/sub", &ticked), Tick::Full, "full all the way up");
+        assert_eq!(tick_of(&t, "C/Docs", &ticked), Tick::Full);
+        let with_folder = [file("C/Docs/a.txt"), folder("C/Docs/sub", "a2")];
+        assert_eq!(tick_of(&t, "C/Docs", &with_folder), Tick::Full, "a ticked folder counts");
+        let partly = [
+            file("C/Docs/a.txt"),
+            Ticked { exclude: &["C/Docs/sub/b.txt".into()], ..folder("C/Docs/sub", "a2") },
+        ];
+        assert_eq!(tick_of(&t, "C/Docs", &partly), Tick::Partial, "something left out inside");
     }
 
     #[test]

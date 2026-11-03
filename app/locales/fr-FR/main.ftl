@@ -182,6 +182,7 @@ remove-from-selection = Retirer de la sélection
 tick-in-folder = Restauré avec le dossier coché { $folder }. Décochez-le pour l'exclure.
 tick-not-in-folder-date = Absent de la sauvegarde avec laquelle revient le dossier coché { $folder } : il n'est pas restauré. Décochez ce dossier pour le choisir seul.
 tick-partial = Un élément à l'intérieur est coché, ou exclu du dossier coché. Cliquez pour cocher tout le dossier.
+tick-full = Tout son contenu est coché élément par élément. Cliquez pour tout décocher.
 tick-left-out = Exclu du dossier coché { $folder } : il n'est pas restauré. Cochez-le pour le restaurer avec le dossier.
 folder-left-out = { $count ->
     [one] { $count } élément décoché à l'intérieur : il n'est pas restauré.
