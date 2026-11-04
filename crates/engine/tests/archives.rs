@@ -1722,3 +1722,57 @@ fn a_file_excluded_after_backups_keeps_its_versions_and_comes_back_only_on_its_o
     let key_path = archeion_core::keys::path_under(&back, &key);
     assert_eq!(fs::read_to_string(key_path).unwrap(), "alpha");
 }
+
+#[test]
+fn an_unconfirmed_network_profile_touches_nothing() {
+    let mut f = fixture(Container::ZipPerFile);
+    f.profile.network_unconfirmed = true;
+    let dest = f.profile.destination.path().to_path_buf();
+    let r = backup(&f.profile, None, BackupMode::Auto, &Recorder::default());
+    assert!(matches!(r, Err(EngineError::NetworkUnconfirmed)), "{r:?}");
+    assert!(!dest.exists(), "the destination was not even created");
+    assert!(matches!(list_archives(&f.profile, None), Err(EngineError::NetworkUnconfirmed)));
+    assert!(matches!(archeion_engine::catalog(&f.profile, None), Err(EngineError::NetworkUnconfirmed)));
+    assert!(matches!(archeion_engine::existing_format(&f.profile), Err(EngineError::NetworkUnconfirmed)));
+    assert!(matches!(archeion_engine::merge_pending(&f.profile), Err(EngineError::NetworkUnconfirmed)));
+    assert!(matches!(
+        verify(&f.profile, None, None, &Recorder::default()),
+        Err(EngineError::NetworkUnconfirmed)
+    ));
+    assert_eq!(archeion_engine::free_space(&f.profile), None);
+    assert!(!archeion_engine::destination_reachable(&f.profile));
+    // Confirmed: as any other profile.
+    f.profile.network_unconfirmed = false;
+    run_backup(&f.profile);
+    assert_eq!(list_archives(&f.profile, None).unwrap().len(), 1);
+}
+
+#[test]
+fn a_restore_never_writes_more_than_the_backup_lists() {
+    let f = fixture(Container::Folder);
+    run_backup(&f.profile);
+    let name = list_archives(&f.profile, None).unwrap().remove(0).name;
+    // The stored copy of a.txt ("alpha", 5 bytes) grown by someone else.
+    let key = archeion_core::keys::key_for(&f.source.join("a.txt")).unwrap();
+    let stored =
+        archeion_core::keys::path_under(&f.profile.destination.path().join(&name).join("data"), &key);
+    fs::write(&stored, vec![b'x'; 5_000_000]).unwrap();
+    let req = RestoreRequest::single(
+        &name,
+        Vec::new(),
+        &RestoreTarget::Folder { path: f.restore_to.clone() },
+        true,
+    );
+    let r = restore(&f.profile, None, &req, &Recorder::default()).unwrap();
+    assert!(
+        r.skipped.iter().any(|s| s.reason.contains("more data than the backup lists")),
+        "{:?}",
+        r.skipped
+    );
+    assert!(!restored(&f, "a.txt").exists());
+    let leftovers: Vec<_> = walkdir_paths(&f.restore_to)
+        .into_iter()
+        .filter(|p| p.to_string_lossy().contains("archeion-tmp"))
+        .collect();
+    assert!(leftovers.is_empty(), "{leftovers:?}");
+}

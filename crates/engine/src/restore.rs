@@ -161,7 +161,7 @@ pub(crate) fn restore_from(
                 let mut fill = |out: &mut dyn std::io::Write| {
                     chunk_reader.write_all(&c.list, out, &mut |n| progress.add(n))
                 };
-                write_file(dest, e.mtime_ns, e.hash.as_deref(), &e.key, &mut fill)
+                write_file(dest, e.size, e.mtime_ns, e.hash.as_deref(), &e.key, &mut fill)
             }
             _ => {
                 let (Some(slot), Some(dir)) = (readers.get_mut(*j), dirs.get(*j)) else {
@@ -179,7 +179,7 @@ pub(crate) fn restore_from(
                             .map_err(EngineError::io(format!("restoring {}", e.key)))
                     })
                 };
-                write_file(dest, e.mtime_ns, e.hash.as_deref(), &e.key, &mut fill)
+                write_file(dest, e.size, e.mtime_ns, e.hash.as_deref(), &e.key, &mut fill)
             }
         };
         match result {
@@ -367,6 +367,7 @@ fn ensure_room(files: &[(u64, &Path, bool)]) -> Result<()> {
 /// checked against `expected_hash`, flushed to the disk, then renamed.
 fn write_file(
     dest: &Path,
+    size: u64,
     mtime_ns: i64,
     expected_hash: Option<&str>,
     key: &str,
@@ -380,7 +381,7 @@ fn write_file(
         "{}.archeion-tmp",
         dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
     ));
-    match write_checked(&tmp, mtime_ns, expected_hash, key, fill, &ctx) {
+    match write_checked(&tmp, size, mtime_ns, expected_hash, key, fill, &ctx) {
         Ok(()) => fs::rename(&tmp, dest).map_err(EngineError::io(ctx)),
         Err(e) => {
             let _ = fs::remove_file(&tmp);
@@ -389,9 +390,33 @@ fn write_file(
     }
 }
 
+/// Passes at most `left` bytes on to `inner`; a write beyond fails and
+/// sets `left` to `u64::MAX`, so the caller can tell why.
+struct Capped<W> {
+    inner: W,
+    left: u64,
+}
+
+impl<W: std::io::Write> std::io::Write for Capped<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if buf.len() as u64 > self.left {
+            self.left = u64::MAX;
+            return Err(std::io::Error::other("more data than the backup lists"));
+        }
+        let n = self.inner.write(buf)?;
+        self.left -= n as u64;
+        Ok(n)
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
 /// The body of [`write_file`]: writes `path` and checks its hash.
 fn write_checked(
     path: &Path,
+    size: u64,
     mtime_ns: i64,
     expected_hash: Option<&str>,
     key: &str,
@@ -399,10 +424,19 @@ fn write_checked(
     ctx: &str,
 ) -> Result<()> {
     let file = fs::File::create(path).map_err(EngineError::io(ctx.to_owned()))?;
-    let mut out = HashingWriter::new(std::io::BufWriter::new(file));
-    fill(&mut out)?;
+    // Never more than the manifest lists: a doctored backup cannot fill
+    // the disk before its hash is found wrong.
+    let mut out = Capped { inner: HashingWriter::new(std::io::BufWriter::new(file)), left: size };
+    let filled = fill(&mut out);
+    if out.left == u64::MAX {
+        return Err(EngineError::Damaged {
+            archive: key.to_owned(),
+            message: "more data than the backup lists".into(),
+        });
+    }
+    filled?;
     out.flush().map_err(EngineError::io(ctx.to_owned()))?;
-    let (_, hash, buffered) = out.finish();
+    let (_, hash, buffered) = out.inner.finish();
     if expected_hash.is_some_and(|h| h != hash) {
         return Err(EngineError::Damaged {
             archive: key.to_owned(),

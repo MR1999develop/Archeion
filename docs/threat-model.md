@@ -60,7 +60,12 @@ or Task Scheduler, same user), Credential Manager.
 | Information disclosure: names and contents read at the destination | destination | AES-256 (WinZip AE-2) zips keyed by a random master key; file names are keyed hashes; chunk names are keyed MACs. The master key is wrapped with Argon2id (64 MiB, 3 passes) of the password. |
 | Information disclosure: EFS files saved in the clear | sources | Counted and shown in the backup summary with the advice to encrypt the destination. |
 | Denial of service: huge or compressed-bomb manifests | destination | Manifests are read with a 4 GiB limit; chunks with their declared size. |
+| Denial of service: a stored file that unpacks to far more than listed fills the disk during a restore | destination | A restored file is written up to the size its manifest lists, then refused. |
+| Tampering: entries marked as excluded so that a folder restore leaves them out | destination | Encrypted manifests cannot be changed; on an unencrypted destination this is part of the accepted risk below. |
 | Elevation / confused deputy: an imported profile backs up the user's files to someone else's share on a schedule | profile files | An imported profile's schedule stays paused until the user turns it on. |
+| Information disclosure: an imported profile naming `\\someone\share` makes Windows sign in there (NTLM) as soon as the settings show it | profile files | Folders on other computers of an imported profile are not touched (one guard in the engine, `destination_of`) until the user confirms the computers named. |
+| Information disclosure: a password given on the command line is visible to other programs | command line | `archeion extract` takes secrets only from standard input or the environment. |
+| Spoofing: a weak password chosen for an encrypted destination | settings | At least 15 characters, no composition rules, common passwords and the profile name refused, an estimated strength required; at most 1024 characters so that Credential Manager keeps it. |
 | Elevation: programs or libraries planted next to the portable exe | program folder | Windows programs are started by full path; libraries load only from System32 and the program's folder. |
 | Repudiation / silent failure | all | Every run has a log; failures of automatic runs are notified; an incremental touching far more files than usual is notified (ransomware). |
 
@@ -79,7 +84,10 @@ or Task Scheduler, same user), Credential Manager.
 - **Sizes of encrypted files** stay visible (one zip per file, chunks of
   64 MiB at most).
 - **Memory.** Passwords and keys are wiped when dropped, but egui keeps
-  copies of text being typed while the field is open.
+  copies of text being typed while the field is open, and the `argon2`
+  crate does not wipe its working memory.
+- **Other users of the same computer** can make the window show itself
+  through its local port (`window.port`); nothing else.
 
 ## Alternatives rejected
 

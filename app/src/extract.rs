@@ -4,9 +4,10 @@
 //!
 //! Progress and the result are written as plain text on stdout and in
 //! `archeion-extract.log` in the target folder. The password or recovery
-//! key of an encrypted destination comes from `--password`,
-//! `--recovery-key`, the first line of standard input (`--stdin`), or the
-//! `ARCHEION_RECOVERY_KEY` / `ARCHEION_PASSWORD` environment variables.
+//! key of an encrypted destination comes from the first line of standard
+//! input (`--stdin`) or the `ARCHEION_RECOVERY_KEY` / `ARCHEION_PASSWORD`
+//! environment variables, never from the command line, which other
+//! programs can read.
 //!
 //! Exit codes as for the other commands: 0 everything restored, 1 failure
 //! or some files skipped, 2 destination missing, 4 password missing or
@@ -53,16 +54,10 @@ pub struct ExtractArgs {
     /// Replace files that already exist in the target folder.
     #[arg(long)]
     overwrite: bool,
-    /// Password of an encrypted destination. Other programs can see a
-    /// command line: prefer --stdin or ARCHEION_PASSWORD.
-    #[arg(long, conflicts_with_all = ["recovery_key", "stdin"])]
-    password: Option<String>,
-    /// Recovery key of an encrypted destination (64 hex digits, spaces
-    /// allowed).
-    #[arg(long, conflicts_with = "stdin")]
-    recovery_key: Option<String>,
-    /// Read the password or the recovery key from the first line of
-    /// standard input.
+    /// Read the password or the recovery key (64 hex digits, spaces
+    /// allowed) of an encrypted destination from the first line of standard
+    /// input. Without it, the ARCHEION_PASSWORD or ARCHEION_RECOVERY_KEY
+    /// environment variable gives it.
     #[arg(long)]
     stdin: bool,
 }
@@ -106,14 +101,6 @@ pub fn run(args: ExtractArgs) -> ExitCode {
 /// encrypted).
 fn secret(args: &ExtractArgs) -> Result<Option<Secret>, String> {
     let non_empty = |s: String| (!s.trim().is_empty()).then_some(s);
-    if let Some(p) = args.password.clone() {
-        return Password::new(p)
-            .map(|p| Some(Secret::Password(p)))
-            .ok_or_else(|| "the password is empty".into());
-    }
-    if let Some(k) = args.recovery_key.clone() {
-        return Ok(Some(Secret::RecoveryKey(k)));
-    }
     if args.stdin {
         let mut line = String::new();
         std::io::stdin().lock().read_line(&mut line).map_err(|e| format!("reading standard input: {e}"))?;
@@ -190,15 +177,13 @@ mod tests {
     }
 
     #[test]
-    fn arguments_parse_and_secrets_conflict() {
-        let t =
-            Test::try_parse_from(["x", "--destination", "E:\\B", "--to", "out", "--recovery-key", "ab cd"])
-                .unwrap();
-        assert!(matches!(secret(&t.args), Ok(Some(Secret::RecoveryKey(_)))));
-        assert!(
-            Test::try_parse_from(["x", "--destination", "d", "--to", "o", "--password", "p", "--stdin"])
-                .is_err()
-        );
+    fn arguments_parse_and_no_secret_comes_from_them() {
+        let t = Test::try_parse_from(["x", "--destination", r"E:\B", "--to", "out", "--stdin"]).unwrap();
+        assert!(t.args.stdin);
+        for flag in ["--password", "--recovery-key"] {
+            let parsed = Test::try_parse_from(["x", "--destination", "d", "--to", "o", flag, "secret"]);
+            assert!(parsed.is_err(), "{flag} is not an option");
+        }
         assert!(Test::try_parse_from(["x", "--to", "o"]).is_err(), "the destination is required");
     }
 }

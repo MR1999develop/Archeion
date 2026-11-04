@@ -1052,11 +1052,13 @@ impl FormatCheck {
     }
 
     fn state(&mut self, ctx: &egui::Context, profile: &Profile) -> FormatLock {
-        if profile.destination.is_empty() {
+        if profile.destination.is_empty() || profile.network_unconfirmed {
             self.free = None;
             self.foreign = None;
             self.file_system = None;
-            return FormatLock::Free;
+            // Looked at once confirmed.
+            self.key = None;
+            return if profile.network_unconfirmed { FormatLock::Unconfirmed } else { FormatLock::Free };
         }
         let key = (profile.id, profile.destination.clone());
         if self.key.as_ref() != Some(&key) {

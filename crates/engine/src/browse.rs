@@ -140,7 +140,7 @@ pub fn catalog(profile: &Profile, password: Option<&Password>) -> Result<Catalog
 
 /// Folder of the profile's archives, or `None` when it does not exist yet.
 fn root(profile: &Profile) -> Result<Option<&Path>> {
-    let root = profile.destination.path();
+    let root = crate::repo::destination_of(profile)?;
     ensure_reachable(root)?;
     Ok(root.exists().then_some(root))
 }
@@ -184,7 +184,7 @@ pub fn existing_format(profile: &Profile) -> Result<Option<ExistingFormat>> {
 /// quietly when another drive was plugged in.
 #[must_use]
 pub fn destination_reachable(profile: &Profile) -> bool {
-    let root = profile.destination.path();
+    let Ok(root) = crate::repo::destination_of(profile) else { return false };
     !root.as_os_str().is_empty() && ensure_reachable(root).is_ok()
 }
 
@@ -193,7 +193,7 @@ pub fn destination_reachable(profile: &Profile) -> bool {
 /// not reachable or does not say.
 #[must_use]
 pub fn free_space(profile: &Profile) -> Option<u64> {
-    let root = profile.destination.path();
+    let root = crate::repo::destination_of(profile).ok()?;
     if root.as_os_str().is_empty() || ensure_reachable(root).is_err() {
         return None;
     }
@@ -205,7 +205,7 @@ pub fn free_space(profile: &Profile) -> Option<u64> {
 /// "FAT32"…; `None` when it is not reachable or does not say.
 #[must_use]
 pub fn destination_file_system(profile: &Profile) -> Option<String> {
-    let root = profile.destination.path();
+    let root = crate::repo::destination_of(profile).ok()?;
     if root.as_os_str().is_empty() || ensure_reachable(root).is_err() {
         return None;
     }

@@ -246,3 +246,23 @@ fn a_typed_exclusion_is_checked_against_the_button_pressed() {
     steps(&mut h);
     assert!(rules(&storage).contains(&"**/cache".to_owned()), "{:?}", rules(&storage));
 }
+
+#[test]
+fn network_folders_of_an_imported_profile_wait_for_the_user() {
+    let (_dir, storage, _backups) = sandbox();
+    let mut settings = storage.load().unwrap();
+    let p = &mut settings.profiles[0];
+    p.sources.push(PathBuf::from(format!("{0}{0}unknown-host.invalid{0}share", std::path::MAIN_SEPARATOR)));
+    p.network_unconfirmed = true;
+    storage.save(&settings).unwrap();
+
+    let mut h = harness(storage.clone());
+    steps(&mut h);
+    let warning = "other computers (unknown-host.invalid)";
+    assert!(h.query_all_by_label_contains(warning).next().is_some(), "the computer is named");
+    assert!(h.state().format.free.is_none(), "the destination was not looked at");
+    button(&h, "Use these network folders").click();
+    steps(&mut h);
+    assert!(!storage.load().unwrap().profiles[0].network_unconfirmed);
+    assert!(h.query_all_by_label_contains(warning).next().is_none(), "the warning is gone");
+}

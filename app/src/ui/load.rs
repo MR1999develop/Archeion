@@ -12,6 +12,8 @@ use std::sync::mpsc;
 pub enum Problem {
     PasswordNeeded,
     WrongPassword,
+    /// An imported profile's network folders are not confirmed yet.
+    NetworkUnconfirmed,
     Other(String),
 }
 
@@ -20,6 +22,7 @@ impl From<EngineError> for Problem {
         match e {
             EngineError::PasswordNeeded => Self::PasswordNeeded,
             EngineError::WrongPassword => Self::WrongPassword,
+            EngineError::NetworkUnconfirmed => Self::NetworkUnconfirmed,
             other => Self::Other(other.to_string()),
         }
     }
@@ -85,6 +88,7 @@ impl<T: Send + 'static> Load<T> {
                 let text = match p {
                     Problem::PasswordNeeded => tr.t("run-password-needed"),
                     Problem::WrongPassword => tr.t("run-wrong-password"),
+                    Problem::NetworkUnconfirmed => tr.t("run-network-unconfirmed"),
                     Problem::Other(e) => e.clone(),
                 };
                 ui.colored_label(ui.visuals().error_fg_color, symbol::with(symbol::WARNING, text));

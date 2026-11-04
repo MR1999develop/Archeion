@@ -115,7 +115,7 @@ pub fn delete_archive(
 /// [`EngineError::DestinationUnavailable`] when the drive or share is not
 /// reachable.
 pub fn merge_pending(profile: &Profile) -> Result<bool> {
-    let root = profile.destination.path();
+    let root = crate::repo::destination_of(profile)?;
     crate::repo::ensure_reachable(root)?;
     if root.as_os_str().is_empty() || !root.exists() {
         return Ok(false);

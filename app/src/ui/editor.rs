@@ -37,6 +37,8 @@ pub enum FormatLock {
     Locked { container: Container, encrypted: bool },
     /// The destination cannot be reached: the format stays as it is.
     Unreachable,
+    /// An imported profile's network folders are not confirmed: not looked at.
+    Unconfirmed,
 }
 
 /// What the user asks "Run now" to do on a profile that has backups.
@@ -205,6 +207,7 @@ pub fn show(
         let resp = ui.text_edit_singleline(&mut p.name).labelled_by(label.id);
         out.changed |= resp.changed();
     });
+    network_confirmation(ui, tr, p, &mut out);
     section(ui, "folders", &tr.t("folders"), true, false, |ui| folders(ui, tr, p, &mut out));
     section(ui, "exclusions", &tr.t("exclusions"), false, false, |ui| {
         exclusions(ui, tr, p, drafts, &mut out)
@@ -703,18 +706,15 @@ fn password_rules(ui: &mut Ui, tr: &Tr, d: &Drafts, profile_name: &str) {
             ui.label(tr.t_args("password-strength", &[("level", arg(strength_text(tr, a.strength)))]));
         });
     }
-    ui.weak(tr.t_args("password-rule-tip", &[("passphrase", arg(policy::PASSPHRASE_CHARS))]));
+    ui.weak(tr.t("password-rule-tip"));
 }
 
 /// The checklist line of a requirement; `typed` is the length so far.
 fn rule_text(tr: &Tr, rule: Rule, typed: usize) -> String {
     match rule {
-        Rule::Length => {
-            tr.t_args("password-rule-length", &[("count", arg(policy::MIN_CHARS)), ("typed", arg(typed))])
-        }
-        Rule::Variety => tr.t_args(
-            "password-rule-variety",
-            &[("kinds", arg(policy::MIN_KINDS)), ("passphrase", arg(policy::PASSPHRASE_CHARS))],
+        Rule::Length => tr.t_args(
+            "password-rule-length",
+            &[("count", arg(policy::MIN_CHARS)), ("max", arg(policy::MAX_CHARS)), ("typed", arg(typed))],
         ),
         Rule::NotCommon => tr.t("password-rule-common"),
         Rule::NoRuns => tr.t_args("password-rule-runs", &[("count", arg(policy::MAX_RUN + 1))]),
@@ -728,8 +728,10 @@ fn rule_text(tr: &Tr, rule: Rule, typed: usize) -> String {
 /// What to do about an unmet requirement, shown next to the Save button.
 fn rule_hint(tr: &Tr, rule: Rule) -> String {
     match rule {
-        Rule::Length => tr.t_args("password-short-hint", &[("count", arg(policy::MIN_CHARS))]),
-        Rule::Variety => tr.t_args("password-variety-hint", &[("passphrase", arg(policy::PASSPHRASE_CHARS))]),
+        Rule::Length => tr.t_args(
+            "password-short-hint",
+            &[("count", arg(policy::MIN_CHARS)), ("max", arg(policy::MAX_CHARS))],
+        ),
         Rule::NotCommon => tr.t("password-common-hint"),
         Rule::NoRuns => tr.t("password-runs-hint"),
         Rule::NotName => tr.t("password-name-hint"),
@@ -837,7 +839,7 @@ fn container(ui: &mut Ui, tr: &Tr, p: &mut Profile, format: FormatLock, out: &mu
     let free = format == FormatLock::Free;
     let why = match format {
         FormatLock::Locked { .. } => tr.t("container-locked"),
-        FormatLock::Unreachable => tr.t("container-unreachable"),
+        FormatLock::Unreachable | FormatLock::Unconfirmed => tr.t("container-unreachable"),
         FormatLock::Checking => tr.t("container-checking"),
         FormatLock::Free => String::new(),
     };
@@ -1048,6 +1050,24 @@ fn folders(ui: &mut Ui, tr: &Tr, p: &mut Profile, out: &mut Outcome) {
         }
         out.changed = true;
     }
+}
+
+/// An imported profile with folders on other computers: which computers,
+/// and the button that lets Archeion contact them. Until then nothing
+/// touches them (Windows would sign in to them with the user's account).
+fn network_confirmation(ui: &mut Ui, tr: &Tr, p: &mut Profile, out: &mut Outcome) {
+    if !p.network_unconfirmed {
+        return;
+    }
+    let hosts = p.network_hosts().join(", ");
+    egui::Frame::group(ui.style()).show(ui, |ui| {
+        let text = tr.t_args("network-unconfirmed", &[("hosts", arg(hosts))]);
+        ui.colored_label(ui.visuals().warn_fg_color, symbol::with(symbol::WARNING, text));
+        if ui.button(tr.t("network-confirm")).clicked() {
+            p.network_unconfirmed = false;
+            out.changed = true;
+        }
+    });
 }
 
 fn destination(ui: &mut Ui, tr: &Tr, d: &mut Destination, info: &DestinationInfo, out: &mut Outcome) {
@@ -1413,13 +1433,16 @@ mod tests {
     fn a_new_password_reports_the_first_unmet_requirement() {
         let tr = Tr::new(Language::English);
         let typed = |pw: &str| Drafts { password: pw.into(), password_again: pw.into(), ..change_drafts() };
-        let short = tr.t_args("password-short-hint", &[("count", arg(policy::MIN_CHARS))]);
-        assert_eq!(password_problem(&tr, &typed("Kx7#mQ2!vR9"), PasswordForm::Choose, ""), Some(short));
+        let short = tr.t_args(
+            "password-short-hint",
+            &[("count", arg(policy::MIN_CHARS)), ("max", arg(policy::MAX_CHARS))],
+        );
+        assert_eq!(password_problem(&tr, &typed("Kx7#mQ2!vR9zLp"), PasswordForm::Choose, ""), Some(short));
         let common = Some(tr.t("password-common-hint"));
-        assert_eq!(password_problem(&tr, &typed("Password2024!"), PasswordForm::Choose, ""), common);
+        assert_eq!(password_problem(&tr, &typed("Password2024!2025"), PasswordForm::Choose, ""), common);
         let name = Some(tr.t("password-name-hint"));
         assert_eq!(password_problem(&tr, &typed("My Photos 2024!"), PasswordForm::Change, "Photos"), name);
-        assert_eq!(password_problem(&tr, &typed("Kx7#mQ2!vR9z"), PasswordForm::Choose, "Photos"), None);
+        assert_eq!(password_problem(&tr, &typed("Kx7#mQ2!vR9zLp5"), PasswordForm::Choose, "Photos"), None);
     }
 
     #[test]

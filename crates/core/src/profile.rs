@@ -175,6 +175,12 @@ pub struct Profile {
     /// the user to look at it and turn it on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub schedule_paused: bool,
+    /// Imported with folders on other computers (destination or sources on
+    /// a share) that the user has not confirmed yet: nothing touches them
+    /// until then, so a profile file from someone else cannot make Windows
+    /// sign in to the computer it names.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub network_unconfirmed: bool,
     /// Backups started by events (logon, idle, drive connected).
     #[serde(default)]
     pub events: EventTriggers,
@@ -224,6 +230,7 @@ impl Profile {
             verification: Verification::default(),
             alerts: Alerts::default(),
             schedule_paused: false,
+            network_unconfirmed: false,
         }
     }
 
@@ -232,6 +239,27 @@ impl Profile {
     #[must_use]
     pub fn backs_up_automatically(&self) -> bool {
         !self.schedule_paused && (self.schedule.is_automatic() || self.events.any())
+    }
+
+    /// The computers this profile's folders are on, for shares (`\\server\x`
+    /// gives `server`), each once, in the order met: destination, then sources.
+    #[must_use]
+    pub fn network_hosts(&self) -> Vec<String> {
+        let mut hosts: Vec<String> = Vec::new();
+        let paths = std::iter::once(self.destination.path()).chain(self.sources.iter().map(PathBuf::as_path));
+        for p in paths {
+            let text = p.to_string_lossy();
+            let unc = text.strip_prefix(r"\\?\UNC\").or_else(|| text.strip_prefix(r"\\"));
+            if let Some(rest) = unc
+                && !rest.starts_with(r"?\")
+                && !rest.starts_with(r".\")
+                && let Some(host) = rest.split(['\\', '/']).next().filter(|h| !h.is_empty())
+                && !hosts.iter().any(|h| h.eq_ignore_ascii_case(host))
+            {
+                hosts.push(host.to_owned());
+            }
+        }
+        hosts
     }
 
     /// Checks that the profile can run. Returns all broken rules.
@@ -272,6 +300,22 @@ pub fn path_within(path: &Path, base: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_computers_of_network_folders_are_listed_once() {
+        let mut p = Profile::new("Imported");
+        p.destination = Destination::Network { unc: r"\\SERVER\backup\pc".into() };
+        p.sources = vec![
+            r"C:\Users\me\Docs".into(),
+            r"\\server\photos".into(),
+            r"\\?\UNC\server2\x".into(),
+            r"\\?\C:\long".into(),
+        ];
+        assert_eq!(p.network_hosts(), vec!["SERVER".to_owned(), "server2".to_owned()]);
+        p.destination = Destination::Local { path: r"E:\Backup".into() };
+        p.sources = vec![r"C:\Users\me".into()];
+        assert!(p.network_hosts().is_empty());
+    }
 
     fn valid() -> Profile {
         let mut p = Profile::new("Documents");

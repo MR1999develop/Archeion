@@ -397,3 +397,16 @@ fn a_backup_remembers_the_newest_backup_it_left() {
         serde_json::from_str(&fs::read_to_string(s.data.join("destinations.json")).unwrap()).unwrap();
     assert_eq!(seen[s.profile.id.to_string()].as_str(), Some(archives(&s, None)[0].as_str()));
 }
+
+#[test]
+fn extract_takes_no_secret_on_the_command_line() {
+    let s = sandbox(Container::ZipPerFile, true);
+    backup(&s, Some(PASSWORD));
+    let dest = s.profile.destination.path().display().to_string();
+    let to = s.root.join("out").display().to_string();
+    for flag in ["--password", "--recovery-key"] {
+        let out = archeion(&s, &["extract", "--destination", &dest, "--to", &to, flag, PASSWORD], None);
+        assert_ne!(code(&out), 0, "{flag} is refused");
+        assert!(!s.root.join("out").join("C").exists(), "nothing restored with {flag}");
+    }
+}
