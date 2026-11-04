@@ -8,8 +8,13 @@
   unisce a `main` solo dopo `tools\check.bat` tutto verde.
 - Rispondere in italiano; interfaccia, codice, commenti e commit in inglese.
 - Applicare le skill di progettazione prima di scrivere o rivedere codice:
-  `rust-egui-desktop-design`, `software-design-core`, `ui-design-core` e,
-  per crittografia, password e rilascio, `security-design`.
+  - sempre: `rust-egui-desktop-design`, `software-design-core` e
+    `durable-data-design` (archivi, manifest, journal, merge, ripristino);
+  - interfaccia: `ui-design-core`;
+  - file e percorsi di Windows, processi e worker, Utilità di
+    pianificazione, Credential Manager, area di notifica, copie shadow:
+    `windows-system-design`;
+  - crittografia, password, file non fidati e rilascio: `security-design`.
 - Linguaggio: Rust + egui.
 - Alla fine di ogni blocco di lavoro aggiornare `TIDY.md` (cose rimandate) e
   il documento di stato del progetto `claude/stato.md` (ultimo commit
