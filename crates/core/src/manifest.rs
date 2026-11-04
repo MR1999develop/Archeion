@@ -185,6 +185,11 @@ pub struct Entry {
     /// The content as chunks, when it is stored that way (format 2).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chunks: Option<Chunks>,
+    /// Left out by an exclusion added after it was backed up: kept as its
+    /// last backup saw it (never stored here), so it is not taken for a
+    /// file deleted at the source.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub excluded: bool,
 }
 
 impl Entry {
@@ -350,6 +355,7 @@ mod tests {
             stored,
             blob: None,
             chunks: None,
+            excluded: false,
         }
     }
 

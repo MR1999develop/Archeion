@@ -212,7 +212,7 @@ impl Profile {
             id: ProfileId::new_random(),
             name: name.into(),
             sources: Vec::new(),
-            excludes: Vec::new(),
+            excludes: crate::exclusion::defaults(),
             destination: Destination::default(),
             container: Container::default(),
             encrypted: false,

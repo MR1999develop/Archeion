@@ -67,9 +67,18 @@ pub struct CatalogEntry {
     /// [`Catalog::archives`], oldest first: `[(0, 3), (6, 6)]` was deleted
     /// after the fourth backup and came back in the seventh.
     pub present: Vec<(usize, usize)>,
+    /// Positions of the backups that list it as left out by an exclusion
+    /// added after it was backed up.
+    pub excluded: Vec<usize>,
 }
 
 impl CatalogEntry {
+    /// Listed by the backup at `pos` as left out by an exclusion.
+    #[must_use]
+    pub fn excluded_at(&self, pos: usize) -> bool {
+        self.excluded.contains(&pos)
+    }
+
     /// Not listed by the newest backup: deleted at the source since.
     #[must_use]
     pub fn deleted(&self, archives: usize) -> bool {
@@ -102,6 +111,9 @@ pub fn catalog(profile: &Profile, password: Option<&Password>) -> Result<Catalog
                 Some(c) => {
                     c.size = e.size;
                     c.kind = e.kind;
+                    if e.excluded {
+                        c.excluded.push(j);
+                    }
                     match c.present.last_mut() {
                         Some(run) if run.1.saturating_add(1) == j => run.1 = j,
                         _ => c.present.push((j, j)),
@@ -109,8 +121,14 @@ pub fn catalog(profile: &Profile, password: Option<&Password>) -> Result<Catalog
                 }
                 None => {
                     let key = e.key;
-                    let c =
-                        CatalogEntry { key: key.clone(), kind: e.kind, size: e.size, present: vec![(j, j)] };
+                    let excluded = if e.excluded { vec![j] } else { Vec::new() };
+                    let c = CatalogEntry {
+                        key: key.clone(),
+                        kind: e.kind,
+                        size: e.size,
+                        present: vec![(j, j)],
+                        excluded,
+                    };
                     entries.insert(key, c);
                 }
             }

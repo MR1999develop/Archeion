@@ -758,7 +758,8 @@ fn tick_box(ui: &mut Ui, tr: &Tr, tree: &Tree, n: &Node, tick: Tick, name: &str)
     match tick {
         Tick::NotInFolderDate { folder } if !n.is_dir() => {
             // Ticked on its own: its newest version comes back too.
-            let hint = tr.t_args("tick-not-in-folder-date", &[("folder", folder_path(folder))]);
+            let id = if n.excluded { "tick-excluded-in-folder" } else { "tick-not-in-folder-date" };
+            let hint = tr.t_args(id, &[("folder", folder_path(folder))]);
             let mut on = false;
             widgets::checkbox(ui, &mut on, text).accessible_name(name).on_hover_text(hint).changed()
         }
@@ -799,10 +800,14 @@ fn tick_box(ui: &mut Ui, tr: &Tr, tree: &Tree, n: &Node, tick: Tick, name: &str)
     }
 }
 
-/// A deleted node says so in words and with an icon, and is greyed.
+/// A deleted or excluded node says so in words and with an icon, and is
+/// greyed.
 fn node_text(ui: &Ui, tr: &Tr, n: &Node, base: String) -> RichText {
     if n.deleted {
         RichText::new(format!("{base}   {}  {}", symbol::DELETED, tr.t("deleted-label")))
+            .color(ui.visuals().weak_text_color())
+    } else if n.excluded {
+        RichText::new(format!("{base}   {}  {}", symbol::EXCLUDED, tr.t("excluded-label")))
             .color(ui.visuals().weak_text_color())
     } else {
         RichText::new(base)
@@ -810,6 +815,9 @@ fn node_text(ui: &Ui, tr: &Tr, n: &Node, base: String) -> RichText {
 }
 
 fn node_hint(tr: &Tr, n: &Node) -> String {
+    if n.excluded {
+        return tr.t(if n.is_dir() { "tree-excluded-folder" } else { "tree-excluded-file" });
+    }
     tr.t(match (n.is_dir(), n.deleted) {
         (true, false) => "tick-folder",
         (true, true) => "tree-deleted-folder",

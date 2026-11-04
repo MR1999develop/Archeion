@@ -333,3 +333,11 @@ trigger it. Remove an item when it is done or no longer applies.
 - **No screen-reader test by hand** yet of the status bar's live region
   (Narrator, NVDA).
 
+## Exclusions (added 04/11)
+
+- **The default patterns `**/tmp` and `**/temp`** also leave out a file
+  called exactly `tmp` or `temp` (no extension). Make them folder-only if
+  it matters (a pattern kind for folders).
+- **An excluded file deleted at the source** stays listed as excluded,
+  with its last version, as long as the exclusion is there.
+

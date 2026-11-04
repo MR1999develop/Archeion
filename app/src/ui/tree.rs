@@ -19,6 +19,9 @@ pub struct Node {
     pub entry: CatalogEntry,
     /// Not listed by the newest backup.
     pub deleted: bool,
+    /// Listed by the newest backup as left out by an exclusion added after
+    /// it was backed up: its last saved version is kept.
+    pub excluded: bool,
     /// Folders first, then files, each by name.
     pub children: Vec<usize>,
 }
@@ -92,6 +95,7 @@ impl Tree {
         let mut index: HashMap<String, usize> = HashMap::with_capacity(catalog.entries.len());
         for e in catalog.entries {
             let deleted = e.deleted(count);
+            let excluded = !deleted && count.checked_sub(1).is_some_and(|newest| e.excluded_at(newest));
             let parent = e.key.rsplit_once('/').map(|(p, _)| p);
             let parent_idx = parent.and_then(|p| index.get(p).copied());
             let label = match parent_idx {
@@ -105,7 +109,7 @@ impl Tree {
             } else {
                 index.insert(e.key.clone(), idx);
             }
-            tree.nodes.push(Node { label, entry: e, deleted, children: Vec::new() });
+            tree.nodes.push(Node { label, entry: e, deleted, excluded, children: Vec::new() });
             match parent_idx.and_then(|p| tree.nodes.get_mut(p)) {
                 Some(p) => p.children.push(idx),
                 None => tree.roots.push(idx),
@@ -160,15 +164,16 @@ impl Tree {
             // The folder brings back what it held at its date, and with its
             // deleted files what it held before too: anything saved up to
             // its date.
-            let listed =
-                self.archives.iter().position(|a| Some(a.name.as_str()) == h.folder_archive).is_some_and(
-                    |pos| {
-                        node.entry.present.iter().any(|&(first, last)| {
-                            if h.with_deleted { first <= pos } else { (first..=last).contains(&pos) }
-                        })
-                    },
-                );
-            if !listed {
+            let pos = self.archives.iter().position(|a| Some(a.name.as_str()) == h.folder_archive);
+            let listed = pos.is_some_and(|pos| {
+                node.entry.present.iter().any(|&(first, last)| {
+                    if h.with_deleted { first <= pos } else { (first..=last).contains(&pos) }
+                })
+            });
+            // Left out by an exclusion at the folder's date: not with it
+            // either; it can be ticked on its own.
+            let excluded = pos.is_some_and(|pos| node.entry.excluded_at(pos));
+            if !listed || excluded {
                 return Tick::NotInFolderDate { folder };
             }
             if node.is_dir() && h.exclude.iter().filter(|x| missing(x)).any(|x| keys::is_within(x, key)) {
@@ -241,7 +246,7 @@ mod tests {
     use super::*;
 
     fn entry(key: &str, kind: EntryKind, present: Vec<(usize, usize)>) -> CatalogEntry {
-        CatalogEntry { key: key.into(), kind, size: 1, present }
+        CatalogEntry { key: key.into(), kind, size: 1, present, excluded: Vec::new() }
     }
 
     fn catalog(mut entries: Vec<CatalogEntry>) -> Catalog {

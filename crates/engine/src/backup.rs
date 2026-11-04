@@ -167,6 +167,7 @@ fn run(
     for source in top_level_sources(&profile.sources) {
         scan.walk(&source, sink, &mut scanning, &mut report);
     }
+    scan.keep_excluded();
     scanning.finish();
 
     let staging = match resumed {
@@ -831,6 +832,7 @@ impl<'a> Scan<'a> {
                     stored: false,
                     blob: None,
                     chunks: None,
+                    excluded: false,
                 });
                 continue;
             }
@@ -867,6 +869,7 @@ impl<'a> Scan<'a> {
                 stored: false,
                 blob: None,
                 chunks: None,
+                excluded: false,
             };
             let idx = self.entries.len();
             match self.previous.get(entry.key.as_str()) {
@@ -943,6 +946,31 @@ fn attributes(_meta: &std::fs::Metadata) -> u32 {
     0
 }
 
+impl Scan<'_> {
+    /// What the previous backup listed and an exclusion now leaves out
+    /// stays listed as excluded, as it was: its saved versions are kept
+    /// and it is not taken for a file deleted at the source. Once the
+    /// exclusion goes, the file is backed up again like any other.
+    fn keep_excluded(&mut self) {
+        let listed: HashSet<&str> = self.entries.iter().map(|e| e.key.as_str()).collect();
+        let mut kept: Vec<Entry> = self
+            .previous
+            .iter()
+            .filter(|(key, _)| !listed.contains(*key))
+            .filter(|(key, old)| self.excludes.excludes(&keys::path_for(key), old.kind == EntryKind::Dir))
+            .map(|(_, old)| Entry {
+                stored: false,
+                blob: None,
+                chunks: None,
+                excluded: true,
+                ..(*old).clone()
+            })
+            .collect();
+        kept.sort_by(|a, b| a.key.cmp(&b.key));
+        self.entries.extend(kept);
+    }
+}
+
 fn skip(sink: &dyn EventSink, report: &mut BackupReport, path: &Path, reason: String) {
     let s = Skipped { path: path.display().to_string(), reason };
     tracing::warn!(path = %s.path, reason = %s.reason, "skipped while scanning");
@@ -967,16 +995,29 @@ struct Excluder {
     globs: GlobSet,
 }
 
+/// An exclusion pattern as backups match it: on the whole path with `/`,
+/// ignoring case.
+fn glob(pattern: &str) -> std::result::Result<globset::Glob, globset::Error> {
+    GlobBuilder::new(&pattern.trim().replace('\\', "/"))
+        .case_insensitive(true)
+        .literal_separator(false)
+        .build()
+}
+
+/// Why `pattern` is not an exclusion pattern backups can use (its syntax),
+/// in English; `None` when it is one.
+#[must_use]
+pub fn pattern_problem(pattern: &str) -> Option<String> {
+    glob(pattern).err().map(|e| e.kind().to_string())
+}
+
 impl Excluder {
     fn new(rules: &[Exclusion]) -> Result<Self> {
         let mut b = GlobSetBuilder::new();
         for rule in rules.iter().filter(|r| !r.is_blank()) {
-            if let Exclusion::Pattern { glob } = rule {
-                let g = GlobBuilder::new(&glob.trim().replace('\\', "/"))
-                    .case_insensitive(true)
-                    .literal_separator(false)
-                    .build()
-                    .map_err(|e| EngineError::InvalidProfile(format!("exclusion {glob:?}: {e}")))?;
+            if let Exclusion::Pattern { glob: pattern } = rule {
+                let g = glob(pattern)
+                    .map_err(|e| EngineError::InvalidProfile(format!("exclusion {pattern:?}: {e}")))?;
                 b.add(g);
             }
         }

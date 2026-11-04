@@ -33,7 +33,7 @@ pub mod settings;
 pub use archive::{ArchiveKind, ArchiveName};
 pub use backup_kind::{BackupMode, FullBackupRule};
 pub use destination::Destination;
-pub use exclusion::Exclusion;
+pub use exclusion::{Exclusion, TypedKind, TypedRuleError};
 pub use large_files::LargeFiles;
 pub use manifest::{ChunkId, ChunkRef, Chunks, Entry, EntryKind, Manifest, ManifestHeader};
 pub use profile::{Alerts, Container, EventTriggers, MergePolicy, Profile, ProfileError, ProfileId};

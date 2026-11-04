@@ -6,6 +6,21 @@ All notable changes to Archeion are listed here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Exclusions: one field for a pattern or a file type, with "Exclude
+  pattern" and "Exclude type" next to it; the button pressed checks the
+  text (a file type typed as a pattern, a pattern as a type, a name alone
+  that would match nothing, a pattern the matcher refuses) and says what
+  to do instead. The row of common types is gone; new profiles start with
+  .tmp, .temp and the folders tmp and temp left out.
+- A file or folder excluded after it was backed up is no longer taken for
+  one deleted at the source: the next backups list it as excluded, its
+  saved versions stay (merges keep them), the restore tree shows it as
+  excluded, a ticked folder leaves it out and, ticked on its own, it
+  comes back with its date in the name. Removing the exclusion backs it
+  up again as before.
+
 ### Security
 
 - An encrypted destination is never backed up in the clear: when its

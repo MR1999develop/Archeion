@@ -1667,3 +1667,58 @@ fn a_merge_does_not_look_for_the_chunks_a_later_backup_holds_itself() {
     let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
     assert!(v.problems.is_empty(), "{:?}", v.problems);
 }
+
+#[test]
+fn a_file_excluded_after_backups_keeps_its_versions_and_comes_back_only_on_its_own() {
+    let mut f = fixture(Container::ZipPerFile);
+    run_backup(&f.profile);
+    // Excluded now: a file and a folder.
+    f.profile.excludes.push(archeion_core::Exclusion::File { path: f.source.join("a.txt") });
+    f.profile.excludes.push(archeion_core::Exclusion::Folder { path: f.source.join("sub") });
+    run_backup(&f.profile);
+    let newest = list_archives(&f.profile, None).unwrap().remove(0).name;
+    let key = archeion_core::keys::key_for(&f.source.join("a.txt")).unwrap();
+
+    // Not deleted: listed as excluded, in the newest backup too.
+    let catalog = archeion_engine::catalog(&f.profile, None).unwrap();
+    let entry = catalog.entries.iter().find(|e| e.key == key).unwrap();
+    assert!(!entry.deleted(catalog.archives.len()), "not taken for a deleted file");
+    assert!(entry.excluded_at(1) && !entry.excluded_at(0));
+
+    // The whole backup leaves it out ...
+    restore_all(&f, &newest);
+    assert!(!restored(&f, "a.txt").exists() && !restored(&f, "sub/ünicode è.txt").exists());
+    // ... asked for alone it comes back, with its date in the name.
+    let to = f._dir.path().join("alone");
+    let req =
+        RestoreRequest::single(&newest, vec![key.clone()], &RestoreTarget::Folder { path: to.clone() }, true);
+    restore(&f.profile, None, &req, &Recorder::default()).unwrap();
+    let tag = archeion_core::restore::date_tag(&newest);
+    let dated = archeion_core::keys::path_under(&to, &key).with_file_name(format!("a ({tag}).txt"));
+    assert_eq!(fs::read_to_string(&dated).unwrap(), "alpha");
+
+    // Merges keep it, deleted files or not.
+    f.profile.merge.keep_deleted = false;
+    run_backup(&f.profile);
+    let mut names: Vec<String> =
+        list_archives(&f.profile, None).unwrap().into_iter().map(|a| a.name).collect();
+    names.sort();
+    merge_range(&f.profile, None, &names[1], &names[2], &Recorder::default()).unwrap();
+    let catalog = archeion_engine::catalog(&f.profile, None).unwrap();
+    assert!(catalog.entries.iter().any(|e| e.key == key), "still listed after a merge");
+    let v = verify(&f.profile, None, None, &Recorder::default()).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+
+    // The exclusion gone: backed up like any other file, its own name again.
+    f.profile.excludes.retain(|x| {
+        !matches!(x, archeion_core::Exclusion::File { .. } | archeion_core::Exclusion::Folder { .. })
+    });
+    run_backup(&f.profile);
+    let newest = list_archives(&f.profile, None).unwrap().remove(0).name;
+    let back = f._dir.path().join("back");
+    let req =
+        RestoreRequest::single(&newest, Vec::new(), &RestoreTarget::Folder { path: back.clone() }, true);
+    restore(&f.profile, None, &req, &Recorder::default()).unwrap();
+    let key_path = archeion_core::keys::path_under(&back, &key);
+    assert_eq!(fs::read_to_string(key_path).unwrap(), "alpha");
+}

@@ -525,6 +525,7 @@ mod tests {
             stored: true,
             blob: None,
             chunks: Some(Chunks { whole: true, list: list.clone() }),
+            excluded: false,
         };
         let m0 = Manifest::new(ArchiveKind::Complete, vec![entry]);
         // Archive 1: one new chunk file.

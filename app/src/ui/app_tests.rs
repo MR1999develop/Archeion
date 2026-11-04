@@ -202,3 +202,47 @@ fn the_backups_of_a_deleted_profile_are_taken_over_without_blocking_the_window()
     }
     assert!(backups.exists());
 }
+
+#[test]
+fn a_typed_exclusion_is_checked_against_the_button_pressed() {
+    let (_dir, storage, _backups) = sandbox();
+    let mut h = harness(storage.clone());
+    steps(&mut h);
+    h.query_all_by(|n| n.label().is_some_and(|l| l == "Exclusions")).next().expect("the section").click();
+    steps(&mut h);
+    let field = "**/node_modules · .iso";
+    let typed = |h: &mut Harness<'_, ArcheionApp>, text: &str, button_label: &str| {
+        let f = h.query_all_by(|n| n.label().as_deref() == Some(field)).next().expect("the field");
+        f.click();
+        h.step();
+        // What an error left there is replaced.
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.step();
+        h.query_all_by(|n| n.label().as_deref() == Some(field)).next().unwrap().type_text(text);
+        steps(h);
+        button(h, button_label).click();
+        steps(h);
+    };
+    let rules = |s: &Storage| {
+        s.load().unwrap().profiles[0].excludes.iter().map(ToString::to_string).collect::<Vec<_>>()
+    };
+    let before = rules(&storage);
+
+    typed(&mut h, ".iso", "Exclude pattern");
+    assert!(h.query_by_label_contains("is a file type: press").is_some(), "told to use the other button");
+    assert_eq!(rules(&storage), before, "nothing added");
+
+    button(&h, "Exclude type").click();
+    steps(&mut h);
+    assert!(rules(&storage).contains(&".iso".to_owned()), "{:?}", rules(&storage));
+
+    typed(&mut h, "node_modules", "Exclude pattern");
+    let kept = h.query_all_by(|n| n.label().as_deref() == Some(field)).next().unwrap();
+    assert_eq!(kept.value().as_deref(), Some("node_modules"), "kept to be corrected");
+    assert!(h.query_by_label_contains("type **/node_modules").is_some(), "the pattern meant is suggested");
+    typed(&mut h, "**/cache", "Exclude type");
+    assert!(h.query_by_label_contains("is a pattern: press").is_some());
+    button(&h, "Exclude pattern").click();
+    steps(&mut h);
+    assert!(rules(&storage).contains(&"**/cache".to_owned()), "{:?}", rules(&storage));
+}

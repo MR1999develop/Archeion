@@ -49,7 +49,75 @@ impl From<RawExclusion> for Exclusion {
     }
 }
 
+/// What typed text is meant to be: the button pressed next to the field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TypedKind {
+    /// "Exclude pattern": a pattern on the whole path.
+    Pattern,
+    /// "Exclude type": a file extension.
+    Extension,
+}
+
+/// Why typed text is not the rule of the button pressed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum TypedRuleError {
+    #[error("nothing typed")]
+    Empty,
+    /// `.tmp` given as a pattern: it names a file type (as a pattern it
+    /// would match only a path called `.tmp`).
+    #[error("a file type, not a pattern")]
+    TypeNotPattern,
+    /// A pattern (`**/cache`, `*.tmp~`) given as a file type.
+    #[error("a pattern, not a file type")]
+    PatternNotType,
+    /// A name alone (`node_modules`) as a pattern: patterns match the whole
+    /// path, so it would match nothing; `**/node_modules` is what is meant.
+    #[error("a name alone matches no path")]
+    NameAlone,
+    /// Not a file type: spaces or dots inside.
+    #[error("not a file type")]
+    BadType,
+}
+
+/// The rules a new profile starts with: temporary files and folders.
+#[must_use]
+pub fn defaults() -> Vec<Exclusion> {
+    vec![
+        Exclusion::Extension { ext: "tmp".into() },
+        Exclusion::Extension { ext: "temp".into() },
+        Exclusion::Pattern { glob: "**/tmp".into() },
+        Exclusion::Pattern { glob: "**/temp".into() },
+    ]
+}
+
 impl Exclusion {
+    /// The rule `text` makes as `kind`, or why it does not; the pattern's
+    /// syntax is checked where patterns are matched (the engine).
+    ///
+    /// # Errors
+    /// [`TypedRuleError`]: [`TypedRuleError::TypeNotPattern`] and
+    /// [`TypedRuleError::PatternNotType`] say the other button fits.
+    pub fn typed(kind: TypedKind, text: &str) -> Result<Self, TypedRuleError> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err(TypedRuleError::Empty);
+        }
+        let wild = text.contains(['*', '?', '[', '/', '\\']);
+        let as_type = Self::extension(text);
+        match kind {
+            TypedKind::Extension => match as_type {
+                Some(rule) => Ok(rule),
+                None if wild => Err(TypedRuleError::PatternNotType),
+                None => Err(TypedRuleError::BadType),
+            },
+            TypedKind::Pattern if as_type.is_some() && text.starts_with('.') && !wild => {
+                Err(TypedRuleError::TypeNotPattern)
+            }
+            TypedKind::Pattern if !wild => Err(TypedRuleError::NameAlone),
+            TypedKind::Pattern => Ok(Self::Pattern { glob: text.replace('\\', "/") }),
+        }
+    }
+
     /// Extension rule from user text: `.TMP`, `tmp` and `*.tmp` all give `tmp`.
     /// Returns `None` for text with no usable extension.
     #[must_use]
@@ -136,6 +204,35 @@ impl PathRules {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn typed_text_must_be_the_rule_of_the_button_pressed() {
+        use TypedKind::{Extension as Type, Pattern};
+        assert_eq!(Exclusion::typed(Type, " .TMP "), Ok(Exclusion::Extension { ext: "tmp".into() }));
+        assert_eq!(Exclusion::typed(Type, "*.bak"), Ok(Exclusion::Extension { ext: "bak".into() }));
+        assert_eq!(Exclusion::typed(Type, "**/cache"), Err(TypedRuleError::PatternNotType));
+        assert_eq!(Exclusion::typed(Type, "my file"), Err(TypedRuleError::BadType));
+        assert_eq!(Exclusion::typed(Type, "  "), Err(TypedRuleError::Empty));
+        assert_eq!(
+            Exclusion::typed(Pattern, "**/node_modules"),
+            Ok(Exclusion::Pattern { glob: "**/node_modules".into() })
+        );
+        assert_eq!(
+            Exclusion::typed(Pattern, r"**\cache\**"),
+            Ok(Exclusion::Pattern { glob: "**/cache/**".into() })
+        );
+        assert_eq!(Exclusion::typed(Pattern, "*.tmp"), Ok(Exclusion::Pattern { glob: "*.tmp".into() }));
+        assert_eq!(Exclusion::typed(Pattern, ".tmp"), Err(TypedRuleError::TypeNotPattern));
+        assert_eq!(Exclusion::typed(Pattern, "node_modules"), Err(TypedRuleError::NameAlone));
+    }
+
+    #[test]
+    fn new_profiles_leave_out_temporary_files_and_folders() {
+        let r = PathRules::new(&defaults());
+        assert!(r.excludes(Path::new(r"C:\Users\Me\Docs\x.TMP"), false));
+        assert!(r.excludes(Path::new(r"C:\Users\Me\Docs\y.temp"), false));
+        assert!(defaults().contains(&Exclusion::Pattern { glob: "**/temp".into() }));
+    }
 
     fn rules() -> PathRules {
         PathRules::new(&[

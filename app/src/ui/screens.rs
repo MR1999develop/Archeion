@@ -157,6 +157,21 @@ fn screens() {
                 n.click();
             }
             shot(&mut h, &out, &name("11-merge-settings"));
+            // The exclusions, open, with a typed rule refused.
+            if let Some(n) = h.query_all_by(|n| n.label().as_deref() == Some(merge.as_str())).last() {
+                n.click();
+            }
+            let exclusions = h.state().tr.t("exclusions");
+            if let Some(n) = h.query_all_by(|n| n.label().as_deref() == Some(exclusions.as_str())).last() {
+                n.click();
+            }
+            settle(&mut h);
+            h.state_mut().drafts.rule = "node_modules".into();
+            let pattern = h.state().tr.t("exclude-pattern");
+            if let Some(n) = h.query_all_by(|n| n.label().as_deref() == Some(pattern.as_str())).last() {
+                n.click();
+            }
+            shot(&mut h, &out, &name("12-exclusions"));
         }
     }
 }
