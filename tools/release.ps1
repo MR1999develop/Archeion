@@ -113,6 +113,28 @@ if ($code -ne 0) {
 }
 Write-Log "Build OK in $seconds s, $warnings warning(s)." 'Green'
 
+# Authenticode signature, when a code-signing certificate is named: its
+# thumbprint in ARCHEION_SIGN_THUMBPRINT (a certificate in the user's store,
+# its key on a token or in the cloud, never in a file here). The time stamp
+# keeps the signature valid after the certificate expires.
+if ($env:ARCHEION_SIGN_THUMBPRINT) {
+    $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" -ErrorAction SilentlyContinue |
+        Sort-Object FullName -Descending | Select-Object -First 1
+    if (-not $signtool) {
+        Write-Log 'signtool.exe not found (Windows SDK): the executable is not signed.' 'Red'
+        Stop-Script 1
+    }
+    $stamp = if ($env:ARCHEION_SIGN_TIMESTAMP) { $env:ARCHEION_SIGN_TIMESTAMP } else { 'http://timestamp.digicert.com' }
+    Write-Log "Signing with certificate $env:ARCHEION_SIGN_THUMBPRINT, time stamp $stamp"
+    & $signtool.FullName sign /sha1 $env:ARCHEION_SIGN_THUMBPRINT /fd sha256 /tr $stamp /td sha256 $exe 2>&1 | ForEach-Object { Write-Log "$_" }
+    if ($LASTEXITCODE -ne 0) { Write-Log 'Signing FAILED.' 'Red'; Stop-Script 1 }
+    & $signtool.FullName verify /pa $exe 2>&1 | ForEach-Object { Write-Log "$_" }
+    if ($LASTEXITCODE -ne 0) { Write-Log 'The signature does not verify.' 'Red'; Stop-Script 1 }
+    Write-Log 'Signed and verified.' 'Green'
+} else {
+    Write-Log 'Not signed: set ARCHEION_SIGN_THUMBPRINT to sign with a code-signing certificate.' 'Yellow'
+}
+
 # 3. What was built.
 Write-Header '3/3 Executable'
 if (-not (Test-Path $exe)) {

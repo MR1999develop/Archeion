@@ -1,9 +1,13 @@
 version: 2
 updates:
+  # New versions wait a few days (a compromised release is usually found
+  # and pulled by then); security updates are not held back.
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
+    cooldown:
+      default-days: 3
     groups:
       cargo:
         patterns: ["*"]
@@ -11,3 +15,5 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    cooldown:
+      default-days: 7

@@ -1,12 +1,15 @@
 # Formatting, lints, tests and dependency checks on every push to main and
-# every pull request. Actions are pinned to a commit (the tag in the
-# comment); Dependabot proposes the updates.
+# every pull request; the dependency check also runs every day, since new
+# advisories appear for code that does not change. Actions are pinned to a
+# commit (the tag in the comment); Dependabot proposes the updates.
 name: CI
 
 on:
   push:
     branches: [main]
   pull_request:
+  schedule:
+    - cron: "17 5 * * *"
 
 permissions:
   contents: read
@@ -21,6 +24,7 @@ env:
 jobs:
   check:
     name: fmt, clippy, test (Windows)
+    if: github.event_name != 'schedule'
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -48,3 +52,14 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2
         with:
           command: check
+
+  sources:
+    name: no hidden bidirectional characters (Trojan Source)
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Look for U+202A to U+202E and U+2066 to U+2069
+        run: python3 tools/bidi_check.py
