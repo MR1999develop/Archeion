@@ -4,10 +4,13 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 
 ## Ultimo commit controllato
 
-`main` con i cinque rami della revisione completa (tutte le skill):
-`fix/destination-trust`, `fix/durable-data`, `fix/windows-integration`,
-`fix/profiles-and-ui`, `chore/release-and-docs`; `tools\check.bat` verde
-(fmt, clippy, test, cargo deny). Non ancora inviato su GitHub.
+`main` con i rami della revisione di sicurezza (`fix/security-review-2`:
+cartelle di rete da confermare, ripristino limitato alla dimensione,
+regole delle password), della catena di fornitura (`chore/supply-chain-2`:
+controllo giornaliero, SBOM, firma facoltativa) e dei test di proprietà
+(`test/property-parsers`: proptest sui lettori di manifest, chiavi, righe
+del worker, esclusioni tipizzate, esadecimale e note sigillate, file di
+profilo); `tools\check.bat` verde. Non ancora inviato su GitHub.
 
 ## Lavoro in corso
 

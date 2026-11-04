@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 0ee2d40b45d9470c772789642644b33ff0a497dbeab27de266b0c012cf706439 # shrinks to text = "A/.."
+cc e50f2df976abf8ea75ef1c1269e02432758896db0b5a5eee4d96b62f9520570d # shrinks to entries = [Entry { key: "C/Aa-aa", kind: File, size: 1000000000, mtime_ns: 1000000000000000000, hash: Some("abababababababababababababababababababababababababababababababab"), stored: false, blob: None, chunks: None, excluded: false }, Entry { key: "C/ü/A AA-_/aa(AA_ü /-Aa", kind: File, size: 100000000, mtime_ns: -1000000000000000000, hash: Some("abababababababababababababababababababababababababababababababab"), stored: false, blob: None, chunks: None, excluded: false }], cuts = [(Index(2346094632815928012), 91)]

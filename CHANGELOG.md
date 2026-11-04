@@ -33,11 +33,17 @@ All notable changes to Archeion are listed here. The format follows
 - `archeion extract` no longer takes `--password` or `--recovery-key`:
   secrets come from standard input (`--stdin`) or the environment only.
 - CI: the dependency check also runs every day; a check refuses hidden
-  bidirectional characters in the sources (`tools/bidi_check.py`, also in
-  `tools\check.bat`); Dependabot waits 3 days (7 for actions) before
+  bidirectional characters and stray control characters in the sources
+  (`tools/bidi_check.py`, also in `tools\check.bat`); Dependabot waits 3 days (7 for actions) before
   proposing a new version. Releases add a CycloneDX software bill of
-  materials with its attestation; `toolselease.bat` signs the
+  materials with its attestation; `tools\release.bat` signs the
   executable with Authenticode when a certificate is named.
+- Hex read from a destination (key file, sealed journal notes) has one
+  spelling only, as written: uppercase digits or a sign are refused. A
+  typed recovery key still ignores case, spaces and dashes.
+- Property tests (proptest, in `tools\check.bat`) on the readers of
+  outside text: manifests, keys, worker lines, typed exclusions, hex and
+  sealed notes, profile files.
 - New passwords: at least 15 characters and at most 1024, without
   composition rules (common passwords, runs, the profile name and a weak
   estimate are still refused).

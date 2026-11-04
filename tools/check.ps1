@@ -115,12 +115,12 @@ if (Get-Command cargo-deny -ErrorAction SilentlyContinue) {
     Write-Log 'cargo-deny is not installed (cargo install cargo-deny): skipped; CI runs it.' 'Yellow'
 }
 
-# 5. Sources: no bidirectional control characters (Trojan Source).
+# 5. Sources: no bidirectional (Trojan Source) or other hidden control characters.
 Write-Header '5/5 text'
 $py = Get-Command python -ErrorAction SilentlyContinue
 if ($py) {
     $text = Invoke-Step 'python tools\bidi_check.py'
-    Add-Result 'text' $text '(bidirectional control characters)'
+    Add-Result 'text' $text '(hidden control characters)'
 } else {
     Write-Log 'Python is not installed: the text check is skipped; CI runs it.' 'Yellow'
 }

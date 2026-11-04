@@ -212,4 +212,49 @@ mod tests {
         assert_eq!(file_name("  "), "profile.archeion-profile");
         assert_eq!(file_name("Foto. "), "Foto.archeion-profile");
     }
+
+    mod properties {
+        use super::*;
+        use proptest::prelude::*;
+
+        /// The text of a real profile file with some bytes changed.
+        fn damaged_file() -> impl Strategy<Value = String> {
+            let text = encode(&sample()).unwrap();
+            prop::collection::vec((any::<prop::sample::Index>(), any::<u8>()), 1..6).prop_map(move |cuts| {
+                let mut bytes = text.clone().into_bytes();
+                for (at, b) in cuts {
+                    let i = at.index(bytes.len());
+                    bytes[i] = b;
+                }
+                String::from_utf8_lossy(&bytes).into_owned()
+            })
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+            /// Whatever a file holds, an imported profile never runs on its
+            /// own and never reaches another computer before the user says so.
+            #[test]
+            fn imported_profiles_wait_for_the_user(text in prop_oneof![damaged_file(), "\\PC{0,300}"]) {
+                if let Ok(profile) = decode(&text) {
+                    let mut settings = Settings::default();
+                    let id = add(&mut settings, profile);
+                    let p = settings.profile(id).unwrap();
+                    prop_assert!(!p.backs_up_automatically(), "{p:?}");
+                    prop_assert_eq!(p.network_unconfirmed, !p.network_hosts().is_empty());
+                }
+            }
+
+            /// A file name never holds a character Windows refuses, nor
+            /// ends its name with a dot or a space.
+            #[test]
+            fn file_names_are_valid(name in "\\PC{0,40}|[ .<>:\"/\\\\|?*a]{0,12}|[\\x00-\\x1f .a]{1,8}") {
+                let file = file_name(&name);
+                let stem = file.strip_suffix(&format!(".{EXTENSION}")).unwrap();
+                prop_assert!(!stem.is_empty() && !stem.ends_with(['.', ' ']), "{file:?}");
+                prop_assert!(!stem.chars().any(|c| c.is_control() || r#"<>:"/\|?*"#.contains(c)), "{file:?}");
+            }
+        }
+    }
 }
