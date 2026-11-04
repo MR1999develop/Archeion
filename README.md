@@ -141,7 +141,7 @@ The executable is `target\release\archeion.exe`.
 
 ## Development
 
-Repository: <https://github.com/MR1999develop/archeion>.
+Repository: <https://github.com/MR1999develop/Archeion>.
 
 - **Branches.** `main` always builds and passes `tools\check.bat`. Work on
   a short-lived branch (`feature/resume-copy`, `fix/merge-journal`) and

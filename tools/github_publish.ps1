@@ -1,4 +1,4 @@
-﻿# Publishes the repository on GitHub as MR1999develop/archeion (private).
+﻿# Publishes the repository on GitHub as MR1999develop/Archeion (private).
 # Every step is shown on screen and written to tools\github_publish.log:
 #   1. checks: a repository with commits and a local main;
 #   2. remote: keeps an existing origin (stops if it points elsewhere);
@@ -19,7 +19,7 @@ $LogName = 'github_publish'
 $DoneLabel = 'GITHUB PUBLISH'
 . (Join-Path $PSScriptRoot 'git_common.ps1')
 
-$Repo = 'MR1999develop/archeion'
+$Repo = 'MR1999develop/Archeion'
 $Visibility = '--private'
 $Description = 'Incremental, scheduled, optionally encrypted backups for Windows (Rust + egui)'
 $BaseBranch = 'main'

@@ -487,5 +487,5 @@ First version, not yet released.
   stopped.
 - English and Italian interface.
 
-[Unreleased]: https://github.com/MR1999develop/archeion/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/MR1999develop/archeion/releases/tag/v0.1.0
+[Unreleased]: https://github.com/MR1999develop/Archeion/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/MR1999develop/Archeion/releases/tag/v0.1.0
