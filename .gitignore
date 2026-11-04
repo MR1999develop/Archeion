@@ -20,3 +20,7 @@
 *.swp
 Thumbs.db
 desktop.ini
+
+# proptest keeps none (failure_persistence: None); never commit one
+*.proptest-regressions
+proptest-regressions/
