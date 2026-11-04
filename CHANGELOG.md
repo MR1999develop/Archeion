@@ -23,6 +23,18 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Security
 
+- An imported profile whose folders are on other computers (a share as
+  destination or source) contacts none of them until the user confirms
+  the computers named in its settings ("Use these network folders"):
+  Windows would otherwise sign in to them with the user's account as soon
+  as the settings showed the profile.
+- A restore writes no more of a file than its backup lists: a doctored
+  backup can no longer fill the disk before its content is found wrong.
+- `archeion extract` no longer takes `--password` or `--recovery-key`:
+  secrets come from standard input (`--stdin`) or the environment only.
+- New passwords: at least 15 characters and at most 1024, without
+  composition rules (common passwords, runs, the profile name and a weak
+  estimate are still refused).
 - An encrypted destination is never backed up in the clear: when its
   description no longer says it is encrypted (removed or changed outside
   Archeion) while the profile or its backups are, the backup stops with an

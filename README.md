@@ -99,8 +99,9 @@ portable executable recovers backups on any computer. Options:
 `--archive <name>` (the newest by default), `--path <file or folder>`
 (its original path; everything by default), `--overwrite`, and for an
 encrypted destination `--stdin` (password or recovery key on the first
-line of standard input), `--password <text>` or `--recovery-key <key>`, or
-the `ARCHEION_PASSWORD` / `ARCHEION_RECOVERY_KEY` variables. The
+line of standard input) or the `ARCHEION_PASSWORD` /
+`ARCHEION_RECOVERY_KEY` variables, never the command line, which other
+programs can read. The
 destination is only read. Progress goes to stdout and to
 `archeion-extract.log` in the target folder; exit codes as above.
 `archeion.exe` is a window program: in a Command Prompt start it with

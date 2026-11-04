@@ -105,6 +105,11 @@ pub enum EngineError {
         "the backups at the destination are not described as encrypted, but the profile or the backups are"
     )]
     EncryptionMissing,
+    /// The profile was imported with folders on other computers the user
+    /// has not confirmed ([`archeion_core::Profile::network_unconfirmed`]):
+    /// nothing was contacted.
+    #[error("the profile's network folders are not confirmed yet")]
+    NetworkUnconfirmed,
     /// The caller asked the run to stop ([`EventSink::stop_requested`]).
     #[error("stopped on request")]
     Cancelled,

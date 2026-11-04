@@ -5,13 +5,12 @@
 //! [`Strength`]. The rules apply only when a password is chosen (first setup
 //! or change), never when the password of existing backups is typed.
 //!
-//! The rules stay humane: a long passphrase is always accepted and there are
-//! no composition tricks that push towards "Password1!".
+//! The rules stay humane (OWASP and NIST SP 800-63B): length, not
+//! composition; any character, spaces and other scripts included; a long
+//! passphrase is always welcome.
 //!
-//! - at least [`MIN_CHARS`] characters, counted as Unicode characters;
-//! - at least [`MIN_KINDS`] of the four kinds of characters (lowercase,
-//!   uppercase, digits, symbols), unless the password is a passphrase of at
-//!   least [`PASSPHRASE_CHARS`] characters;
+//! - between [`MIN_CHARS`] and [`MAX_CHARS`] characters, counted as
+//!   Unicode characters (the most fits Windows' Credential Manager);
 //! - not one of the most common passwords, also with digits or symbols
 //!   around it ("Password2024!");
 //! - no run of more than [`MAX_RUN`] identical or consecutive characters
@@ -25,12 +24,11 @@
 //! passwords or the profile name count for (almost) nothing. It is a guide,
 //! not a guarantee.
 
-/// Fewest characters of a new password.
-pub const MIN_CHARS: usize = 12;
-/// From this length the kinds of characters are not required.
-pub const PASSPHRASE_CHARS: usize = 20;
-/// Kinds of characters (out of four) required below [`PASSPHRASE_CHARS`].
-pub const MIN_KINDS: usize = 3;
+/// Fewest characters of a new password: the only thing protecting the
+/// backups, so the length NIST asks of a single factor.
+pub const MIN_CHARS: usize = 15;
+/// Most characters: Credential Manager keeps 2560 bytes, 1280 UTF-16 units.
+pub const MAX_CHARS: usize = 1024;
 /// Longest accepted run of identical or consecutive characters.
 pub const MAX_RUN: usize = 3;
 /// Shorter profile names are not looked for in the password.
@@ -82,11 +80,8 @@ const COMMON: &[&str] = &[
 /// What a requirement asks of a new password.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Rule {
-    /// At least [`MIN_CHARS`] characters.
+    /// Between [`MIN_CHARS`] and [`MAX_CHARS`] characters.
     Length,
-    /// At least [`MIN_KINDS`] kinds of characters, or a passphrase of
-    /// [`PASSPHRASE_CHARS`] characters.
-    Variety,
     /// Not a common password, even with digits or symbols around it.
     NotCommon,
     /// No run of more than [`MAX_RUN`] identical or consecutive characters.
@@ -175,14 +170,13 @@ pub fn assess(password: &str, profile_name: &str) -> Assessment {
     let strength = Strength::of_bits(bits);
 
     let met = |rule| match rule {
-        Rule::Length => chars.len() >= MIN_CHARS,
-        Rule::Variety => kinds.count() >= MIN_KINDS || chars.len() >= PASSPHRASE_CHARS,
+        Rule::Length => (MIN_CHARS..=MAX_CHARS).contains(&chars.len()),
         Rule::NotCommon => !is_common(&folded),
         Rule::NoRuns => longest_run <= MAX_RUN,
         Rule::NotName => !contains_name,
         Rule::Strength => strength >= MIN_STRENGTH,
     };
-    let checks = [Rule::Length, Rule::Variety, Rule::NotCommon, Rule::NoRuns, Rule::NotName, Rule::Strength]
+    let checks = [Rule::Length, Rule::NotCommon, Rule::NoRuns, Rule::NotName, Rule::Strength]
         .into_iter()
         .map(|rule| Check { rule, met: met(rule) })
         .collect();
@@ -376,39 +370,25 @@ mod tests {
     #[test]
     fn checks_follow_the_display_order() {
         let rules: Vec<Rule> = assess("x", "").checks.iter().map(|c| c.rule).collect();
-        assert_eq!(
-            rules,
-            [Rule::Length, Rule::Variety, Rule::NotCommon, Rule::NoRuns, Rule::NotName, Rule::Strength]
-        );
+        assert_eq!(rules, [Rule::Length, Rule::NotCommon, Rule::NoRuns, Rule::NotName, Rule::Strength]);
     }
 
     #[test]
     fn length_counts_characters_not_bytes() {
-        assert!(!met("Kx7#mQ2!vR9", "", Rule::Length), "11 characters");
-        assert!(met("Kx7#mQ2!vR9z", "", Rule::Length), "12 characters");
-        assert!(met("àèìòùéçñüöäß", "", Rule::Length), "12 characters, 24 bytes");
-        assert!(!met("àèìòùéçñüöä", "", Rule::Length), "11 characters, 22 bytes");
+        assert!(!met("Kx7#mQ2!vR9zLp", "", Rule::Length), "14 characters");
+        assert!(met("Kx7#mQ2!vR9zLp5", "", Rule::Length), "15 characters");
+        assert!(met("àèìòùéçñüöäßåøæ", "", Rule::Length), "15 characters, 30 bytes");
+        assert!(!met("àèìòùéçñüöäßåø", "", Rule::Length), "14 characters, 28 bytes");
+        assert!(met(&"ü".repeat(MAX_CHARS), "", Rule::Length), "the most");
+        assert!(!met(&"ü".repeat(MAX_CHARS + 1), "", Rule::Length), "one too many");
     }
 
     #[test]
-    fn variety_needs_three_kinds_below_twenty_characters() {
-        assert_eq!(assess("onlylowercase", "").kinds, 1);
-        assert!(!met("onlylowercase", "", Rule::Variety));
-        assert!(!met("lower and spaces", "", Rule::Variety), "two kinds");
-        assert!(met("Lower and spaces", "", Rule::Variety), "three kinds");
-        assert!(met("Kx7mQ2vR9zpw", "", Rule::Variety), "lower, upper, digits");
-    }
-
-    #[test]
-    fn a_passphrase_of_twenty_characters_needs_no_variety() {
-        let nineteen = "gentle river stones";
-        let twenty = "gentle river stonesx";
-        assert_eq!(nineteen.chars().count(), 19);
-        assert_eq!(twenty.chars().count(), 20);
-        assert!(!met(nineteen, "", Rule::Variety));
-        assert!(met(twenty, "", Rule::Variety));
+    fn no_mix_of_kinds_is_asked_for() {
+        // Lowercase words alone, long enough: fine.
         let a = assess("violet kettle on the windy hill", "");
         assert!(a.is_acceptable(), "{a:?}");
+        assert!(met("gentle river stones", "", Rule::Length));
     }
 
     #[test]
@@ -492,10 +472,11 @@ mod tests {
 
     #[test]
     fn a_good_password_meets_everything() {
-        let a = assess("Kx7#mQ2!vR9z", "Documents");
+        let a = assess("Kx7#mQ2!vR9zLp5", "Documents");
         assert!(a.is_acceptable(), "{a:?}");
         assert_eq!(a.first_unmet(), None);
         assert_eq!(assess("short", "").first_unmet(), Some(Rule::Length));
-        assert_eq!(assess("onlylowercase", "").first_unmet(), Some(Rule::Variety));
+        assert_eq!(assess("onlylowercasewords", "").first_unmet(), None, "letters alone, long enough");
+        assert_eq!(assess("password12345678", "").first_unmet(), Some(Rule::NotCommon));
     }
 }

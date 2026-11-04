@@ -84,6 +84,8 @@ pub fn import(path: &Path) -> Result<Profile, ImportError> {
 /// elsewhere decides what is backed up and where.
 pub fn add(settings: &mut Settings, mut profile: Profile) -> ProfileId {
     profile.schedule_paused = profile.schedule.is_automatic() || profile.events.any();
+    // Folders on other computers wait for the user to confirm them.
+    profile.network_unconfirmed = !profile.network_hosts().is_empty();
     if settings.profile(profile.id).is_some() {
         profile.id = ProfileId::new_random();
     }
@@ -186,6 +188,21 @@ mod tests {
         manual.schedule = Schedule::Manual;
         let id = add(&mut settings, manual);
         assert!(!settings.profile(id).unwrap().schedule_paused, "nothing to wait for");
+    }
+
+    #[test]
+    fn an_imported_profile_with_network_folders_waits_for_their_confirmation() {
+        let mut settings = Settings::default();
+        let mut p = sample();
+        p.destination = archeion_core::Destination::Network { unc: r"\\server\backup".into() };
+        let id = add(&mut settings, p);
+        assert!(settings.profile(id).unwrap().network_unconfirmed);
+
+        let mut local = sample();
+        local.destination = archeion_core::Destination::Local { path: r"E:\Backup".into() };
+        local.sources = vec![r"C:\Users\me".into()];
+        let id = add(&mut settings, local);
+        assert!(!settings.profile(id).unwrap().network_unconfirmed, "nothing on other computers");
     }
 
     #[test]

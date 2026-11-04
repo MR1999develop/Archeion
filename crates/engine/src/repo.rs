@@ -89,7 +89,7 @@ pub(crate) struct Repo {
 /// [`EngineError::DestinationUnavailable`], or [`EngineError::Damaged`] for
 /// an unreadable descriptor.
 pub fn destination_owner(profile: &Profile) -> Result<Option<ProfileId>> {
-    let root = profile.destination.path();
+    let root = crate::repo::destination_of(profile)?;
     ensure_reachable(root)?;
     Ok(read_descriptor(root)?.map(|d| d.profile))
 }
@@ -102,7 +102,7 @@ pub fn destination_owner(profile: &Profile) -> Result<Option<ProfileId>> {
 /// [`EngineError::Busy`] while a run uses the destination; otherwise see
 /// [`EngineError`].
 pub fn adopt_destination(profile: &Profile) -> Result<()> {
-    let root = profile.destination.path();
+    let root = crate::repo::destination_of(profile)?;
     ensure_reachable(root)?;
     let Some(mut descriptor) = read_descriptor(root)? else { return Ok(()) };
     let lock_path = root.join(LOCK);
@@ -159,7 +159,7 @@ pub struct DestinationTrashed {
 /// [`EngineError::Busy`] or [`EngineError::DestinationUnavailable`];
 /// otherwise see [`EngineError`].
 pub fn trash_destination(profile: &Profile) -> Result<DestinationTrashed> {
-    let root = profile.destination.path();
+    let root = crate::repo::destination_of(profile)?;
     if root.as_os_str().is_empty() {
         return Ok(DestinationTrashed::default());
     }
@@ -298,7 +298,8 @@ fn names_in(dir: &Path) -> Result<Vec<String>> {
 /// end right after; runs still check the lock themselves.
 #[must_use]
 pub fn destination_busy(profile: &Profile) -> bool {
-    let path = profile.destination.path().join(LOCK);
+    let Ok(root) = destination_of(profile) else { return false };
+    let path = root.join(LOCK);
     let Ok(file) = File::options().write(true).open(&path) else { return false };
     match file.try_lock() {
         Ok(()) => {
@@ -311,6 +312,16 @@ pub fn destination_busy(profile: &Profile) -> bool {
 }
 
 /// Fails when the drive or share holding `root` is not reachable.
+/// The destination folder of `profile`, refused while its network folders
+/// wait for the user's confirmation: the one way the engine reaches a
+/// profile's destination.
+pub(crate) fn destination_of(profile: &Profile) -> Result<&Path> {
+    if profile.network_unconfirmed {
+        return Err(EngineError::NetworkUnconfirmed);
+    }
+    Ok(profile.destination.path())
+}
+
 pub(crate) fn ensure_reachable(root: &Path) -> Result<()> {
     let volume = root.ancestors().last().unwrap_or(root);
     if root.exists() || volume.as_os_str().is_empty() || volume.exists() {
@@ -328,7 +339,7 @@ impl Repo {
     /// encrypted as the profile says; an existing one keeps what it is.
     /// `password` is needed for an encrypted destination.
     pub(crate) fn open(profile: &Profile, create: bool, password: Option<&Password>) -> Result<Option<Self>> {
-        let root = profile.destination.path().to_path_buf();
+        let root = crate::repo::destination_of(profile)?.to_path_buf();
         ensure_reachable(&root)?;
         if !root.exists() {
             if !create {
@@ -902,7 +913,7 @@ pub(crate) fn write_durably(path: &Path, bytes: &[u8]) -> Result<()> {
 /// [`EngineError::PasswordNeeded`] or [`EngineError::WrongPassword`] for an
 /// encrypted destination.
 pub fn list_archives(profile: &Profile, password: Option<&Password>) -> Result<Vec<ArchiveInfo>> {
-    let root = profile.destination.path();
+    let root = crate::repo::destination_of(profile)?;
     ensure_reachable(root)?;
     if !root.exists() {
         return Ok(Vec::new());
