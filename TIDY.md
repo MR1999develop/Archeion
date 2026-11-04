@@ -5,8 +5,11 @@ trigger it. Remove an item when it is done or no longer applies.
 
 ## Before the first release
 
-- **Publish on GitHub**: `tools\github_publish.bat` (needs the GitHub CLI signed in; creates the
-  private repository `MR1999develop/archeion` and pushes). Then on GitHub:
+- **Publish on GitHub**: `tools\github_publish.bat`. With `origin` already
+  set (as now) it only pushes, with the repository's own fine-grained
+  token kept by Git Credential Manager (`credential.useHttpPath` in
+  `.git/config`); without `origin` it needs the GitHub CLI signed in to
+  create the private repository `MR1999develop/archeion`. Then on GitHub:
   protect `main` (require the CI check before merging) if pull requests
   are used; two-factor sign-in with a security key or passkey; Settings >
   Code security: secret scanning with push protection, Dependabot alerts,
@@ -22,10 +25,13 @@ trigger it. Remove an item when it is done or no longer applies.
   `main`, and the SBOM step (cargo-cyclonedx 0.5.9). Check all of it on
   the first tag.
 - **Try the git scripts on the PC** (written without a Windows shell to
-  run them): `tools\git_status.bat`, then `tools\git_commit.bat` on
-  `feature/automatic-backup`, `tools\github_publish.bat` (pushes `main`
-  and the feature branch), `tools\git_push.bat -PullRequest`; read the
-  four `.log` files.
+  run them): `tools\git_status.bat`, `tools\git_commit.bat`,
+  `tools\github_publish.bat`, `tools\git_push.bat -PullRequest`; read the
+  four `.log` files. The first run of `github_publish.bat` (4 November)
+  stopped on a syntax error, now fixed and caught by
+  `tools\script_check.ps1`; mistakes the parser cannot see (a wrong
+  command, an unhandled exit code) show only by running them. The path
+  "origin points elsewhere" was tried on a copy; a real push has not run.
 - **Commands typed in a terminal print nothing** (3 November): the
   executable is a windows-subsystem program, so `archeion extract` run by
   hand in `cmd` or PowerShell does not show its output (it does through a

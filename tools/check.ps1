@@ -75,7 +75,7 @@ if (Test-Path .git) {
 }
 
 # 1. Formatting: list what rustfmt would change, then format.
-Write-Header '1/5 cargo fmt'
+Write-Header '1/6 cargo fmt'
 $fmtCheck = Invoke-Step 'cargo fmt --all -- --check -l'
 $changed = @($fmtCheck.Lines | Where-Object { $_ -match '\.rs$' })
 if ($changed.Count -gt 0) {
@@ -88,13 +88,13 @@ $fmt = Invoke-Step 'cargo fmt --all'
 Add-Result 'fmt' $fmt "($($changed.Count) file(s) reformatted)"
 
 # 2. Lints: warnings are errors.
-Write-Header '2/5 cargo clippy'
+Write-Header '2/6 cargo clippy'
 $clippy = Invoke-Step "cargo clippy --workspace --all-targets $($cargoVerbose -join ' ') -- -D warnings"
 $problems = @($clippy.Lines | Where-Object { $_ -match '^(warning|error)(\[|:)' -and $_ -notmatch 'generated \d+ warning' })
 Add-Result 'clippy' $clippy "($($problems.Count) warning(s) or error(s))"
 
 # 3. Tests: every test name is printed by cargo; failures summed up below.
-Write-Header '3/5 cargo test'
+Write-Header '3/6 cargo test'
 $test = Invoke-Step "cargo test --workspace --no-fail-fast $($cargoVerbose -join ' ')"
 $passed = 0; $failed = 0; $ignored = 0
 foreach ($line in $test.Lines) {
@@ -107,7 +107,7 @@ Add-Result 'test' $test "($passed passed, $failed failed, $ignored ignored)"
 
 # 4. Dependencies: known vulnerabilities, licences, sources (deny.toml).
 # Skipped, and said, when cargo-deny is not installed.
-Write-Header '4/5 cargo deny'
+Write-Header '4/6 cargo deny'
 if (Get-Command cargo-deny -ErrorAction SilentlyContinue) {
     $deny = Invoke-Step 'cargo deny check'
     Add-Result 'deny' $deny '(advisories, licences, sources)'
@@ -116,7 +116,7 @@ if (Get-Command cargo-deny -ErrorAction SilentlyContinue) {
 }
 
 # 5. Sources: no bidirectional (Trojan Source) or other hidden control characters.
-Write-Header '5/5 text'
+Write-Header '5/6 text'
 $py = Get-Command python -ErrorAction SilentlyContinue
 if ($py) {
     $text = Invoke-Step 'python tools\bidi_check.py'
@@ -124,6 +124,11 @@ if ($py) {
 } else {
     Write-Log 'Python is not installed: the text check is skipped; CI runs it.' 'Yellow'
 }
+
+# 6. Scripts: every PowerShell script in tools parses (none is run).
+Write-Header '6/6 scripts'
+$scripts = Invoke-Step 'powershell -NoProfile -ExecutionPolicy Bypass -File tools\script_check.ps1'
+Add-Result 'scripts' $scripts '(PowerShell syntax)'
 
 # Summary.
 Write-Header 'Summary'
