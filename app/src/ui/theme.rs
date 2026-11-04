@@ -29,6 +29,10 @@ pub const SETTINGS_MAX_WIDTH: f32 = 760.0;
 pub const SIDE_PANEL_WIDTH: f32 = 240.0;
 /// The field of a typed exclusion (a pattern or a file type).
 pub const RULE_FIELD_WIDTH: f32 = 240.0;
+/// A password field.
+pub const PASSWORD_FIELD_WIDTH: f32 = 240.0;
+/// The text of a modal dialog: wider ones are hard to read.
+pub const DIALOG_WIDTH: f32 = 440.0;
 /// Corners of controls, list items and highlighted cards.
 pub const RADIUS: u8 = 4;
 /// Corners of windows, menus and popups.

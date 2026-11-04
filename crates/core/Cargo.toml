@@ -14,11 +14,12 @@ jiff = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+# The text of a profile (profile files, the copy kept at the destination).
+toml = { workspace = true }
 uuid = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
-toml = { workspace = true }
 
 [lints]
 workspace = true

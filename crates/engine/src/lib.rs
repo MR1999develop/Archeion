@@ -8,6 +8,10 @@
 //! archeion.lock                  held while a run uses the folder
 //! archeion.key.json              wrapped master key (encrypted only)
 //! archeion.archives.mac          signed list of archives (encrypted only)
+//! archeion.profile.toml          the profile's rules, rewritten by each
+//!                                backup, to import them on another
+//!                                computer (archeion.profile.zip, sealed,
+//!                                when encrypted)
 //! 2026-10-29_213000_C/           complete archive
 //!   manifest.jsonl               every file and folder at that time
 //!   zipped/C/Users/.../a.txt.zip content, one zip per file (default), or
@@ -56,7 +60,7 @@ pub use extract::{ExtractRequest, Secret, extract};
 pub use merge::{delete_archive, merge, merge_pending, merge_range};
 pub use repo::{
     DestinationTrashed, adopt_destination, destination_busy, destination_owner, list_archives,
-    trash_destination,
+    read_profile_copy, trash_destination,
 };
 pub use restore::{RestoreItem, RestoreRequest, RestoreTarget, restore};
 pub use verify::verify;
@@ -91,6 +95,13 @@ pub enum EngineError {
     /// The destination folder belongs to another profile.
     #[error("the destination is used by another profile")]
     ForeignDestination,
+    /// The folder holds no backups of Archeion (no `archeion.json`).
+    #[error("the folder holds no backups of Archeion")]
+    NotADestination,
+    /// The backups were made before each backup kept a copy of its
+    /// profile: the profile cannot be read from them.
+    #[error("the backups hold no copy of their profile")]
+    NoProfileCopy,
     /// The destination's drive has no Recycle Bin (a network share, a
     /// removable drive): nothing was moved.
     #[error("{0} has no Recycle Bin: nothing was moved")]

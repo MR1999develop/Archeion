@@ -34,6 +34,8 @@ E:\Backup\Documents\
   archeion.lock               held while a run uses the folder
   archeion.key.json           wrapped master key (encrypted destinations)
   archeion.archives.mac       signed list of archives (encrypted destinations)
+  archeion.profile.toml       the profile's rules, rewritten by each backup
+                              (archeion.profile.zip, sealed, when encrypted)
   2026-10-29_213000_C\        complete archive: every file whole
     manifest.jsonl            every file and folder at that time, with the
                               chunk list of large files (format 2)
@@ -75,7 +77,10 @@ progress; Cancel kills the process. Exit codes: 0 success, 1 failure, 2 destinat
 missing, 3 busy, 4 password missing or wrong, 5 not enough free space.
 
 Settings: `%APPDATA%\Archeion\config\settings.toml` (or `data\` next to the
-executable when a `portable.txt` file is there).
+executable when a `portable.txt` file is there). They are the source of
+truth; the copy each backup keeps at its destination is read only by
+File > Import profile from backups…, to bring a profile back on another
+computer (the password, never in either, is asked for).
 
 ### Restoring from the window
 

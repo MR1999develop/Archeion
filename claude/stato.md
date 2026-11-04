@@ -25,9 +25,15 @@ errore di sintassi alla riga 69, `$Repo:`; nuovo passo 6/6 di
 tutti gli script PowerShell senza eseguirli) e del nome esatto del
 repository (`chore/repository-name`: `MR1999develop/Archeion` con la
 maiuscola, come su GitHub, in `origin`, `Cargo.toml`, README, SECURITY,
-CHANGELOG, finestra Aiuto e script); `tools\check.bat` verde.
-Su GitHub (4 novembre) c'è `main` fino a `2a7f96b`; il commit del nome
-esatto parte con il prossimo push, che lancia l'utente.
+CHANGELOG, finestra Aiuto e script) e della copia del profilo nella
+destinazione (`feature/profile-copy`: ogni backup scrive
+`archeion.profile.toml`, o `archeion.profile.zip` sigillato se cifrato;
+File > Importa profilo da un backup… la legge; formato del testo spostato
+in `archeion_core::profile_text`; test in
+`crates/engine/tests/profile_copy.rs`, `app/src/ui/backup_import.rs` e
+`app/tests/cli.rs`); `tools\check.bat` verde.
+Su GitHub (4 novembre) c'è `main` fino a `542a215`; il resto parte con il
+prossimo push, che lancia l'utente.
 
 ## Lavoro in corso
 
@@ -38,7 +44,10 @@ esatto parte con il prossimo push, che lancia l'utente.
 - Provare a mano: Annulla durante un backup (si ferma al file successivo),
   spegnimento con un backup in corso (messaggio di Windows), seconda
   apertura che porta avanti la finestra, profilo importato con la
-  pianificazione in pausa, avviso sulle unità FAT32/exFAT.
+  pianificazione in pausa, avviso sulle unità FAT32/exFAT; importazione da
+  un backup cifrato fino al salvataggio della password in Gestione
+  credenziali (i test automatici si fermano prima, per non toccare quella
+  vera) e da un disco con un'altra lettera.
 - Misurare su un disco USB lento il costo del flush per file (TIDY).
 - GitHub: vedere verde la prima esecuzione della CI, poi le impostazioni
   del repository (regole per `main` e per i tag `v*`, sicurezza del
@@ -68,6 +77,19 @@ esatto parte con il prossimo push, che lancia l'utente.
   dell'altro progetto e non si usa per Archeion; con `origin` impostato
   `tools\github_publish.bat` non chiama `gh`. Il repository si chiama
   `Archeion` con la maiuscola: ogni riferimento usa quel nome esatto.
+- Impostazioni dei profili sul PC, fonte di verità (4 novembre); ogni
+  backup ne lascia una copia nella destinazione (scritta all'apertura,
+  dopo il recupero: temporaneo, flush, rinomina), sigillata con la chiave
+  se la destinazione è cifrata, e toglie quella dell'altro tipo. La copia
+  si legge solo con File > Importa profilo da un backup…, su una cartella
+  scelta dall'utente: l'id è quello del proprietario in `archeion.json`,
+  la destinazione è la cartella scelta, la cifratura quella della
+  destinazione; poi le stesse protezioni dei file di profilo
+  (`profile_file::add`). La password che apre i backup si salva con il
+  profilo. Scartate: impostazioni solo nella destinazione (non fidata,
+  irraggiungibile quando il disco è staccato, memoria anti-rollback da
+  tenere sul PC) e copia per archivio (più complessa con unioni ed
+  eliminazioni, senza un bisogno attuale).
 - Il recupero non cancella mai l'unica copia (OSTEP): un `.old` si toglie
   solo se l'archivio al suo posto si legge; un archivio illeggibile va in
   `<archivio>.damaged`, che Archeion non cancella mai (il controllo lo

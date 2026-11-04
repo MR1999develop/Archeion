@@ -172,6 +172,37 @@ fn screens() {
                 n.click();
             }
             shot(&mut h, &out, &name("12-exclusions"));
+            // The File menu, open: the import commands.
+            let file = h.state().tr.t("menu-file");
+            if let Some(n) = h.query_all_by(|n| n.label().as_deref() == Some(file.as_str())).next() {
+                n.click();
+            }
+            shot(&mut h, &out, &name("13-file-menu"));
+            h.key_press(egui::Key::Escape);
+            // The password asked by an import from encrypted backups.
+            let sealed = encrypted_backups(dir.path());
+            let ctx = h.ctx.clone();
+            h.state_mut().backup_import.start(&ctx, sealed);
+            shot(&mut h, &out, &name("14-import-password"));
         }
     }
+}
+
+/// A folder of encrypted backups, as found on a drive brought to a new
+/// computer.
+fn encrypted_backups(root: &Path) -> std::path::PathBuf {
+    struct Quiet;
+    impl archeion_engine::EventSink for Quiet {
+        fn emit(&self, _: archeion_core::RunEvent) {}
+    }
+    let source = root.join("Tesi");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("capitolo1.docx"), "testo").unwrap();
+    let mut thesis = Profile::new("Tesi");
+    thesis.sources.push(source);
+    thesis.destination = Destination::Local { path: root.join("Chiavetta USB").join("Archeion") };
+    thesis.encrypted = true;
+    let password = archeion_engine::Password::new("una password abbastanza lunga".into()).unwrap();
+    archeion_engine::backup(&thesis, Some(&password), BackupMode::Auto, &Quiet).unwrap();
+    thesis.destination.path().to_path_buf()
 }

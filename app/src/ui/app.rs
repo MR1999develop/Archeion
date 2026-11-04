@@ -2,6 +2,7 @@
 
 use super::{
     activity::phase_text,
+    backup_import::{self, BackupImport},
     editor::{self, Drafts, FormatLock, PasswordStatus, RunChoice},
     help::{self, Help},
     history::HistoryView,
@@ -110,6 +111,8 @@ pub struct ArcheionApp {
     /// Taking over a destination, on a thread of its own (a share may be
     /// slow): its result.
     adopting: Option<mpsc::Receiver<Result<(), String>>>,
+    /// A profile being imported from a folder of backups.
+    backup_import: BackupImport,
     /// When the window took a size not saved yet: it is saved once the
     /// resizing stops.
     resized_at: Option<Instant>,
@@ -208,6 +211,7 @@ impl ArcheionApp {
             resized_at: None,
             wipe: None,
             adopting: None,
+            backup_import: BackupImport::default(),
             fitted: false,
         }
     }
@@ -353,20 +357,7 @@ impl ArcheionApp {
         };
         let file = || arg(path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()));
         match profile_file::import(&path) {
-            Ok(profile) => {
-                let held: Vec<ProfileId> = self.removed.iter().map(|p| p.id).collect();
-                let id = profile_file::add(&mut self.settings, profile, &held);
-                // No profile here had this id: a password saved for it was
-                // left by a profile deleted before (the window closed
-                // abruptly), and must not open the backups the file names.
-                forget_password(id);
-                self.selected = Some(id);
-                self.tab = Tab::Settings;
-                self.restore.invalidate();
-                self.drafts.clear_password();
-                self.save();
-                self.apply_schedule(id);
-            }
+            Ok(profile) => self.add_imported(profile, None),
             Err(e) => {
                 tracing::warn!(error = %e, path = %path.display(), "profile import");
                 self.error = Some(match e {
@@ -378,6 +369,44 @@ impl ArcheionApp {
                 });
             }
         }
+    }
+
+    /// Starts importing the profile of a folder of backups the user
+    /// chooses, from the copy its backups keep there.
+    fn import_from_backup(&mut self, ctx: &egui::Context) {
+        let Some(folder) = rfd::FileDialog::new().set_title(self.tr.t("import-backup")).pick_folder() else {
+            return;
+        };
+        self.backup_import.start(ctx, folder);
+    }
+
+    /// Adds an imported profile, selects it and registers its scheduled
+    /// tasks (paused until the user turns them on). `password` opened its
+    /// backups and is saved with it; without one, a password saved for its
+    /// id is forgotten: no profile here had this id, so it was left by a
+    /// profile deleted before (the window closed abruptly) and must not
+    /// open the backups the import names. An encrypted profile without a
+    /// password asks for it in its settings, as a new one does.
+    fn add_imported(&mut self, profile: Profile, password: Option<Password>) {
+        let held: Vec<ProfileId> = self.removed.iter().map(|p| p.id).collect();
+        let id = profile_file::add(&mut self.settings, profile, &held);
+        match password {
+            Some(pw) => {
+                if let Err(e) = credentials::set(id, &pw) {
+                    tracing::error!(error = %e, "saving the password of an imported profile");
+                    self.error =
+                        Some(self.tr.t_args("import-backup-password-not-saved", &[("detail", arg(e))]));
+                }
+            }
+            None => forget_password(id),
+        }
+        self.password.saved = None;
+        self.selected = Some(id);
+        self.tab = Tab::Settings;
+        self.restore.invalidate();
+        self.drafts.clear_password();
+        self.save();
+        self.apply_schedule(id);
     }
 
     /// Saves the selected profile to a file the user names.
@@ -693,6 +722,16 @@ impl ArcheionApp {
                     .clicked()
                 {
                     self.import_profile();
+                }
+                let importing = self.backup_import.busy();
+                if ui
+                    .add_enabled(!importing, egui::Button::new(self.tr.t("import-backup")))
+                    .on_hover_text(self.tr.t("import-backup-hint"))
+                    .on_disabled_hover_text(self.tr.t("import-backup-busy"))
+                    .clicked()
+                {
+                    let ctx = ui.ctx().clone();
+                    self.import_from_backup(&ctx);
                 }
                 let exportable = self.selected.is_some_and(|id| self.settings.profile(id).is_some());
                 if ui
@@ -1361,6 +1400,13 @@ impl eframe::App for ArcheionApp {
         self.remember_size(&ctx);
         self.poll_wipe(&ctx);
         self.poll_adopting();
+        match self.backup_import.poll(&self.tr) {
+            Some(backup_import::Done::Imported { profile, password }) => {
+                self.add_imported(*profile, password)
+            }
+            Some(backup_import::Done::Failed(text)) => self.error = Some(text),
+            None => {}
+        }
         self.poll();
         self.update_tray();
         if self.close_after_run && self.job.is_none() {
@@ -1408,6 +1454,7 @@ impl eframe::App for ArcheionApp {
             .show(ui, |ui| self.profile_list(ui));
         egui::CentralPanel::default().show(ui, |ui| self.central(ui));
         self.help.show(&ctx, &self.tr, &self.storage);
+        self.backup_import.show(&ctx, &self.tr);
         let current = settings::Values { language: self.settings.language, window: self.settings.window };
         let changed = self.preferences.show(&ctx, &self.tr, self.storage.dir(), self.tray.is_some(), current);
         if let Some(values) = changed {

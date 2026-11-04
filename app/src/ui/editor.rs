@@ -13,8 +13,6 @@ use archeion_engine::Password;
 use eframe::egui::{self, RichText, Ui};
 
 const DELETE_DIALOG_ID: &str = "delete-profile-dialog";
-/// Width of the "Delete profile" warning: lines stay readable.
-const DELETE_DIALOG_WIDTH: f32 = 440.0;
 
 /// What the form asks the window to do after this frame.
 #[derive(Debug, Default)]
@@ -409,7 +407,7 @@ fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool,
     let focus_cancel = std::mem::take(&mut dialog.focus_cancel);
     let (mut delete, mut cancel) = (false, false);
     let response = widgets::modal(ui.ctx(), egui::Id::unique(DELETE_DIALOG_ID)).show(ui.ctx(), |ui| {
-        ui.set_max_width(DELETE_DIALOG_WIDTH);
+        ui.set_max_width(theme::DIALOG_WIDTH);
         ui.heading(tr.t_args("delete-profile-title", &[("name", arg(p.name.clone()))]));
         ui.add_space(theme::SPACE_S);
         // With the backups, no Undo: the text says where it all goes.
@@ -531,19 +529,23 @@ fn encryption(
                 ui.add(
                     egui::TextEdit::singleline(&mut drafts.current_password)
                         .password(true)
-                        .desired_width(240.0),
+                        .desired_width(theme::PASSWORD_FIELD_WIDTH),
                 );
                 ui.end_row();
             }
             ui.label(tr.t(if change { "password-new" } else { "password" }));
-            ui.add(egui::TextEdit::singleline(&mut drafts.password).password(true).desired_width(240.0));
+            ui.add(
+                egui::TextEdit::singleline(&mut drafts.password)
+                    .password(true)
+                    .desired_width(theme::PASSWORD_FIELD_WIDTH),
+            );
             ui.end_row();
             if confirm {
                 ui.label(tr.t("password-again"));
                 ui.add(
                     egui::TextEdit::singleline(&mut drafts.password_again)
                         .password(true)
-                        .desired_width(240.0),
+                        .desired_width(theme::PASSWORD_FIELD_WIDTH),
                 );
                 ui.end_row();
             }
@@ -627,7 +629,7 @@ fn recovery_ui(ui: &mut Ui, tr: &Tr, password: &PasswordStatus, drafts: &mut Dra
                     egui::TextEdit::singleline(&mut drafts.recovery_password)
                         .id(field_id)
                         .password(true)
-                        .desired_width(240.0),
+                        .desired_width(theme::PASSWORD_FIELD_WIDTH),
                 );
                 let entered = field.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let ready = !drafts.recovery_password.is_empty() && !password.working;

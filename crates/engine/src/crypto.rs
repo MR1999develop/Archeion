@@ -269,7 +269,8 @@ impl Keys {
         let salt = from_hex(&file.salt).ok_or_else(|| damaged("bad salt"))?;
         let wrapped = from_hex(&file.wrapped).ok_or_else(|| damaged("bad key"))?;
         let kek = derive(password, &salt, file.memory_kib, file.passes, file.lanes)?;
-        let plain = decrypt_single(&wrapped, &to_hex(&kek)).map_err(|_| EngineError::WrongPassword)?;
+        let plain = decrypt_single(&wrapped, &to_hex(&kek), crate::repo::MAX_SMALL_BYTES)
+            .map_err(|_| EngineError::WrongPassword)?;
         let master: [u8; 32] = plain.try_into().map_err(|_| damaged("bad key length"))?;
         Ok(Self::from_master(master))
     }
@@ -363,8 +364,9 @@ pub(crate) fn encrypt_single(data: &[u8], name: &str, password: &str) -> Result<
     Ok(zip.finish().map_err(zip_error(ctx))?.into_inner())
 }
 
-/// The first entry of an encrypted zip in memory.
-pub(crate) fn decrypt_single(bytes: &[u8], password: &str) -> Result<Vec<u8>> {
+/// The first entry of an encrypted zip in memory, refused when it unpacks
+/// to more than `limit` bytes.
+pub(crate) fn decrypt_single(bytes: &[u8], password: &str, limit: u64) -> Result<Vec<u8>> {
     let ctx = "decrypting";
     let mut zip = ZipArchive::new(Cursor::new(bytes)).map_err(zip_error(ctx))?;
     let entry = zip.by_index_decrypt(0, password.as_bytes()).map_err(zip_error(ctx))?;
@@ -376,7 +378,6 @@ pub(crate) fn decrypt_single(bytes: &[u8], password: &str) -> Result<Vec<u8>> {
         });
     }
     let mut out = Vec::new();
-    let limit = crate::repo::MAX_MANIFEST_BYTES;
     entry.take(limit + 1).read_to_end(&mut out).map_err(|_| EngineError::WrongPassword)?;
     if out.len() as u64 > limit {
         return Err(EngineError::Io {
@@ -418,8 +419,18 @@ mod tests {
     fn single_entry_round_trips_and_wrong_password_fails() {
         let bytes = encrypt_single(b"secret text", "data", "correct horse").unwrap();
         assert!(!bytes.windows(6).any(|w| w == b"secret"), "content is not in clear");
-        assert_eq!(decrypt_single(&bytes, "correct horse").unwrap(), b"secret text");
-        assert!(decrypt_single(&bytes, "wrong").is_err());
+        assert_eq!(decrypt_single(&bytes, "correct horse", 64).unwrap(), b"secret text");
+        assert!(decrypt_single(&bytes, "wrong", 64).is_err());
+    }
+
+    /// A small sealed file that unpacks to much more than its reader
+    /// expects is refused, not read whole into memory.
+    #[test]
+    fn an_entry_larger_than_its_limit_is_refused() {
+        let bytes = encrypt_single(&[b'x'; 4096], "data", "correct horse").unwrap();
+        assert!(bytes.len() < 1024, "deflated: {} bytes", bytes.len());
+        assert_eq!(decrypt_single(&bytes, "correct horse", 4096).unwrap().len(), 4096);
+        assert!(decrypt_single(&bytes, "correct horse", 4095).is_err());
     }
 
     #[test]

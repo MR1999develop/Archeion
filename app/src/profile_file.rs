@@ -1,25 +1,18 @@
 //! A profile as a file of its own (`Documents.archeion-profile`): every
-//! rule of the profile (folders, exclusions, destination, format,
-//! schedule, merge, checks, notifications) in readable TOML, to keep it or
-//! take it to another computer. Never the password: it stays in Windows
-//! Credential Manager and is asked for again after an import.
+//! rule of the profile in readable TOML ([`archeion_core::profile_text`]),
+//! to keep it or take it to another computer. Never the password: it stays
+//! in Windows Credential Manager and is asked for again after an import.
 
-use archeion_core::{Profile, ProfileId, Settings};
-use serde::{Deserialize, Serialize};
+use archeion_core::{
+    Profile, ProfileId, Settings,
+    profile_text::{self, DecodeError},
+};
 use std::{fs, io::Read as _, path::Path};
 
 /// Extension of profile files, without the dot.
 pub const EXTENSION: &str = "archeion-profile";
-/// Version of the file layout; a file of a later one is refused.
-const FORMAT: u32 = 1;
 /// A profile file is a few kilobytes; anything far larger is not one.
 const MAX_BYTES: u64 = 1024 * 1024;
-
-#[derive(Serialize, Deserialize)]
-struct ProfileFile {
-    format: u32,
-    profile: Profile,
-}
 
 /// Why a file could not be imported.
 #[derive(Debug, thiserror::Error)]
@@ -34,26 +27,15 @@ pub enum ImportError {
 
 /// The text of the file for `profile`.
 pub fn encode(profile: &Profile) -> anyhow::Result<String> {
-    let file = ProfileFile { format: FORMAT, profile: profile.clone() };
-    let body = toml::to_string_pretty(&file)?;
-    Ok(format!("# Archeion profile \"{}\". The password is not in this file.\n\n{body}", profile.name))
+    Ok(profile_text::encode(profile)?)
 }
 
 /// The profile in `text`.
 pub fn decode(text: &str) -> Result<Profile, ImportError> {
-    #[derive(Deserialize)]
-    struct Head {
-        format: Option<u32>,
-    }
-    let head: Head = toml::from_str(text).map_err(|_| ImportError::NotAProfile)?;
-    match head.format {
-        None => Err(ImportError::NotAProfile),
-        Some(f) if f > FORMAT => Err(ImportError::Newer(f)),
-        Some(_) => {
-            let file: ProfileFile = toml::from_str(text).map_err(|_| ImportError::NotAProfile)?;
-            Ok(file.profile)
-        }
-    }
+    profile_text::decode(text).map_err(|e| match e {
+        DecodeError::NotAProfile => ImportError::NotAProfile,
+        DecodeError::Newer(f) => ImportError::Newer(f),
+    })
 }
 
 /// Writes `profile` to `path`, replacing it.
