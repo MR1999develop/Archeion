@@ -52,6 +52,12 @@ pub fn verify(
                 .to_owned(),
         );
     }
+    for folder in repo.set_aside()? {
+        report.problems.push(format!(
+            "{folder}: a backup found unreadable after an interrupted merge, set aside with the backups it \
+             replaced put back; Archeion does not remove it"
+        ));
+    }
     let mut manifests = Vec::with_capacity(archives.len());
     for name in &archives {
         match repo.manifest(name) {

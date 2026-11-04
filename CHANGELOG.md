@@ -110,6 +110,21 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Fixed
 
+- Recovering an interrupted merge whose merged backup was in place but
+  unreadable (a lost write, a bad sector) put the members back except the
+  newest, whose name the merged backup takes, and then removed that
+  newest one as a leftover: its only copy was lost. The unreadable backup
+  is now set aside as `<backup>.damaged`, never removed by Archeion (the
+  check names it, deleting the profile's backups recycles it), and every
+  member comes back. A member moved aside is removed only once the backup
+  in its place reads.
+- An interrupted merge of encrypted backups was half undone by the next
+  run, which recovered before unlocking the destination and so could not
+  read the merged backup: it is now finished.
+- Deleting a profile's backups also recycles the unfinished and
+  set-aside folders Archeion left (`<backup>.partial`, `.damaged`…),
+  and still leaves a folder of the user's that only looks like one
+  (`Holidays.old`).
 - A merge (or the deletion of a backup, which merges it with the next)
   could drop chunks of large files that the merged backup still needed
   when a later backup also held them: restoring or checking the merged

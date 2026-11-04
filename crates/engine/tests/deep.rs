@@ -498,9 +498,12 @@ fn a_merge_stopped_at_any_file_leaves_every_backup_restorable() {
 // ------------------------------------------------------- merge crash states
 
 /// Every state an interrupted merge of the three newest backups can leave
-/// (members moved aside or not, the merged backup in place or lost, the
-/// journal whole, half written or lost): the next run recovers, nothing is
-/// lost unless the merge was complete, and the newest state restores.
+/// (members moved aside or not, the merged backup in place, lost or in
+/// place but unreadable, the journal whole, half written or lost): the
+/// next run recovers, nothing is lost unless the merge was complete, and
+/// the newest state restores. An unreadable merged backup is set aside,
+/// never removed, and every member comes back, the newest included,
+/// whose name the merged backup takes.
 #[test]
 fn every_crash_state_of_a_merge_recovers_without_losing_data() {
     let mut rng = Rng::new(14);
@@ -531,7 +534,8 @@ fn every_crash_state_of_a_merge_recovers_without_losing_data() {
 
     let mut states = 0;
     for moved in 0u32..(1 << members.len()) {
-        for merged_in_place in [false, true] {
+        for merged in ["lost", "in place", "damaged"] {
+            let merged_in_place = merged == "in place";
             for journal in ["none", "whole", "torn"] {
                 // Moving aside goes oldest first; the merged backup comes
                 // after all of them.
@@ -541,7 +545,7 @@ fn every_crash_state_of_a_merge_recovers_without_losing_data() {
                     .filter(|(i, _)| moved & (1 << i) != 0)
                     .map(|(_, m)| m)
                     .collect();
-                if merged_in_place && aside.len() != members.len() {
+                if merged != "lost" && aside.len() != members.len() {
                     continue;
                 }
                 states += 1;
@@ -551,8 +555,12 @@ fn every_crash_state_of_a_merge_recovers_without_losing_data() {
                 for m in &aside {
                     rename_retrying(&d.join(m), &d.join(format!("{m}.old")));
                 }
-                if merged_in_place {
+                if merged != "lost" {
                     copy_dir(&merged_dest.join(&target), &d.join(&target));
+                }
+                if merged == "damaged" {
+                    // Its data on the disk, its manifest lost to a bad sector.
+                    fs::write(d.join(&target).join("manifest.jsonl"), b"\0\0\0\0").unwrap();
                 }
                 let text =
                     serde_json::json!({ "format": 1, "target": target, "members": members }).to_string();
@@ -561,7 +569,7 @@ fn every_crash_state_of_a_merge_recovers_without_losing_data() {
                     "torn" => fs::write(d.join("merge.journal"), &text[..text.len() / 2]).unwrap(),
                     _ => {}
                 }
-                let what = format!("moved {moved:03b}, merged {merged_in_place}, journal {journal}");
+                let what = format!("moved {moved:03b}, merged {merged}, journal {journal}");
                 let mut bed = Bed::new(Container::Folder, false);
                 bed.profile = base.profile.clone();
                 bed.profile.sources = base.profile.sources.clone();
@@ -569,7 +577,17 @@ fn every_crash_state_of_a_merge_recovers_without_losing_data() {
                 bed.source = base.source.clone();
                 bed.snapshots = base.snapshots.clone();
                 let v = verify(&bed.profile, None, None, &Quiet).unwrap_or_else(|e| panic!("{what}: {e}"));
-                assert!(v.problems.is_empty(), "{what}: {:?}", v.problems);
+                if merged == "damaged" {
+                    // The check names what was set aside, and nothing else.
+                    assert_eq!(v.problems.len(), 1, "{what}: {:?}", v.problems);
+                    assert!(
+                        v.problems[0].starts_with(&format!("{target}.damaged:")),
+                        "{what}: {:?}",
+                        v.problems
+                    );
+                } else {
+                    assert!(v.problems.is_empty(), "{what}: {:?}", v.problems);
+                }
                 let after = bed.names();
                 assert!(
                     after.iter().any(|n| time_of(n) == time_of(&newest)),
@@ -579,6 +597,9 @@ fn every_crash_state_of_a_merge_recovers_without_losing_data() {
                     assert_eq!(after, names, "{what}: nothing merged, nothing lost");
                 }
                 assert!(!d.join("merge.journal").exists(), "{what}: the journal is done with");
+                if merged == "damaged" {
+                    assert!(d.join(format!("{target}.damaged")).is_dir(), "{what}: set aside, not removed");
+                }
                 for n in &after {
                     let got = bed.restored(n);
                     assert_trees(&got, &bed.snapshots[&time_of(n)], &format!("{what}: {n}"));
@@ -586,7 +607,67 @@ fn every_crash_state_of_a_merge_recovers_without_losing_data() {
             }
         }
     }
-    assert_eq!(states, 8 * 3 + 3);
+    assert_eq!(states, 8 * 3 + 3 + 3);
+}
+
+/// An encrypted destination left by a merge interrupted once its members
+/// were moved aside and the merged backup was in place: the next run
+/// finishes the merge (reading the sealed manifest of the merged backup
+/// needs the keys, so it unlocks first), and the list it leaves matches
+/// the signature written before the merge began.
+#[test]
+fn an_interrupted_merge_of_encrypted_backups_is_finished() {
+    let mut rng = Rng::new(15);
+    let mut bed = Bed::new(Container::ZipPerFile, true);
+    varied_source(&bed, &mut rng);
+    bed.backup(BackupMode::Auto, None);
+    for _ in 0..2 {
+        mutate(&mut rng, &bed.source);
+        bed.backup(BackupMode::Auto, None);
+    }
+    let names = bed.names();
+    let members = names[1..].to_vec();
+    let newest = names.last().unwrap().clone();
+    let dest = bed.profile.destination.path().to_path_buf();
+    // The real merged backup, made on a copy.
+    let scratch = tempfile::tempdir().unwrap();
+    let merged_dest = scratch.path().join("backups");
+    copy_dir(&dest, &merged_dest);
+    let mut scratch_profile = bed.profile.clone();
+    scratch_profile.destination = Destination::Local { path: merged_dest.clone() };
+    merge_range(&scratch_profile, bed.pw(), &members[0], &newest, &Quiet).unwrap();
+    let target = list_archives(&scratch_profile, bed.pw())
+        .unwrap()
+        .into_iter()
+        .map(|a| a.name)
+        .find(|n| time_of(n) == time_of(&newest))
+        .unwrap();
+    // As the merge leaves it before removing the members: the signature of
+    // the list before and after, the journal, the members aside, the
+    // merged backup in place.
+    let mac = "archeion.archives.mac";
+    let before = fs::read_to_string(dest.join(mac)).unwrap();
+    let after = fs::read_to_string(merged_dest.join(mac)).unwrap();
+    fs::write(dest.join(mac), format!("{}\n{}", before.trim(), after.trim())).unwrap();
+    let journal = serde_json::json!({ "format": 1, "target": target, "members": members }).to_string();
+    fs::write(dest.join("merge.journal"), journal).unwrap();
+    for m in &members {
+        rename_retrying(&dest.join(m), &dest.join(format!("{m}.old")));
+    }
+    copy_dir(&merged_dest.join(&target), &dest.join(&target));
+
+    let v = verify(&bed.profile, bed.pw(), None, &Quiet).unwrap();
+    assert!(v.problems.is_empty(), "{:?}", v.problems);
+    assert!(!dest.join("merge.journal").exists(), "the merge is finished");
+    for m in &members {
+        assert!(!dest.join(format!("{m}.old")).exists(), "{m}: removed once the merge is finished");
+    }
+    assert_eq!(bed.names(), vec![names[0].clone(), target.clone()]);
+    for n in [&names[0], &target] {
+        let got = bed.restored(n);
+        let expected = bed.snapshots[&time_of(n)].clone();
+        assert_trees(&got, &expected, n);
+    }
 }
 
 /// A rename, tried again for a few seconds: on a network share a folder
