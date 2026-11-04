@@ -149,6 +149,10 @@ All notable changes to Archeion are listed here. The format follows
   settings warn about FAT32 and exFAT drives.
 - Cancel asks the run to stop at the next file instead of killing it at
   once; runs started from the window end with it, even after a crash.
+- `tools\github_publish.bat` stopped with a PowerShell syntax error
+  before its first step. `tools\check.bat` and CI now parse every
+  PowerShell script in `tools` (`tools\script_check.ps1`), without running
+  them.
 
 ### Changed
 

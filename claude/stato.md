@@ -18,9 +18,14 @@ password lasciata da un profilo eliminato, confronti a tempo costante,
 release in due job; test in `crates/engine/tests/hostile.rs` e in
 `app/tests/cli.rs`) e del recupero delle unioni (`fix/merge-recovery-copy`:
 un archivio unito illeggibile si mette da parte come `.damaged` invece di
-far cancellare il membro più recente, caso segnalato dalla scheda OSTEP);
-`tools\check.bat` verde. Non ancora inviato su
-GitHub.
+far cancellare il membro più recente, caso segnalato dalla scheda OSTEP)
+e della correzione di `tools\github_publish.ps1` (`fix/publish-script-parse`:
+errore di sintassi alla riga 69, `$Repo:`; nuovo passo 6/6 di
+`tools\check.bat` e della CI, `tools\script_check.ps1`, che analizza
+tutti gli script PowerShell senza eseguirli); `tools\check.bat` verde.
+Non ancora inviato su GitHub: `origin` e la credenziale per repository
+(`credential.https://github.com.useHttpPath`) sono impostati, il push lo
+lancia l'utente con `tools\github_publish.bat`.
 
 ## Lavoro in corso
 
@@ -52,6 +57,11 @@ GitHub.
   avvisano (`changed_outside` nei rapporti, notifica e nota nel
   riepilogo), poi firmano l'elenco trovato; la ripresa non rifirma un
   elenco che non corrisponde.
+- GitHub con un token fine-grained solo per Archeion (4 novembre), come
+  l'altro progetto: Git Credential Manager lo tiene per l'URL del
+  repository (`useHttpPath` in `.git/config`), `gh` resta con il token
+  dell'altro progetto e non si usa per Archeion; con `origin` impostato
+  `tools\github_publish.bat` non chiama `gh`.
 - Il recupero non cancella mai l'unica copia (OSTEP): un `.old` si toglie
   solo se l'archivio al suo posto si legge; un archivio illeggibile va in
   `<archivio>.damaged`, che Archeion non cancella mai (il controllo lo

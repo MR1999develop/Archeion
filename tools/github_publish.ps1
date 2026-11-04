@@ -66,7 +66,7 @@ if ($origin) {
     $slug = Get-GitHubSlug $origin
     Write-Log "origin is already set: $origin"
     if ($slug -ne $Repo) {
-        Write-Log "It does not point to $Repo: nothing pushed, to be safe." 'Red'
+        Write-Log "It does not point to ${Repo}: nothing pushed, to be safe." 'Red'
         Write-Log "If it should, run: git remote set-url origin https://github.com/$Repo.git" 'Red'
         Stop-Script 1
     }

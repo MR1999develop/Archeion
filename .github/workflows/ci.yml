@@ -41,6 +41,9 @@ jobs:
         run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests
         run: cargo test --workspace --locked --no-fail-fast
+      - name: PowerShell scripts parse
+        shell: powershell
+        run: .\tools\script_check.ps1
 
   dependencies:
     name: cargo deny (advisories, licences, sources)
