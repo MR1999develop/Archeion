@@ -5,7 +5,9 @@ use crate::{
     EngineError, Result,
     crypto::{KEY_FILE, KEY_FORMAT, Keys, LIST_MAC_FILE, Password, decrypt_single, encrypt_single},
 };
-use archeion_core::{ArchiveInfo, ArchiveName, EntryKind, Manifest, Profile, ProfileId};
+use archeion_core::{
+    ArchiveInfo, ArchiveName, Destination, EntryKind, Manifest, Profile, ProfileId, profile_text,
+};
 use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, File, TryLockError},
@@ -16,6 +18,14 @@ use std::{
 const DESCRIPTOR: &str = "archeion.json";
 const LOCK: &str = "archeion.lock";
 const JOURNAL: &str = "merge.journal";
+/// The copy of the profile at an unencrypted destination: its text, as in
+/// a profile file.
+const PROFILE_COPY: &str = "archeion.profile.toml";
+/// The copy of the profile at an encrypted destination: sealed like the
+/// manifests, so it opens with the recovery key in 7-Zip too.
+const PROFILE_COPY_SEALED: &str = "archeion.profile.zip";
+/// Name of the entry inside [`PROFILE_COPY_SEALED`].
+const PROFILE_ENTRY: &str = "profile.toml";
 pub(crate) const MANIFEST: &str = "manifest.jsonl";
 /// Encrypted manifest of an archive of an encrypted destination.
 pub(crate) const MANIFEST_ZIP: &str = "manifest.zip";
@@ -102,6 +112,54 @@ pub fn destination_owner(profile: &Profile) -> Result<Option<ProfileId>> {
     let root = crate::repo::destination_of(profile)?;
     ensure_reachable(root)?;
     Ok(read_descriptor(root)?.map(|d| d.profile))
+}
+
+/// The profile whose backups are in the folder `root`, read from the copy
+/// its last backup kept there: for importing it on this or another
+/// computer once its settings are lost. Its id is the one that owns the
+/// backups and its destination is `root`, whatever the copy says, so the
+/// imported profile goes on with these backups; whether it is encrypted is
+/// what the destination says. Only reads: no lock, nothing recovered or
+/// written.
+///
+/// An encrypted destination is read from its sealed copy only: a plain
+/// one put there is not looked at.
+///
+/// # Errors
+/// [`EngineError::NotADestination`] for a folder without Archeion's
+/// backups, [`EngineError::NoProfileCopy`] for backups made before the
+/// copy was kept, [`EngineError::PasswordNeeded`] or
+/// [`EngineError::WrongPassword`] for an encrypted destination,
+/// [`EngineError::Damaged`] for a copy that does not read.
+pub fn read_profile_copy(root: &Path, password: Option<&Password>) -> Result<Profile> {
+    ensure_reachable(root)?;
+    let descriptor = read_descriptor(root)?.ok_or(EngineError::NotADestination)?;
+    let name = if descriptor.encryption.is_some() { PROFILE_COPY_SEALED } else { PROFILE_COPY };
+    let path = root.join(name);
+    let damaged = |message: String| EngineError::Damaged { archive: name.to_owned(), message };
+    let bytes = match read_small_bytes_io(&path) {
+        Ok(bytes) => bytes,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(EngineError::NoProfileCopy),
+        Err(e) => return Err(EngineError::io(format!("reading {}", path.display()))(e)),
+    };
+    let bytes = match &descriptor.encryption {
+        None => bytes,
+        Some(info) => {
+            let keys = info.unlock(root, password)?;
+            // The password opened the key: a copy that does not open with it
+            // was not sealed at this destination.
+            decrypt_single(&bytes, keys.password(), MAX_SMALL_BYTES).map_err(|e| match e {
+                EngineError::WrongPassword => damaged("not sealed with this destination's key".to_owned()),
+                other => damaged(other.to_string()),
+            })?
+        }
+    };
+    let text = String::from_utf8(bytes).map_err(|e| damaged(e.to_string()))?;
+    let mut profile = profile_text::decode(&text).map_err(|e| damaged(e.to_string()))?;
+    profile.id = descriptor.profile;
+    profile.destination = Destination::for_folder(root);
+    profile.encrypted = descriptor.encryption.is_some();
+    Ok(profile)
 }
 
 /// Gives the backups of another profile to `profile`: for a profile
@@ -480,6 +538,35 @@ impl Repo {
         match &self.keys {
             Some(keys) => keys.write_key_file(&self.root, new),
             None => Err(EngineError::InvalidProfile("the destination is not encrypted".into())),
+        }
+    }
+
+    /// Keeps a copy of `profile`'s rules at the destination, replacing the
+    /// previous one, for [`read_profile_copy`]. At an encrypted destination
+    /// it is sealed with its keys and reveals none of the folders; a copy
+    /// of the other kind (left from before the destination was emptied and
+    /// encrypted, or put there by someone else) is removed. Written whole:
+    /// a temporary file, flushed, then renamed.
+    pub(crate) fn write_profile_copy(&self, profile: &Profile) -> Result<()> {
+        let text = profile_text::encode(profile).map_err(|e| EngineError::InvalidProfile(e.to_string()))?;
+        let (name, other, bytes) = match &self.keys {
+            None => (PROFILE_COPY, PROFILE_COPY_SEALED, text.into_bytes()),
+            Some(keys) => (
+                PROFILE_COPY_SEALED,
+                PROFILE_COPY,
+                encrypt_single(text.as_bytes(), PROFILE_ENTRY, keys.password())?,
+            ),
+        };
+        let path = self.root.join(name);
+        let tmp = self.root.join(format!("{name}.tmp"));
+        write_durably(&tmp, &bytes)?;
+        retry(|| archeion_win::rename_durably(&tmp, &path))
+            .map_err(EngineError::io(format!("replacing {}", path.display())))?;
+        let stale = self.root.join(other);
+        match fs::remove_file(&stale) {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(EngineError::io(format!("removing {}", stale.display()))(e)),
         }
     }
 
@@ -976,7 +1063,7 @@ pub(crate) fn read_manifest(dir: &Path, name: &ArchiveName, keys: Option<&Keys>)
             return Err(damaged("the encrypted manifest is missing".to_owned()));
         }
         let bytes = read_limited(&sealed)?;
-        let plain = decrypt_single(&bytes, keys.password())?;
+        let plain = decrypt_single(&bytes, keys.password(), MAX_MANIFEST_BYTES)?;
         String::from_utf8(plain).map_err(|e| damaged(e.to_string()))?
     } else {
         let path = dir.join(MANIFEST);
@@ -1004,20 +1091,28 @@ fn read_limited(path: &Path) -> Result<Vec<u8>> {
 }
 
 /// Largest small file of a destination read: the descriptor, the key file,
-/// the signature of the list and the merge journal are a few kilobytes.
-const MAX_SMALL_BYTES: u64 = 1024 * 1024;
+/// the signature of the list, the merge journal and the copy of the
+/// profile are a few kilobytes.
+pub(crate) const MAX_SMALL_BYTES: u64 = 1024 * 1024;
 
-/// The text of `path`, a small file of the destination: refused (as
-/// `InvalidData`) beyond [`MAX_SMALL_BYTES`] or when it is not UTF-8, so a
-/// huge file put there cannot fill the memory.
-pub(crate) fn read_small_io(path: &Path) -> std::io::Result<String> {
+/// The bytes of `path`, a small file of the destination: refused (as
+/// `InvalidData`) beyond [`MAX_SMALL_BYTES`], so a huge file put there
+/// cannot fill the memory.
+fn read_small_bytes_io(path: &Path) -> std::io::Result<Vec<u8>> {
     use std::io::Read as _;
     let mut bytes = Vec::new();
     File::open(path)?.take(MAX_SMALL_BYTES + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > MAX_SMALL_BYTES {
         return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "the file is too large"));
     }
-    String::from_utf8(bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+    Ok(bytes)
+}
+
+/// The text of `path`, a small file of the destination: refused (as
+/// `InvalidData`) beyond [`MAX_SMALL_BYTES`] or when it is not UTF-8.
+pub(crate) fn read_small_io(path: &Path) -> std::io::Result<String> {
+    String::from_utf8(read_small_bytes_io(path)?)
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
 }
 
 /// [`read_small_io`] with the file named in the error.

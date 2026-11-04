@@ -24,6 +24,7 @@ pub mod manifest;
 pub mod merge_plan;
 pub mod password_policy;
 pub mod profile;
+pub mod profile_text;
 pub mod restore;
 pub mod retention;
 pub mod run;

@@ -433,3 +433,33 @@ fn a_planted_merge_journal_cannot_reach_the_users_folders() {
     assert!(!s.root.join("Documents.old").exists());
     assert!(!s.profile.destination.path().join("merge.journal").exists(), "the journal is done with");
 }
+
+/// A scheduled backup leaves its profile at the destination: read back from
+/// the folder alone, as on a new computer, sealed when it is encrypted.
+#[test]
+fn a_backup_leaves_its_profile_at_the_destination() {
+    for encrypted in [false, true] {
+        let s = sandbox(Container::ZipPerFile, encrypted);
+        let password = encrypted.then_some(PASSWORD);
+        let id = s.profile.id.to_string();
+        ok(&archeion(&s, &["run", &id, "--scheduled"], password));
+        let dest = s.profile.destination.path();
+        let (kept, absent) = if encrypted {
+            ("archeion.profile.zip", "archeion.profile.toml")
+        } else {
+            ("archeion.profile.toml", "archeion.profile.zip")
+        };
+        assert!(dest.join(kept).is_file(), "{kept}");
+        assert!(!dest.join(absent).exists(), "{absent}");
+        if encrypted {
+            let sealed = fs::read(dest.join(kept)).unwrap();
+            assert!(!sealed.windows(13).any(|w| w == b"source folder"), "the folders do not show");
+        }
+        let pw = password.map(|p| archeion_engine::Password::new(p.to_owned()).unwrap());
+        let mut read = archeion_engine::read_profile_copy(dest, pw.as_ref()).unwrap();
+        assert_eq!(read.destination.path(), dest);
+        // With ARCHEION_TEST_DEST the folder is a share: the rest is the same.
+        read.destination = s.profile.destination.clone();
+        assert_eq!(read, s.profile, "encrypted: {encrypted}");
+    }
+}

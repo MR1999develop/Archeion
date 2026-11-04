@@ -6,6 +6,17 @@ All notable changes to Archeion are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Every backup keeps a copy of its profile in the destination folder
+  (`archeion.profile.toml`; `archeion.profile.zip`, sealed with the
+  destination's key, when it is encrypted). File > Import profile from
+  backups… reads it from a folder the user chooses, on a new computer or
+  after the settings were lost: every rule comes back, the destination is
+  that folder (whatever drive letter it has now), the schedule waits to be
+  turned on, and encrypted backups ask for their password first, which is
+  then saved with the profile. The copy is never used otherwise.
+
 ### Changed
 
 - Exclusions: one field for a pattern or a file type, with "Exclude

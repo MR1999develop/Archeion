@@ -126,6 +126,9 @@ fn run(
     })?;
     sink.emit(RunEvent::Phase { phase: Phase::Opening });
     let repo = Repo::open(profile, true, password)?.expect("created when missing");
+    // The rules travel with the backups: if this computer's settings are
+    // lost, the profile is imported from its destination.
+    repo.write_profile_copy(profile)?;
     let archives = repo.archives()?;
     let previous = match archives.last() {
         Some(name) => Some(repo.manifest(name)?),

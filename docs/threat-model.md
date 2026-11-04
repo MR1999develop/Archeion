@@ -18,6 +18,7 @@ cloud storage, other users' files, backups of the system itself.
 | The destination may be read, changed or deleted by others (a NAS, a drive lent or lost, another PC on the network). | — (this is the case designed for) |
 | Windows' Credential Manager keeps the saved password for this user only. | Another program running as the user reads it. |
 | Profile files (`.archeion-profile`) may come from someone else. | — |
+| The copy of the profile kept at the destination may have been written by someone else, like the rest of the destination. | — |
 | The toolchain, crates.io and GitHub Actions are trustworthy. | A dependency or action is compromised (mitigated by `cargo deny`, the lock file, pinned actions). |
 
 ## Assets
@@ -43,11 +44,13 @@ flowchart LR
   worker -- "writes, reads back" --> dest[(Destination: drive or share)]
   profile[/.archeion-profile from elsewhere/] --> window
   dest -. "untrusted" .-> worker
+  dest -. "copy of the profile, untrusted" .-> window
 ```
 
-Boundaries: the destination (untrusted), imported profile files
-(untrusted), the worker's command line and standard input (from the window
-or Task Scheduler, same user), Credential Manager.
+Boundaries: the destination (untrusted), imported profile files and the
+copy of the profile read from a folder of backups (untrusted), the
+worker's command line and standard input (from the window or Task
+Scheduler, same user), Credential Manager.
 
 ## Threats and responses
 
@@ -67,6 +70,9 @@ or Task Scheduler, same user), Credential Manager.
 | Elevation / confused deputy: an imported profile backs up the user's files to someone else's share on a schedule | profile files | An imported profile's schedule stays paused until the user turns it on. |
 | Information disclosure: an imported profile naming `\\someone\share` makes Windows sign in there (NTLM) as soon as the settings show it | profile files | Folders on other computers of an imported profile are not touched (one guard in the engine, `destination_of`) until the user confirms the computers named. Every folder not on a drive of this computer counts (`//server/x`, `\\.\UNC\…`, `\??\UNC\…`, other device paths: `remote_part`). |
 | Spoofing: an imported profile takes the id of a profile deleted before, whose password is still saved, and points it at someone else's destination | profile files | An import forgets any password saved for the id it keeps, and does not take the id of a profile whose Undo is still offered. |
+| Tampering / elevation: the copy of the profile at the destination is changed so that importing it backs up other folders, or to another computer | destination | The copy is read only by File > Import profile from backups, on a folder the user chose; it goes through the same guards as a profile file (schedule paused, other computers to confirm). Its destination is the folder chosen, never the one the copy names, and its id is the owner the destination's description names. An encrypted destination is read from its sealed copy only (a plain one put there is not read, and the next backup removes it); a sealed copy from another destination does not open. |
+| Information disclosure: the copy of the profile names the source folders | destination | At an encrypted destination it is sealed like the manifests (`archeion.profile.zip`); at an unencrypted one it says no more than the manifests already do. The password is never in it. |
+| Denial of service: a huge copy of the profile | destination | Read up to 1 MiB, and a sealed one unpacked up to 1 MiB. |
 | Information disclosure: a password given on the command line is visible to other programs | command line | `archeion extract` takes secrets only from standard input or the environment. |
 | Spoofing: a weak password chosen for an encrypted destination | settings | At least 15 characters, no composition rules, common passwords and the profile name refused, an estimated strength required; at most 1024 characters so that Credential Manager keeps it. |
 | Elevation: programs or libraries planted next to the portable exe | program folder | Windows programs are started by full path; libraries load only from System32 and the program's folder. |
@@ -97,6 +103,11 @@ or Task Scheduler, same user), Credential Manager.
   only once checked. Kept for recovery by hand with 7-Zip.
 - **Sizes of encrypted files** stay visible (one zip per file, chunks of
   64 MiB at most).
+- **An older copy of the profile** put back at an encrypted destination
+  (sealed with the same key) is imported as it is: its rules are older,
+  and the user sees them in the settings before turning the schedule on.
+  On an unencrypted destination anyone who can write there chooses the
+  rules imported, with the same guards.
 - **Memory.** Passwords and keys are wiped when dropped, but egui keeps
   copies of text being typed while the field is open, and the `argon2`
   crate does not wipe its working memory.

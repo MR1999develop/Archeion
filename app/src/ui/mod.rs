@@ -2,6 +2,7 @@
 
 mod activity;
 mod app;
+mod backup_import;
 mod backups;
 mod editor;
 mod help;

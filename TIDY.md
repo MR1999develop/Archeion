@@ -391,3 +391,23 @@ trigger it. Remove an item when it is done or no longer applies.
   window does not offer to open, restore from or remove it.
 - **Chunk files are linked without that check** during a merge (only a
   file whose name is a 64-digit hex hash could be reached).
+
+## Copy of the profile at the destination (added 04/11)
+
+- **The copy is as new as the last backup**: rules changed since are in
+  it only after the next backup. Writing it on every save of the settings
+  would reach the destination (a share, a drive often unplugged) from the
+  window; wait for a need.
+- **The check does not read the copy**: a damaged or missing copy shows
+  only at an import. The check could read it and report it like a
+  damaged archive.
+- **Only the password opens an encrypted copy**: whoever has the
+  recovery key alone cannot import the profile (they can still restore
+  with `archeion extract`). Accepting the recovery key would also need a
+  way to choose a new password for the destination.
+- **The save of the password after an import** (Credential Manager) is
+  not covered by an automatic test, which would write to the real one;
+  the dialog is tested up to the password handed back. Try it by hand.
+- **Backups made before this version** have no copy until their next
+  backup; importing them says so and points to "Use these backups for
+  this profile".

@@ -43,6 +43,17 @@ impl Destination {
     pub fn display(&self) -> String {
         self.path().display().to_string()
     }
+
+    /// The destination for a folder the user chose: a share when the path
+    /// names another computer (in any spelling), a local folder otherwise.
+    #[must_use]
+    pub fn for_folder(path: &Path) -> Self {
+        if crate::profile::remote_part(path).is_some() {
+            Self::Network { unc: path.to_string_lossy().into_owned() }
+        } else {
+            Self::Local { path: path.to_path_buf() }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -60,5 +71,21 @@ mod tests {
     fn network_path_is_the_unc_text() {
         let d = Destination::Network { unc: r"\\server\b".into() };
         assert_eq!(d.path(), Path::new(r"\\server\b"));
+    }
+
+    #[test]
+    fn a_chosen_folder_is_a_share_only_on_another_computer() {
+        assert_eq!(
+            Destination::for_folder(Path::new(r"E:\Backup")),
+            Destination::Local { path: r"E:\Backup".into() }
+        );
+        assert_eq!(
+            Destination::for_folder(Path::new(r"\\nas\backup\pc")),
+            Destination::Network { unc: r"\\nas\backup\pc".into() }
+        );
+        assert_eq!(
+            Destination::for_folder(Path::new(r"\\?\UNC\nas\backup")),
+            Destination::Network { unc: r"\\?\UNC\nas\backup".into() }
+        );
     }
 }
