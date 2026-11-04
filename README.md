@@ -149,6 +149,11 @@ Repository: <https://github.com/MR1999develop/archeion>.
   printed (in the Command Prompt: `set ARCHEION_DEEP=20`, then the
   command on its own line). Close the PowerShell window, or
   `Remove-Item Env:ARCHEION_DEEP`, to go back to two.
+- **Backups elsewhere.** `$env:ARCHEION_TEST_DEST = 'E:\ArcheionTest'`
+  makes the engine, command-line and restore-window tests keep their
+  backups in new folders below that path (a network share, another
+  drive), removed at the end; a share without a Recycle Bin is expected
+  to refuse moving backups there.
 - **Postponed work** goes in `TIDY.md`; user-visible changes go in
   `CHANGELOG.md` under "Unreleased".
 

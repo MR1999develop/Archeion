@@ -25,8 +25,26 @@ impl EventSink for Quiet {
 
 struct Fixture {
     _dir: tempfile::TempDir,
+    /// The backups' folder when it is elsewhere (`ARCHEION_TEST_DEST`).
+    _elsewhere: Option<tempfile::TempDir>,
     profile: Profile,
     source: std::path::PathBuf,
+}
+
+/// Where a test keeps its backups: `local`, or a new folder below
+/// `ARCHEION_TEST_DEST` when it is set, to run the tests against another
+/// drive or a network share. The guard removes that folder at the end.
+fn backups_folder(local: std::path::PathBuf) -> (std::path::PathBuf, Option<tempfile::TempDir>) {
+    match std::env::var_os("ARCHEION_TEST_DEST").filter(|d| !d.is_empty()) {
+        Some(root) => {
+            let dir = tempfile::Builder::new()
+                .prefix("archeion-test-")
+                .tempdir_in(&root)
+                .unwrap_or_else(|e| panic!("a folder in ARCHEION_TEST_DEST {}: {e}", root.to_string_lossy()));
+            (dir.path().join("backups"), Some(dir))
+        }
+        None => (local, None),
+    }
 }
 
 /// One backup of `source/{a.txt, sub/b.txt, sub/deep/c.txt}`.
@@ -39,10 +57,11 @@ fn backed_up() -> Fixture {
     fs::write(source.join("sub").join("deep").join("c.txt"), "gamma").unwrap();
     let mut profile = Profile::new("UI");
     profile.sources.push(source.clone());
-    profile.destination = Destination::Local { path: dir.path().join("backups") };
+    let (backups, elsewhere) = backups_folder(dir.path().join("backups"));
+    profile.destination = Destination::Local { path: backups };
     profile.container = Container::Folder;
     archeion_engine::backup(&profile, None, BackupMode::Auto, &Quiet).unwrap();
-    Fixture { _dir: dir, profile, source }
+    Fixture { _dir: dir, _elsewhere: elsewhere, profile, source }
 }
 
 type State = (RestoreView, Option<Action>);

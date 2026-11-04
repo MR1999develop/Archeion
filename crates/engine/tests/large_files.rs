@@ -27,6 +27,8 @@ impl EventSink for Recorder {
     }
 }
 
+mod common;
+
 const MB: usize = 1024 * 1024;
 
 fn small_chunks() -> Tuning {
@@ -48,6 +50,8 @@ fn noise(len: usize, seed: u64) -> Vec<u8> {
 
 struct Fixture {
     _dir: tempfile::TempDir,
+    /// The backups' folder when it is elsewhere (`ARCHEION_TEST_DEST`).
+    _elsewhere: Option<tempfile::TempDir>,
     source: PathBuf,
     restore_to: PathBuf,
     profile: Profile,
@@ -65,14 +69,15 @@ fn fixture(container: Container, encrypted: bool) -> Fixture {
     fs::write(source.join("big.bin"), noise(2 * MB, 1)).unwrap();
     let mut profile = Profile::new("Large");
     profile.sources.push(source.clone());
-    profile.destination = Destination::Local { path: dir.path().join("backups") };
+    let (backups, elsewhere) = common::backups_folder(dir.path().join("backups"));
+    profile.destination = Destination::Local { path: backups };
     profile.container = container;
     profile.encrypted = encrypted;
     profile.large_files = LargeFiles { threshold_mb: 1 };
     profile.merge.rules = Retention::KEEP_ALL;
     let password = encrypted.then(|| Password::new("correct horse battery".into()).unwrap());
     let restore_to = dir.path().join("restored");
-    Fixture { _dir: dir, source, restore_to, profile, password }
+    Fixture { _dir: dir, _elsewhere: elsewhere, source, restore_to, profile, password }
 }
 
 impl Fixture {

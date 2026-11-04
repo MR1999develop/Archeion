@@ -26,6 +26,8 @@ use std::{
     time::Duration,
 };
 
+mod common;
+
 // ---------------------------------------------------------------- helpers
 
 /// xorshift64*: reproducible from the printed seed, no dependency.
@@ -136,6 +138,8 @@ fn tree(root: &Path) -> Tree {
 /// A profile, its source and a place for restores, in a temporary folder.
 struct Bed {
     dir: tempfile::TempDir,
+    /// The backups' folder when it is elsewhere (`ARCHEION_TEST_DEST`).
+    _elsewhere: Option<tempfile::TempDir>,
     source: PathBuf,
     profile: Profile,
     password: Option<Password>,
@@ -156,7 +160,8 @@ impl Bed {
         fs::create_dir_all(&source).unwrap();
         let mut profile = Profile::new("Deep");
         profile.sources.push(source.clone());
-        profile.destination = Destination::Local { path: dir.path().join("backups") };
+        let (backups, elsewhere) = common::backups_folder(dir.path().join("backups"));
+        profile.destination = Destination::Local { path: backups };
         profile.container = container;
         profile.encrypted = encrypted;
         profile.large_files.threshold_mb = 1;
@@ -164,7 +169,16 @@ impl Bed {
         profile.merge.keep_deleted = false;
         let password = encrypted.then(|| Password::new("deep test password".into()).unwrap());
         let tuning = Tuning { chunks: ChunkParams::new(4096, 16384, 65536), ..Tuning::default() };
-        Self { dir, source, profile, password, tuning, snapshots: BTreeMap::new(), restores: 0 }
+        Self {
+            dir,
+            _elsewhere: elsewhere,
+            source,
+            profile,
+            password,
+            tuning,
+            snapshots: BTreeMap::new(),
+            restores: 0,
+        }
     }
 
     fn pw(&self) -> Option<&Password> {
@@ -503,7 +517,7 @@ fn every_crash_state_of_a_merge_recovers_without_losing_data() {
     let dest = base.profile.destination.path().to_path_buf();
     // The real merged backup, made on a copy.
     let scratch = tempfile::tempdir().unwrap();
-    let merged_dest = scratch.path().join("backups");
+    let (merged_dest, _scratch_elsewhere) = common::backups_folder(scratch.path().join("backups"));
     copy_dir(&dest, &merged_dest);
     let mut scratch_profile = base.profile.clone();
     scratch_profile.destination = Destination::Local { path: merged_dest.clone() };
@@ -532,10 +546,10 @@ fn every_crash_state_of_a_merge_recovers_without_losing_data() {
                 }
                 states += 1;
                 let copy = tempfile::tempdir().unwrap();
-                let d = copy.path().join("backups");
+                let (d, _copy_elsewhere) = common::backups_folder(copy.path().join("backups"));
                 copy_dir(&dest, &d);
                 for m in &aside {
-                    fs::rename(d.join(m), d.join(format!("{m}.old"))).unwrap();
+                    rename_retrying(&d.join(m), &d.join(format!("{m}.old")));
                 }
                 if merged_in_place {
                     copy_dir(&merged_dest.join(&target), &d.join(&target));
@@ -573,6 +587,19 @@ fn every_crash_state_of_a_merge_recovers_without_losing_data() {
         }
     }
     assert_eq!(states, 8 * 3 + 3);
+}
+
+/// A rename, tried again for a few seconds: on a network share a folder
+/// just copied can be refused for a moment (as the engine knows).
+fn rename_retrying(from: &Path, to: &Path) {
+    for wait in [50, 200, 500, 1000, 2000, 4000] {
+        match fs::rename(from, to) {
+            Ok(()) => return,
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => sleep(Duration::from_millis(wait)),
+            Err(e) => panic!("renaming {}: {e}", from.display()),
+        }
+    }
+    fs::rename(from, to).unwrap_or_else(|e| panic!("renaming {}: {e}", from.display()));
 }
 
 fn copy_dir(from: &Path, to: &Path) {
