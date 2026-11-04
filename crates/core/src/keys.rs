@@ -176,7 +176,8 @@ mod tests {
 
     #[test]
     fn keys_of_paths_pass_the_check_and_doctored_ones_do_not() {
-        for key in ["C/Users/user/a b/ü.txt", "D", "UNC/server/share/x", "ROOT/home/m/a.txt", "C/x/.hidden"] {
+        for key in ["C/Users/user/a b/ü.txt", "D", "UNC/server/share/x", "ROOT/home/m/a.txt", "C/x/.hidden"]
+        {
             assert_eq!(check(key), Ok(()), "{key}");
         }
         for key in [
