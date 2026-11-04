@@ -379,5 +379,8 @@ trigger it. Remove an item when it is done or no longer applies.
   `GetFinalPathNameByHandleW` per file read from a plain backup (and the
   canonical destination once per backup read). Measure a merge of many
   small files on a NAS.
+- **A backup set aside as `.damaged`** after an interrupted merge is named
+  by the check only (a problem line, in English like the others); the
+  window does not offer to open, restore from or remove it.
 - **Chunk files are linked without that check** during a merge (only a
   file whose name is a 64-digit hex hash could be reached).

@@ -505,13 +505,19 @@ fn trashing_the_backups_leaves_other_files_and_their_folder() {
     let archive = list_archives(&f.profile, None).unwrap().remove(0).name;
     fs::write(root.join("notes.txt"), "mine").unwrap();
     fs::create_dir(root.join("Photos")).unwrap();
+    // A folder of the user's that only looks like a leftover, and one
+    // Archeion set aside.
+    fs::create_dir(root.join("Holidays.old")).unwrap();
+    let damaged = format!("{archive}.damaged");
+    fs::create_dir(root.join(&damaged)).unwrap();
     let Some(done) = trashed_or_refused(&f) else { return };
     assert!(!done.folder_trashed);
-    assert_eq!(done.left, vec!["Photos".to_owned(), "notes.txt".to_owned()]);
+    assert_eq!(done.left, vec!["Holidays.old".to_owned(), "Photos".to_owned(), "notes.txt".to_owned()]);
     let mut names: Vec<String> =
         fs::read_dir(&root).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     names.sort();
-    assert_eq!(names, vec!["Photos", "notes.txt"], "only what Archeion did not write");
+    assert_eq!(names, vec!["Holidays.old", "Photos", "notes.txt"], "only what Archeion did not write");
+    assert!(recycled(&root, &damaged), "the set-aside archive is in the Recycle Bin");
     assert!(recycled(&root, &archive), "the archive is in the Recycle Bin");
     assert!(recycled(&root, "archeion.json"));
 }

@@ -28,6 +28,9 @@ const PARTIAL: &str = "partial";
 const MERGING: &str = "merging";
 const OLD: &str = "old";
 const DELETING: &str = "deleting";
+/// Suffix of an archive folder found damaged during a recovery and set
+/// aside: never removed by Archeion, it may hold the only copy of a file.
+const DAMAGED: &str = "damaged";
 
 #[derive(Serialize, Deserialize)]
 struct Descriptor {
@@ -286,9 +289,14 @@ fn purge_from_recycle_bin(probe: &Path) {
 
 /// Names Archeion writes at the root of a destination.
 fn written_by_archeion(name: &str) -> bool {
+    let archive_folder = |n: &str| n.parse::<ArchiveName>().is_ok();
+    let set_aside = name.rsplit_once('.').is_some_and(|(stem, suffix)| {
+        [PARTIAL, MERGING, OLD, DELETING, DAMAGED].contains(&suffix) && archive_folder(stem)
+    });
     name.starts_with("archeion.")
         || [JOURNAL, PARTIAL, MERGING, OLD, DELETING, crate::chunks::CHUNKS_DIR].contains(&name)
-        || name.parse::<ArchiveName>().is_ok()
+        || archive_folder(name)
+        || set_aside
 }
 
 /// The names in `dir`, sorted.
@@ -682,6 +690,13 @@ impl Repo {
         }
         if !self.merged_in_place(journal) {
             tracing::warn!(target_archive = %journal.target, "the merged archive is missing: the merge is undone");
+            // There but unreadable (renamed from the staging folder, now
+            // gone): set aside, so that a member of the same name (the
+            // newest, when the merged archive takes its name) gets its
+            // place back instead of being removed as a leftover.
+            if target.exists() && !staging.exists() {
+                self.set_aside_damaged(&journal.target)?;
+            }
             for m in &journal.members {
                 self.put_back(m)?;
             }
@@ -705,6 +720,42 @@ impl Repo {
     fn merged_in_place(&self, journal: &Journal) -> bool {
         let dir = self.dir(&journal.target);
         dir.is_dir() && read_manifest(&dir, &journal.target, self.keys()).is_ok()
+    }
+
+    /// Renames the archive folder `name`, found unreadable during a
+    /// recovery, to `<name>.damaged` (`.damaged-2`… when taken). Nothing
+    /// removes it: it may still hold the only copy of some file.
+    fn set_aside_damaged(&self, name: &ArchiveName) -> Result<()> {
+        let dir = self.dir(name);
+        let mut aside = self.root.join(format!("{name}.{DAMAGED}"));
+        for n in 2.. {
+            if !aside.exists() {
+                break;
+            }
+            aside = self.root.join(format!("{name}.{DAMAGED}-{n}"));
+        }
+        tracing::warn!(archive = %name, folder = %aside.display(), "an unreadable archive set aside");
+        retry(|| archeion_win::rename_durably(&dir, &aside))
+            .map_err(EngineError::io(format!("setting aside {}", dir.display())))
+    }
+
+    /// Folders set aside by [`Self::set_aside_damaged`], sorted: the check
+    /// names them, since nothing else does.
+    pub(crate) fn set_aside(&self) -> Result<Vec<String>> {
+        let mut names: Vec<String> = fs::read_dir(&self.root)
+            .map_err(EngineError::io("listing the destination"))?
+            .flatten()
+            .filter(is_real_dir)
+            .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+            .filter(|n| {
+                n.split_once('.').is_some_and(|(stem, rest)| {
+                    stem.parse::<ArchiveName>().is_ok()
+                        && (rest == DAMAGED || rest.strip_prefix(DAMAGED).is_some_and(|r| r.starts_with('-')))
+                })
+            })
+            .collect();
+        names.sort_unstable();
+        Ok(names)
     }
 
     /// `name.old` becomes `name` again, when there is no `name`.
@@ -771,8 +822,18 @@ impl Repo {
             })
             .collect();
         // A member moved aside whose archive is not back: its name again.
+        // One whose place is taken by an archive that does not read (a
+        // merged archive damaged before its journal was found) gets it
+        // back too: the moved-aside copy is never removed for a broken one.
         for (_, member, suffix) in &leftovers {
-            if *suffix == OLD && !self.dir(member).exists() {
+            if *suffix != OLD {
+                continue;
+            }
+            let dir = self.dir(member);
+            if dir.exists() && read_manifest(&dir, member, self.keys()).is_err() {
+                self.set_aside_damaged(member)?;
+            }
+            if !dir.exists() {
                 tracing::warn!(
                     archive = %member,
                     "putting back an archive left aside by an interrupted merge"

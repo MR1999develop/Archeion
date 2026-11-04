@@ -16,7 +16,10 @@ dell'elenco controllata a ogni apertura, percorsi di rete in ogni grafia,
 collegamenti e junction non seguiti, file piccoli limitati a 1 MiB,
 password lasciata da un profilo eliminato, confronti a tempo costante,
 release in due job; test in `crates/engine/tests/hostile.rs` e in
-`app/tests/cli.rs`); `tools\check.bat` verde. Non ancora inviato su
+`app/tests/cli.rs`) e del recupero delle unioni (`fix/merge-recovery-copy`:
+un archivio unito illeggibile si mette da parte come `.damaged` invece di
+far cancellare il membro più recente, caso segnalato dalla scheda OSTEP);
+`tools\check.bat` verde. Non ancora inviato su
 GitHub.
 
 ## Lavoro in corso
@@ -49,6 +52,10 @@ GitHub.
   avvisano (`changed_outside` nei rapporti, notifica e nota nel
   riepilogo), poi firmano l'elenco trovato; la ripresa non rifirma un
   elenco che non corrisponde.
+- Il recupero non cancella mai l'unica copia (OSTEP): un `.old` si toglie
+  solo se l'archivio al suo posto si legge; un archivio illeggibile va in
+  `<archivio>.damaged`, che Archeion non cancella mai (il controllo lo
+  nomina, l'eliminazione del profilo lo manda nel Cestino).
 - Un percorso di un profilo importato è locale solo se è su un'unità di
   questo PC (`X:\…`, `\\?\X:\…`); ogni altra grafia chiede conferma
   (`archeion_core::profile::remote_part`).
