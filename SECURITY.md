@@ -3,10 +3,11 @@
 ## Reporting a problem
 
 Please report security problems privately, not in a public issue: use
-GitHub's "Report a vulnerability" on the repository's Security tab, or
-write to MR1999develop@users.noreply.github.com. Say what you found, how
-to reproduce it and which version you used. You will get an answer within
-two weeks; a fix comes with a new release and a note in `CHANGELOG.md`.
+GitHub's "Report a vulnerability" on the repository's Security tab (the
+only private channel: the project has no e-mail address). Say what you
+found, how to reproduce it and which version you used. You will get an
+answer within two weeks; a fix comes with a new release and a note in
+`CHANGELOG.md`.
 
 ## What Archeion protects, and what it does not
 

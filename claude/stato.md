@@ -29,7 +29,11 @@ profilo); `tools\check.bat` verde. Non ancora inviato su GitHub.
 ## Decisioni
 
 - Licenza `GPL-3.0-only`, copyright e autori `MR`. Cronologia riscritta
-  (2 novembre) senza nome, email né percorsi locali; autore dei commit
+  (2 novembre) senza nome, email né percorsi locali, e di nuovo il 4
+  novembre prima della pubblicazione: gli esempi di rete e la cartella di
+  prova sono generici (`\\server\…`, `E:\ArcheionTest`), nessun nome
+  proprio nelle liste di prova. Esempi di percorsi e computer sempre
+  inventati, mai quelli del PC su cui si sviluppa. Autore dei commit
   `MR <MR1999develop@users.noreply.github.com>`, impostato anche nella
   configurazione git del repository.
 - `tools\release.ps1` passa `--remap-path-prefix` e `/PDBALTPATH` con
