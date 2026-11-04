@@ -136,7 +136,11 @@ impl Keys {
     /// password. `None` when the text is not a recovery key; whether it is
     /// the right one shows when a manifest is opened.
     pub(crate) fn from_recovery_key(text: &str) -> Option<Self> {
-        let hex: String = text.chars().filter(|c| !c.is_whitespace() && *c != '-').collect();
+        let hex: String = text
+            .chars()
+            .filter(|c| !c.is_whitespace() && *c != '-')
+            .map(|c| c.to_ascii_lowercase())
+            .collect();
         let master: [u8; 32] = from_hex(&hex)?.try_into().ok()?;
         Some(Self::from_master(master))
     }
@@ -318,14 +322,19 @@ pub(crate) fn to_hex(bytes: &[u8]) -> String {
     })
 }
 
+/// Bytes of hex as [`to_hex`] writes it: lowercase digits only, so each
+/// value has one spelling (`from_str_radix` alone also takes `0A` and `+a`).
 fn from_hex(text: &str) -> Option<Vec<u8>> {
+    let digit = |c: u8| match c {
+        b'0'..=b'9' => Some(c - b'0'),
+        b'a'..=b'f' => Some(c - b'a' + 10),
+        _ => None,
+    };
     let t = text.as_bytes();
     if !t.len().is_multiple_of(2) {
         return None;
     }
-    t.chunks(2)
-        .map(|pair| std::str::from_utf8(pair).ok().and_then(|p| u8::from_str_radix(p, 16).ok()))
-        .collect()
+    t.chunks(2).map(|pair| Some(digit(pair[0])? << 4 | digit(pair[1])?)).collect()
 }
 
 pub(crate) fn aes_options(password: &str) -> Options<'_> {
@@ -510,5 +519,45 @@ mod tests {
     fn debug_hides_the_password() {
         assert!(!format!("{:?}", pw("hunter2")).contains("hunter2"));
         assert_eq!(Password::new(String::new()), None);
+    }
+
+    mod properties {
+        use super::*;
+        use proptest::prelude::*;
+
+        proptest! {
+            #![proptest_config(ProptestConfig { cases: 256, failure_persistence: None, ..ProptestConfig::default() })]
+
+            /// Hex is read back as written, and only one text gives a value:
+            /// what a destination holds has a single reading.
+            #[test]
+            fn hex_has_one_spelling(bytes in prop::collection::vec(any::<u8>(), 0..40), text in "[0-9a-fA-F+ x-]{0,40}|\\PC{0,40}") {
+                prop_assert_eq!(from_hex(&to_hex(&bytes)), Some(bytes));
+                if let Some(read) = from_hex(&text) {
+                    prop_assert_eq!(to_hex(&read), text);
+                }
+            }
+
+            /// A note opens only as sealed: any other text, for any id, is
+            /// refused without a panic.
+            #[test]
+            fn notes_open_only_as_sealed(
+                id in "\\PC{0,12}",
+                plain in "\\PC{0,60}",
+                other in "\\PC{0,120}",
+                flip in any::<prop::sample::Index>(),
+            ) {
+                let keys = Keys::from_master([3; 32]);
+                let sealed = keys.seal_note(&id, &plain);
+                prop_assert_eq!(keys.open_note(&id, &sealed), Some(plain));
+                let mut bytes = from_hex(&sealed).unwrap();
+                let at = flip.index(bytes.len());
+                bytes[at] ^= 1;
+                prop_assert_eq!(keys.open_note(&id, &to_hex(&bytes)), None);
+                if other != sealed {
+                    prop_assert_eq!(keys.open_note(&id, &other), None);
+                }
+            }
+        }
     }
 }

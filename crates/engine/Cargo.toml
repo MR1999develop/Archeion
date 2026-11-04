@@ -30,6 +30,7 @@ zeroize = { version = "1", features = ["derive"] }
 zip = { workspace = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 tempfile = { workspace = true }
 # The tests empty from the Recycle Bin what they put there.
 trash = "5"

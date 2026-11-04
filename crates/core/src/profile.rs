@@ -348,7 +348,7 @@ mod tests {
         q.sources = vec![r"D:\Data".into()];
         q.destination = Destination::Local { path: r"d:\data\Backup".into() };
         assert_eq!(q.validate(), Err(vec![ProfileError::DestinationInsideSource]), "case");
-        q.destination = Destination::Local { path: r"D:\Data\.ackups".into() };
+        q.destination = Destination::Local { path: r"D:\Data\.\backups".into() };
         assert_eq!(q.validate(), Err(vec![ProfileError::DestinationInsideSource]), "a dot");
         q.destination = Destination::Local { path: r"D:\Database".into() };
         assert_eq!(q.validate(), Ok(()), "a name that only begins the same");

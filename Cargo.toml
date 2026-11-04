@@ -17,6 +17,8 @@ archeion_scheduler = { path = "crates/scheduler" }
 archeion_win = { path = "crates/win" }
 
 anyhow = "1"
+# Property tests of the readers of files from outside (dev only).
+proptest = { version = "1", default-features = false, features = ["std"] }
 blake3 = "1"
 globset = "0.4"
 jiff = "0.2"

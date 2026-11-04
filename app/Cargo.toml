@@ -49,6 +49,7 @@ winreg = "0.56"
 winresource = "0.1"
 
 [dev-dependencies]
+proptest = { workspace = true }
 # Drives the egui screens in tests, without a window.
 egui_kittest = { version = "0.37", features = ["eframe", "snapshot", "wgpu"] }
 # The system fonts eframe draws with (icons, Hindi, Japanese, Chinese).

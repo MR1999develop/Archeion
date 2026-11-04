@@ -350,3 +350,15 @@ trigger it. Remove an item when it is done or no longer applies.
 - **An excluded file deleted at the source** stays listed as excluded,
   with its last version, as long as the exclusion is there.
 
+## Property tests (added 04/11)
+
+- **Reserved Windows names** (`CON`, `NUL`, `COM1`…) still give a profile
+  file name like `CON.archeion-profile`, which older Windows refuse; the
+  save dialog says so. Add an underscore if it ever matters.
+- **Proptest runs 256 cases per property** in `check.bat` and keeps no
+  regression files (`failure_persistence: None`): a failure prints its
+  smallest input, to be turned into an ordinary test.
+- **Engine readers of JSON** (descriptor, key file, journal) are covered by
+  the doctored-destination fuzz in `deep.rs`, not by properties of their
+  own.
+

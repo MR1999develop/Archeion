@@ -54,12 +54,12 @@ jobs:
           command: check
 
   sources:
-    name: no hidden bidirectional characters (Trojan Source)
+    name: no hidden control characters (Trojan Source)
     if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
-      - name: Look for U+202A to U+202E and U+2066 to U+2069
+      - name: Look for bidirectional and other control characters
         run: python3 tools/bidi_check.py
