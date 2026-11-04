@@ -489,6 +489,31 @@ fn the_tick_box_above_the_tree_leaves_deleted_files_out_of_folders() {
     assert!(request(&mut h).items[0].with_deleted);
 }
 
+#[test]
+fn a_file_excluded_after_its_backups_stays_out_of_its_folder_and_can_be_ticked_alone() {
+    let f = backed_up();
+    std::thread::sleep(Duration::from_millis(1100));
+    let mut profile = f.profile.clone();
+    profile.excludes.push(archeion_core::Exclusion::File { path: f.source.join("a.txt") });
+    archeion_engine::backup(&profile, None, BackupMode::Auto, &Quiet).unwrap();
+
+    let mut h = harness(&f);
+    let excluded = format!("{}  excluded", symbol::EXCLUDED);
+    assert!(h.query_all_by_label_contains(&excluded).next().is_some(), "shown as excluded, not deleted");
+    let deleted = format!("{}  deleted", symbol::DELETED);
+    assert!(h.query_all_by_label_contains(&deleted).next().is_none(), "not as deleted");
+    let root = symbol::with(symbol::FOLDER, f.source.display());
+    tick_box(&h, &root).click();
+    settle(&mut h);
+    assert_eq!(toggled(&h, &file("a.txt")), Some(Toggled::False), "the folder leaves it out");
+    assert_eq!(toggled(&h, &symbol::with(symbol::FOLDER, "sub")), Some(Toggled::True), "the rest comes back");
+    tick_box(&h, &file("a.txt")).click();
+    settle(&mut h);
+    let req = request(&mut h);
+    let key = keys::key_for(&f.source.join("a.txt")).unwrap();
+    assert!(req.items.iter().any(|i| i.key.as_deref() == Some(key.as_str())), "{:?}", req.items);
+}
+
 /// Every character the interface draws (symbols in the code, texts of
 /// every language, the icons) has a glyph in the fonts the window draws
 /// with: the theme's, egui's own and the system fonts.

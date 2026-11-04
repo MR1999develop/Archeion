@@ -5,7 +5,7 @@ use super::{symbol, theme, widgets};
 use crate::i18n::{Tr, arg};
 use archeion_core::{
     Alerts, Container, Destination, Exclusion, FullBackupRule, LargeFiles, Profile, ProfileError, ProfileId,
-    Retention, Schedule, TimeOfDay, Weekday,
+    Retention, Schedule, TimeOfDay, TypedKind, TypedRuleError, Weekday,
     password_policy::{self as policy, Rule, Strength},
     profile::Verification,
 };
@@ -53,10 +53,10 @@ pub enum RunChoice {
 /// between frames; never saved.
 #[derive(Debug, Default)]
 pub struct Drafts {
-    pub extension: String,
-    pub pattern: String,
-    /// The pattern field is shown ("Exclude patterns" pressed).
-    pub pattern_open: bool,
+    /// A pattern or file type being typed in the exclusions.
+    pub rule: String,
+    /// Why the typed rule was not added.
+    pub rule_error: Option<String>,
     pub run: RunChoice,
     /// The "Delete profile" warning, while open.
     delete: Option<DeleteDialog>,
@@ -945,59 +945,58 @@ fn exclusions(ui: &mut Ui, tr: &Tr, p: &mut Profile, drafts: &mut Drafts, out: &
                 }
             }
         }
-        if ui
-            .selectable_label(drafts.pattern_open, tr.t("exclude-pattern"))
-            .on_hover_text(tr.t("exclusions-hint"))
-            .clicked()
-        {
-            drafts.pattern_open = !drafts.pattern_open;
-        }
     });
-    if drafts.pattern_open {
-        ui.horizontal(|ui| {
-            let resp = ui.add(
-                egui::TextEdit::singleline(&mut drafts.pattern)
-                    .hint_text("**/node_modules")
-                    .desired_width(220.0),
-            );
-            let entered = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let ready = !drafts.pattern.trim().is_empty();
-            if (ui.add_enabled(ready, egui::Button::new(tr.t("exclude-pattern-add"))).clicked() || entered)
-                && ready
-            {
-                let glob = drafts.pattern.trim().to_owned();
-                out.changed |= add_rule(p, Exclusion::Pattern { glob });
-                drafts.pattern.clear();
-            }
-        });
-        ui.weak(tr.t("exclusions-hint"));
-    }
+    // One field for a pattern or a file type; the button pressed says
+    // which it is meant to be, and the text is checked against it.
     ui.horizontal(|ui| {
-        let resp = ui.add(
-            egui::TextEdit::singleline(&mut drafts.extension)
-                .hint_text(tr.t("exclude-type-hint"))
-                .desired_width(140.0),
-        );
-        let entered = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        let rule = Exclusion::extension(&drafts.extension);
-        let add = ui.add_enabled(rule.is_some(), egui::Button::new(tr.t("exclude-type")));
-        if (add.clicked() || entered)
-            && let Some(rule) = rule
-        {
-            out.changed |= add_rule(p, rule);
-            drafts.extension.clear();
+        let field = egui::TextEdit::singleline(&mut drafts.rule)
+            .hint_text(tr.t("exclude-rule-hint"))
+            .desired_width(theme::RULE_FIELD_WIDTH);
+        let resp =
+            ui.add(field).accessible_name(tr.t("exclude-rule-hint")).on_hover_text(tr.t("exclusions-hint"));
+        if resp.changed() {
+            drafts.rule_error = None;
         }
-    });
-    ui.horizontal_wrapped(|ui| {
-        ui.weak(tr.t("common-types"));
-        for ext in ["tmp", "bak", "log", "iso", "part"] {
-            let rule = Exclusion::Extension { ext: ext.into() };
-            let present = p.excludes.contains(&rule);
-            if ui.add_enabled(!present, egui::Button::new(format!(".{ext}")).small()).clicked() {
-                out.changed |= add_rule(p, rule);
+        let kinds = [(TypedKind::Pattern, "exclude-pattern"), (TypedKind::Extension, "exclude-type")];
+        for (kind, label) in kinds {
+            if ui.button(tr.t(label)).on_hover_text(tr.t("exclusions-hint")).clicked() {
+                match typed_rule(tr, kind, &drafts.rule) {
+                    Ok(rule) if p.excludes.contains(&rule) => drafts.rule_error = Some(tr.t("rule-already")),
+                    Ok(rule) => {
+                        out.changed |= add_rule(p, rule);
+                        drafts.rule.clear();
+                        drafts.rule_error = None;
+                    }
+                    Err(text) => drafts.rule_error = Some(text),
+                }
             }
         }
     });
+    if let Some(e) = &drafts.rule_error {
+        ui.colored_label(ui.visuals().error_fg_color, e.as_str());
+    }
+}
+
+/// The rule typed `text` makes for the button `kind`, or the message that
+/// says why not (and which button fits when the other one does).
+fn typed_rule(tr: &Tr, kind: TypedKind, text: &str) -> Result<Exclusion, String> {
+    let shown = || arg(text.trim().to_owned());
+    let rule = Exclusion::typed(kind, text).map_err(|e| {
+        let key = match e {
+            TypedRuleError::Empty => return tr.t("rule-empty"),
+            TypedRuleError::TypeNotPattern => "rule-type-not-pattern",
+            TypedRuleError::PatternNotType => "rule-pattern-not-type",
+            TypedRuleError::NameAlone => "rule-name-alone",
+            TypedRuleError::BadType => "rule-bad-type",
+        };
+        tr.t_args(key, &[("text", shown())])
+    })?;
+    if let Exclusion::Pattern { glob } = &rule
+        && let Some(detail) = archeion_engine::pattern_problem(glob)
+    {
+        return Err(tr.t_args("rule-bad-pattern", &[("text", shown()), ("detail", arg(detail))]));
+    }
+    Ok(rule)
 }
 
 /// Adds `rule` unless it is already there; true when added.

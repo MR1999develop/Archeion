@@ -18,7 +18,7 @@ pub use archeion_core::restore::{RestoreItem, RestoreRequest, RestoreTarget};
 use archeion_core::{
     ArchiveName, Chunks, Entry, EntryKind, FileAction, Manifest, Phase, Profile, RestoreReport, RunEvent,
     Skipped, Summary,
-    restore::{Output, date_tag, deleted_name, make_distinct, output_path, precise_date_tag},
+    restore::{Output, date_tag, deleted_name, make_distinct, output_path, precise_date_tag, with_date_tag},
 };
 use std::{
     collections::{BTreeMap, HashMap, HashSet, hash_map},
@@ -223,7 +223,11 @@ fn select<'a>(
     for (item, &k) in request.items.iter().zip(positions) {
         let Some(manifest) = chosen.get(&k) else { continue };
         let original = item.target == RestoreTarget::Original;
-        let wanted = |e: &&'a Entry| item.wants(&e.key);
+        // A file left out by an exclusion comes back only when asked for
+        // itself.
+        let wanted = |e: &&'a Entry| {
+            item.wants(&e.key) && (!e.excluded || item.key.as_deref() == Some(e.key.as_str()))
+        };
         // (archive read from, entry): the item's date, then for a folder
         // with its deleted files what earlier dates listed and it does not.
         let mut entries: Vec<(usize, &'a Entry)> =
@@ -245,6 +249,11 @@ fn select<'a>(
             let gone = newest.is_some_and(|m| m.get(&entry.key).is_none());
             if item.with_deleted && gone && entry.kind == EntryKind::File {
                 dest = deleted_name(&dest);
+            }
+            // Excluded since: beside what may be there now, with its date.
+            if entry.excluded && entry.kind == EntryKind::File && item.target != RestoreTarget::BesideOriginal
+            {
+                dest = with_date_tag(&dest, &tag);
             }
             match seen.entry((k, entry.key.as_str(), dest.clone())) {
                 hash_map::Entry::Occupied(o) => {

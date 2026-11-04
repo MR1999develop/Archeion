@@ -5,6 +5,8 @@
 pub const FOLDER: &str = "\u{F12B}";
 pub const FILE: &str = "\u{E7C3}";
 pub const DELETED: &str = "\u{E74D}";
+/// Left out by an exclusion added after it was backed up.
+pub const EXCLUDED: &str = "\u{E738}";
 pub const REMOVE: &str = "\u{E711}";
 pub const REFRESH: &str = "\u{E72C}";
 pub const RUNNING: &str = "\u{E895}";
@@ -23,8 +25,8 @@ pub const CURRENT: &str = "\u{EA3B}";
 /// Every icon, for the test that each has a glyph.
 #[cfg(test)]
 pub const ALL: &[&str] = &[
-    FOLDER, FILE, DELETED, REMOVE, REFRESH, RUNNING, WARNING, ERROR, DONE, LOCKED, KEY, TAG, PATTERN, WAIT,
-    PENDING, CURRENT,
+    FOLDER, FILE, DELETED, EXCLUDED, REMOVE, REFRESH, RUNNING, WARNING, ERROR, DONE, LOCKED, KEY, TAG,
+    PATTERN, WAIT, PENDING, CURRENT,
 ];
 
 /// `icon` and `text` with the gap the interface uses between them.

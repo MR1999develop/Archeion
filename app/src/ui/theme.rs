@@ -27,6 +27,8 @@ pub const FORM_MAX_WIDTH: f32 = 600.0;
 /// whole form fits the window's height.
 pub const SETTINGS_MAX_WIDTH: f32 = 760.0;
 pub const SIDE_PANEL_WIDTH: f32 = 240.0;
+/// The field of a typed exclusion (a pattern or a file type).
+pub const RULE_FIELD_WIDTH: f32 = 240.0;
 /// Corners of controls, list items and highlighted cards.
 pub const RADIUS: u8 = 4;
 /// Corners of windows, menus and popups.
