@@ -160,7 +160,11 @@ fn run(
     };
 
     sink.emit(RunEvent::Phase { phase: Phase::Scanning });
-    let mut report = BackupReport { complete: kind == ArchiveKind::Complete, ..BackupReport::default() };
+    let mut report = BackupReport {
+        complete: kind == ArchiveKind::Complete,
+        changed_outside: repo.changed_outside(),
+        ..BackupReport::default()
+    };
     let excludes = Excluder::new(&profile.excludes)?;
     let mut scan = Scan::new(previous.as_ref(), &excludes, repo.root(), kind == ArchiveKind::Complete);
     let mut scanning = Progress::new(sink, 0, 0);

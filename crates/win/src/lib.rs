@@ -17,6 +17,16 @@ pub fn rename_durably(from: &Path, to: &Path) -> io::Result<()> {
     imp::rename_durably(from, to)
 }
 
+/// Where the open `file` really is, after every link and junction on the
+/// way to it: `\\?\C:\…` or `\\?\UNC\server\share\…` on Windows, the form
+/// `std::fs::canonicalize` gives for a folder, so the two compare.
+///
+/// # Errors
+/// When the system cannot tell (and on systems other than Windows and Linux).
+pub fn real_path(file: &std::fs::File) -> io::Result<std::path::PathBuf> {
+    imp::real_path(file)
+}
+
 /// The file system of the volume holding `path` ("NTFS", "ReFS", "exFAT",
 /// "FAT32", "FAT"); `None` when Windows does not say, and elsewhere.
 #[must_use]
@@ -101,8 +111,8 @@ mod imp {
     use windows_sys::Win32::{
         Foundation::{CloseHandle, HANDLE, HWND},
         Storage::FileSystem::{
-            GetVolumeInformationW, GetVolumePathNameW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-            MoveFileExW,
+            GetFinalPathNameByHandleW, GetVolumeInformationW, GetVolumePathNameW, MOVEFILE_REPLACE_EXISTING,
+            MOVEFILE_WRITE_THROUGH, MoveFileExW,
         },
         System::{
             JobObjects::{
@@ -157,6 +167,29 @@ mod imp {
             MoveFileExW(from.as_ptr(), to.as_ptr(), MOVEFILE_WRITE_THROUGH | MOVEFILE_REPLACE_EXISTING)
         };
         if ok == 0 { Err(io::Error::last_os_error()) } else { Ok(()) }
+    }
+
+    pub(super) fn real_path(file: &std::fs::File) -> io::Result<std::path::PathBuf> {
+        use std::os::windows::{ffi::OsStringExt as _, io::AsRawHandle as _};
+        let handle: HANDLE = file.as_raw_handle();
+        let mut buffer = vec![0u16; 512];
+        loop {
+            // SAFETY: `handle` is the open handle of `file`, alive for the
+            // call; `buffer` is writable for the length passed. Flags 0:
+            // normalized name, with its drive letter.
+            let len = unsafe { GetFinalPathNameByHandleW(handle, buffer.as_mut_ptr(), len32(&buffer), 0) };
+            let len = len as usize;
+            if len == 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // Too small: `len` is the size needed, with the NUL.
+            if len >= buffer.len() {
+                buffer.resize(len, 0);
+                continue;
+            }
+            let text = buffer.get(..len).unwrap_or_default();
+            return Ok(std::path::PathBuf::from(std::ffi::OsString::from_wide(text)));
+        }
     }
 
     pub(super) fn file_system(path: &Path) -> Option<String> {
@@ -328,6 +361,19 @@ mod imp {
         Ok(())
     }
 
+    pub(super) fn real_path(file: &std::fs::File) -> io::Result<std::path::PathBuf> {
+        #[cfg(target_os = "linux")]
+        {
+            use std::os::fd::AsRawFd as _;
+            std::fs::read_link(format!("/proc/self/fd/{}", file.as_raw_fd()))
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = file;
+            Err(io::Error::from(io::ErrorKind::Unsupported))
+        }
+    }
+
     pub(super) fn file_system(_path: &Path) -> Option<String> {
         None
     }
@@ -405,6 +451,17 @@ mod tests {
             let path = system_program(p);
             assert!(path.is_absolute() && path.is_file(), "{}", path.display());
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn the_real_path_of_a_file_compares_with_its_folder_made_canonical() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.txt");
+        std::fs::write(&path, b"x").unwrap();
+        let real = real_path(&std::fs::File::open(&path).unwrap()).unwrap();
+        assert_eq!(real, std::fs::canonicalize(&path).unwrap());
+        assert!(real.starts_with(std::fs::canonicalize(dir.path()).unwrap()), "{}", real.display());
     }
 
     #[cfg(windows)]

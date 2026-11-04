@@ -82,11 +82,16 @@ pub fn import(path: &Path) -> Result<Profile, ImportError> {
 ///
 /// Its schedule does not run until the user turns it on: a file from
 /// elsewhere decides what is backed up and where.
-pub fn add(settings: &mut Settings, mut profile: Profile) -> ProfileId {
+///
+/// The id is a copy's too when it is in `held` (a profile just deleted,
+/// whose Undo is still offered). A profile keeping its id has no password
+/// yet: the caller forgets one saved for that id, left by a profile deleted
+/// long ago, which must not open the backups the file points at.
+pub fn add(settings: &mut Settings, mut profile: Profile, held: &[ProfileId]) -> ProfileId {
     profile.schedule_paused = profile.schedule.is_automatic() || profile.events.any();
     // Folders on other computers wait for the user to confirm them.
     profile.network_unconfirmed = !profile.network_hosts().is_empty();
-    if settings.profile(profile.id).is_some() {
+    if settings.profile(profile.id).is_some() || held.contains(&profile.id) {
         profile.id = ProfileId::new_random();
     }
     profile.name = free_name(settings, &profile.name);
@@ -166,12 +171,23 @@ mod tests {
     fn an_import_keeps_its_id_unless_the_profile_is_already_here() {
         let mut settings = Settings::default();
         let p = sample();
-        assert_eq!(add(&mut settings, p.clone()), p.id, "another computer: the same profile");
-        let copy = add(&mut settings, p.clone());
+        assert_eq!(add(&mut settings, p.clone(), &[]), p.id, "another computer: the same profile");
+        let copy = add(&mut settings, p.clone(), &[]);
         assert_ne!(copy, p.id, "imported twice: a copy");
         assert_eq!(settings.profile(copy).unwrap().name, "Documenti (2)");
-        let third = add(&mut settings, p);
+        let third = add(&mut settings, p, &[]);
         assert_eq!(settings.profile(third).unwrap().name, "Documenti (3)");
+    }
+
+    /// The id of a profile just deleted (its Undo still offered) is taken:
+    /// putting that profile back must not give two profiles one id.
+    #[test]
+    fn an_import_does_not_take_the_id_of_a_profile_just_deleted() {
+        let mut settings = Settings::default();
+        let p = sample();
+        let id = add(&mut settings, p.clone(), &[p.id]);
+        assert_ne!(id, p.id);
+        assert!(settings.profile(p.id).is_none());
     }
 
     #[test]
@@ -179,14 +195,14 @@ mod tests {
         let mut settings = Settings::default();
         let p = sample();
         assert!(p.schedule.is_automatic());
-        let id = add(&mut settings, p);
+        let id = add(&mut settings, p, &[]);
         let imported = settings.profile(id).unwrap();
         assert!(imported.schedule_paused && !imported.backs_up_automatically());
         assert!(imported.schedule.is_automatic(), "kept for when it is turned on");
 
         let mut manual = sample();
         manual.schedule = Schedule::Manual;
-        let id = add(&mut settings, manual);
+        let id = add(&mut settings, manual, &[]);
         assert!(!settings.profile(id).unwrap().schedule_paused, "nothing to wait for");
     }
 
@@ -195,13 +211,13 @@ mod tests {
         let mut settings = Settings::default();
         let mut p = sample();
         p.destination = archeion_core::Destination::Network { unc: r"\\server\backup".into() };
-        let id = add(&mut settings, p);
+        let id = add(&mut settings, p, &[]);
         assert!(settings.profile(id).unwrap().network_unconfirmed);
 
         let mut local = sample();
         local.destination = archeion_core::Destination::Local { path: r"E:\Backup".into() };
         local.sources = vec![r"C:\Users\me".into()];
-        let id = add(&mut settings, local);
+        let id = add(&mut settings, local, &[]);
         assert!(!settings.profile(id).unwrap().network_unconfirmed, "nothing on other computers");
     }
 
@@ -239,7 +255,7 @@ mod tests {
             fn imported_profiles_wait_for_the_user(text in prop_oneof![damaged_file(), "\\PC{0,300}"]) {
                 if let Ok(profile) = decode(&text) {
                     let mut settings = Settings::default();
-                    let id = add(&mut settings, profile);
+                    let id = add(&mut settings, profile, &[]);
                     let p = settings.profile(id).unwrap();
                     prop_assert!(!p.backs_up_automatically(), "{p:?}");
                     prop_assert_eq!(p.network_unconfirmed, !p.network_hosts().is_empty());

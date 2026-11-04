@@ -56,14 +56,17 @@ or Task Scheduler, same user), Credential Manager.
 | Tampering: a manifest key leads a restore outside the chosen folder (`..`, `C:\x` segments) | destination | Keys are checked when a manifest is read: only plain names under a drive, `UNC` or `ROOT` (`keys::check`). |
 | Tampering: an encrypted destination's description is stripped so that backups go on in the clear | destination | A destination with backups that no longer says it is encrypted, while the profile or its archives are, is refused (`EncryptionMissing`). |
 | Tampering: a plain archive, manifest, zip entry or wrapped master key put in an encrypted destination | destination | With keys, only sealed manifests and vault files are read, and plain zip entries are refused; restores check every file's BLAKE3 hash from the encrypted manifest. |
-| Tampering: backups removed, swapped or put back from an old copy | destination | Encrypted destinations sign the list of archives (keyed BLAKE3); this computer also remembers the newest backup seen and warns when the destination goes back. |
+| Tampering: backups removed, swapped or put back from an old copy | destination | Encrypted destinations sign the list of archives (keyed BLAKE3), checked when the destination is opened: a backup, merge or deletion that finds another list notifies the user (and the check reports it); recovering an interrupted run signs again only a list signed before the run began. This computer also remembers the newest backup seen and warns when the destination goes back. |
 | Information disclosure: names and contents read at the destination | destination | AES-256 (WinZip AE-2) zips keyed by a random master key; file names are keyed hashes; chunk names are keyed MACs. The master key is wrapped with Argon2id (64 MiB, 3 passes) of the password. |
 | Information disclosure: EFS files saved in the clear | sources | Counted and shown in the backup summary with the advice to encrypt the destination. |
-| Denial of service: huge or compressed-bomb manifests | destination | Manifests are read with a 4 GiB limit; chunks with their declared size. |
+| Denial of service: huge or compressed-bomb manifests | destination | Manifests are read with a 4 GiB limit; chunks with their declared size; the description, key file, signature and merge journal with 1 MiB; a resume journal larger than 4 GiB starts again. |
 | Denial of service: a stored file that unpacks to far more than listed fills the disk during a restore | destination | A restored file is written up to the size its manifest lists, then refused. |
 | Tampering: entries marked as excluded so that a folder restore leaves them out | destination | Encrypted manifests cannot be changed; on an unencrypted destination this is part of the accepted risk below. |
+| Elevation / confused deputy: a merge journal put at the destination names folders of the computer, so that recovering the "interrupted merge" renames and deletes them | destination | The journal names archives (`ArchiveName`) or it is not read; recovery touches only `<archive>.old`, `.merging` and `.deleting` folders of the destination. |
+| Elevation / confused deputy: a junction or symbolic link put in a backup or in an unfinished backup, so that a run writes over the user's files (the sources being backed up) or a merge copies files of the computer into the destination | destination | Links are not followed: an unfinished backup holding one is not resumed, folders that are links are not backups, and a plain file is read only when its real path (`GetFinalPathNameByHandleW`) is inside the destination. Encrypted files open only with the key. |
 | Elevation / confused deputy: an imported profile backs up the user's files to someone else's share on a schedule | profile files | An imported profile's schedule stays paused until the user turns it on. |
-| Information disclosure: an imported profile naming `\\someone\share` makes Windows sign in there (NTLM) as soon as the settings show it | profile files | Folders on other computers of an imported profile are not touched (one guard in the engine, `destination_of`) until the user confirms the computers named. |
+| Information disclosure: an imported profile naming `\\someone\share` makes Windows sign in there (NTLM) as soon as the settings show it | profile files | Folders on other computers of an imported profile are not touched (one guard in the engine, `destination_of`) until the user confirms the computers named. Every folder not on a drive of this computer counts (`//server/x`, `\\.\UNC\…`, `\??\UNC\…`, other device paths: `remote_part`). |
+| Spoofing: an imported profile takes the id of a profile deleted before, whose password is still saved, and points it at someone else's destination | profile files | An import forgets any password saved for the id it keeps, and does not take the id of a profile whose Undo is still offered. |
 | Information disclosure: a password given on the command line is visible to other programs | command line | `archeion extract` takes secrets only from standard input or the environment. |
 | Spoofing: a weak password chosen for an encrypted destination | settings | At least 15 characters, no composition rules, common passwords and the profile name refused, an estimated strength required; at most 1024 characters so that Credential Manager keeps it. |
 | Elevation: programs or libraries planted next to the portable exe | program folder | Windows programs are started by full path; libraries load only from System32 and the program's folder. |
@@ -76,7 +79,18 @@ or Task Scheduler, same user), Credential Manager.
   Revisit if an append-only remote copy is added.
 - **Unencrypted destinations are trusted** for content: a planted file
   with a matching manifest entry is restored. Encrypt the destination
-  when others can write to it.
+  when others can write to it. They are never trusted for where Archeion
+  reads or writes on the computer (journal names, links).
+- **Backups changed outside are told once.** The run that finds another
+  list than the signed one notifies the user, then goes on and signs the
+  list it found; refusing would need a way to accept a destination put
+  back on purpose. After an interrupted merge on exFAT or a share, where
+  the journal itself can be lost, the list left may match no signed line:
+  the next run then tells about a change that Archeion made.
+- **Chunk files are linked by name** during a merge, without the real-path
+  check of whole files: a junction could make a merge copy a file of the
+  computer only if its name is a 64-digit hex hash. Chunks are checked
+  against their names when read.
 - **WinZip AE-2** authenticates each entry's data but not its metadata,
   and checks the MAC only at the end of the entry; Archeion compensates
   with the hashes in the encrypted manifest and temporary files renamed

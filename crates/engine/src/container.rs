@@ -282,11 +282,15 @@ impl Writer {
     pub(crate) fn add_from(&mut self, reader: &mut Reader, key: &str, mtime_ns: i64) -> Result<()> {
         let ctx = format!("merging {key}");
         match (self, reader) {
-            (Self::Folder { data }, Reader::Folder { data: src }) => {
-                link_or_copy(&keys::path_under(src, key), &keys::path_under(data, key), &ctx)
+            (Self::Folder { data }, Reader::Folder { data: src, inside }) => {
+                let from = keys::path_under(src, key);
+                drop(inside.open(&from, &ctx)?);
+                link_or_copy(&from, &keys::path_under(data, key), &ctx)
             }
-            (Self::ZipPerFile { root }, Reader::ZipPerFile { root: src }) => {
-                link_or_copy(&zipped_path(src, key), &zipped_path(root, key), &ctx)
+            (Self::ZipPerFile { root }, Reader::ZipPerFile { root: src, inside }) => {
+                let from = zipped_path(src, key);
+                drop(inside.open(&from, &ctx)?);
+                link_or_copy(&from, &zipped_path(root, key), &ctx)
             }
             (
                 Self::Vault { root, keys, archive },
@@ -433,11 +437,56 @@ pub(crate) fn link_or_copy(src: &Path, dest: &Path, ctx: &str) -> Result<()> {
 }
 
 /// Reads the content of a committed archive.
+///
+/// Plain files and plain zips are read only when they really lie inside
+/// the destination (`inside`, its real path): a link or junction put in a
+/// backup could otherwise make a merge copy any file of the computer into
+/// the destination. Encrypted files need the key, so a file from
+/// elsewhere does not open as one.
 #[derive(Debug)]
 pub(crate) enum Reader {
-    Folder { data: PathBuf },
-    ZipPerFile { root: PathBuf },
+    Folder { data: PathBuf, inside: Inside },
+    ZipPerFile { root: PathBuf, inside: Inside },
     Vault { root: PathBuf, keys: Keys, archive: String },
+}
+
+/// The real path of a destination folder, for checking that the files read
+/// from it are inside it.
+#[derive(Debug, Clone)]
+pub(crate) struct Inside {
+    real: PathBuf,
+    archive: String,
+}
+
+impl Inside {
+    /// The destination folder holding `archive_dir`.
+    fn of(archive_dir: &Path) -> Result<Self> {
+        let root = archive_dir.parent().unwrap_or(archive_dir);
+        let real = fs::canonicalize(root).map_err(EngineError::io(format!("opening {}", root.display())))?;
+        let archive = archive_dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        Ok(Self { real, archive })
+    }
+
+    /// Fails unless `file`, opened at `path`, lies below the destination.
+    fn check(&self, file: &File, path: &Path) -> Result<()> {
+        match archeion_win::real_path(file) {
+            Ok(real) if real.starts_with(&self.real) => Ok(()),
+            Ok(_) => Err(EngineError::Damaged {
+                archive: self.archive.clone(),
+                message: format!("{} leads outside the destination (a link)", path.display()),
+            }),
+            // A system that cannot tell: nothing to compare.
+            Err(e) if e.kind() == std::io::ErrorKind::Unsupported => Ok(()),
+            Err(e) => Err(EngineError::io(format!("reading {}", path.display()))(e)),
+        }
+    }
+
+    /// Opens `path` for reading once [`Self::check`] passes.
+    fn open(&self, path: &Path, ctx: &str) -> Result<File> {
+        let file = File::open(path).map_err(EngineError::io(ctx.to_owned()))?;
+        self.check(&file, path)?;
+        Ok(file)
+    }
 }
 
 impl Reader {
@@ -453,9 +502,10 @@ impl Reader {
                 archive_dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
             return Ok(Self::Vault { root: vault, keys: keys.clone(), archive });
         }
+        let inside = Inside::of(archive_dir)?;
         match detect(archive_dir) {
-            Container::ZipPerFile => Ok(Self::ZipPerFile { root: archive_dir.join(ZIPPED_DIR) }),
-            Container::Folder => Ok(Self::Folder { data: archive_dir.join(DATA_DIR) }),
+            Container::ZipPerFile => Ok(Self::ZipPerFile { root: archive_dir.join(ZIPPED_DIR), inside }),
+            Container::Folder => Ok(Self::Folder { data: archive_dir.join(DATA_DIR), inside }),
         }
     }
 
@@ -463,12 +513,12 @@ impl Reader {
     pub(crate) fn read<T>(&mut self, key: &str, f: impl FnOnce(&mut dyn Read) -> Result<T>) -> Result<T> {
         let ctx = format!("reading {key}");
         match self {
-            Self::Folder { data } => {
-                let mut file = File::open(keys::path_under(data, key)).map_err(EngineError::io(ctx))?;
+            Self::Folder { data, inside } => {
+                let mut file = inside.open(&keys::path_under(data, key), &ctx)?;
                 f(&mut file)
             }
-            Self::ZipPerFile { root } => {
-                let file = File::open(zipped_path(root, key)).map_err(EngineError::io(ctx.clone()))?;
+            Self::ZipPerFile { root, inside } => {
+                let file = inside.open(&zipped_path(root, key), &ctx)?;
                 let mut zip =
                     ZipArchive::new(BufReader::with_capacity(BUFFER, file)).map_err(zip_err(&ctx))?;
                 let mut entry = zip.by_index(0).map_err(zip_err(&ctx))?;

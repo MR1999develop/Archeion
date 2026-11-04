@@ -240,21 +240,20 @@ pub fn run(storage: &Storage, id: ProfileId, work: Work, scheduled: bool, log: O
     // The engine reports progress and the final summary itself.
     let result = match work {
         Work::Backup { mode } => archeion_engine::backup(&profile, pw, mode, &sink).map(|report| {
+            warn_if_changed_outside(&tr, &profile, report.changed_outside);
             warn_if_unusual(storage, &tr, &profile, &log_path, &report);
         }),
         Work::Merge { range, drop_deleted } => {
-            let mut profile = profile.clone();
-            profile.merge.keep_deleted &= !drop_deleted;
+            let mut merging = profile.clone();
+            merging.merge.keep_deleted &= !drop_deleted;
             match range {
-                None => archeion_engine::merge(&profile, pw, &sink).map(|_| ()),
-                Some((first, last)) => {
-                    archeion_engine::merge_range(&profile, pw, &first, &last, &sink).map(|_| ())
-                }
+                None => archeion_engine::merge(&merging, pw, &sink),
+                Some((first, last)) => archeion_engine::merge_range(&merging, pw, &first, &last, &sink),
             }
+            .map(|report| warn_if_changed_outside(&tr, &profile, report.changed_outside))
         }
-        Work::Delete { archive } => {
-            archeion_engine::delete_archive(&profile, pw, &archive, &sink).map(|_| ())
-        }
+        Work::Delete { archive } => archeion_engine::delete_archive(&profile, pw, &archive, &sink)
+            .map(|report| warn_if_changed_outside(&tr, &profile, report.changed_outside)),
         Work::Restore { .. } => match restore {
             Some(Ok(req)) => archeion_engine::restore(&profile, pw, &req, &sink).map(|_| ()),
             Some(Err(e)) => return fail(&sink, &e),
@@ -369,6 +368,18 @@ fn warn_if_went_back(storage: &Storage, tr: &Tr, profile: &archeion_core::Profil
     let title = tr.t_args("alert-went-back-title", &[("name", crate::i18n::arg(profile.name.clone()))]);
     notify::toast(&title, &tr.t("alert-went-back-body"));
     crate::seen::record(storage.dir(), profile.id, newest.as_deref());
+}
+
+/// When the run found backups removed or put back at the encrypted
+/// destination from outside Archeion (the signed list did not match): a
+/// notification, whoever started it. The run itself went on.
+fn warn_if_changed_outside(tr: &Tr, profile: &archeion_core::Profile, changed: bool) {
+    if !changed {
+        return;
+    }
+    tracing::warn!("backups were removed or put back at the destination outside Archeion");
+    let title = tr.t_args("alert-changed-outside-title", &[("name", crate::i18n::arg(profile.name.clone()))]);
+    notify::toast(&title, &tr.t("alert-changed-outside-body"));
 }
 
 /// After an incremental backup that touched far more files than usual

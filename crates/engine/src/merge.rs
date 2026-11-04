@@ -158,7 +158,11 @@ fn run(
     };
     let archives = repo.archives()?;
     let steps = plan(&archives)?;
-    let mut report = MergeReport { archives_before: archives.len() as u64, ..MergeReport::default() };
+    let mut report = MergeReport {
+        archives_before: archives.len() as u64,
+        changed_outside: repo.changed_outside(),
+        ..MergeReport::default()
+    };
     let size_before = dir_size(repo.root());
 
     sink.emit(RunEvent::Phase { phase: Phase::Merging });

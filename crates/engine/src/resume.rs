@@ -73,18 +73,24 @@ pub(crate) struct Journal {
 
 impl Journal {
     /// Opens (or starts) the journal in `staging`. Lines that cannot be
-    /// read, such as one cut short by a power loss, are ignored.
+    /// read, such as one cut short by a power loss, are ignored. A journal
+    /// larger than the largest manifest ([`crate::repo::MAX_MANIFEST_BYTES`])
+    /// is not one Archeion wrote: it starts again, empty.
     pub(crate) fn open(staging: &Path, keys: Option<&Keys>) -> Result<Self> {
         let path = staging.join(FILE);
         let ctx = || format!("opening {}", path.display());
-        let mut file = File::options()
-            .create(true)
-            .read(true)
-            .append(true)
-            .open(&path)
-            .map_err(EngineError::io(ctx()))?;
+        let open = || File::options().create(true).read(true).append(true).open(&path);
+        let mut file = open().map_err(EngineError::io(ctx()))?;
+        let limit = crate::repo::MAX_MANIFEST_BYTES;
+        if file.metadata().map_err(EngineError::io(ctx()))?.len() > limit {
+            tracing::warn!(file = %path.display(), "a resume journal too large to be Archeion's: started again");
+            drop(file);
+            fs::remove_file(&path).map_err(EngineError::io(ctx()))?;
+            file = open().map_err(EngineError::io(ctx()))?;
+        }
         let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes).map_err(EngineError::io(ctx()))?;
+        // The limit again, should the file grow meanwhile.
+        (&mut file).take(limit).read_to_end(&mut bytes).map_err(EngineError::io(ctx()))?;
         // A torn write may leave invalid UTF-8: that line just fails to parse.
         let text = String::from_utf8_lossy(&bytes);
         let mut done = HashMap::new();

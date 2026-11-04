@@ -309,19 +309,19 @@ pub fn summary_text(tr: &Tr, op: Op, summary: &Summary) -> (String, bool) {
                     ("copied", arg(tr.bytes(r.bytes_copied))),
                 ],
             );
-            (with_resumed(tr, text, r), !r.skipped.is_empty())
+            (with_resumed(tr, text, r), !r.skipped.is_empty() || r.changed_outside)
         }
-        Summary::Merge(r) => (
-            tr.t_args(
+        Summary::Merge(r) => {
+            let text = tr.t_args(
                 if op == Op::Delete { "activity-delete-summary" } else { "activity-merge-summary" },
                 &[
                     ("before", arg(r.archives_before)),
                     ("after", arg(r.archives_after)),
                     ("freed", arg(tr.bytes(r.bytes_freed))),
                 ],
-            ),
-            false,
-        ),
+            );
+            (with_changed_outside(tr, text, r.changed_outside), r.changed_outside)
+        }
         Summary::Restore(r) => (
             tr.t_args(
                 "activity-restore-summary",
@@ -379,7 +379,13 @@ pub fn with_resumed(tr: &Tr, text: String, r: &BackupReport) -> String {
         let extra = tr.t_args("backup-efs-clear", &[("count", arg(r.files_efs_in_clear))]);
         text = format!("{text} · {extra}. {}", tr.t("backup-efs-clear-hint"));
     }
-    text
+    with_changed_outside(tr, text, r.changed_outside)
+}
+
+/// `text`, plus the warning that backups were removed or put back at the
+/// destination outside Archeion, when `changed` ([`BackupReport::changed_outside`]).
+pub fn with_changed_outside(tr: &Tr, text: String, changed: bool) -> String {
+    if changed { format!("{text} · {}", tr.t("run-changed-outside")) } else { text }
 }
 
 pub fn phase_text(tr: &Tr, p: Phase) -> String {
@@ -434,5 +440,19 @@ mod tests {
             "{text}"
         );
         assert_eq!(with_resumed(&tr, "Done".into(), &BackupReport::default()), "Done");
+    }
+
+    #[test]
+    fn the_summary_says_when_backups_were_changed_outside_and_asks_for_attention() {
+        let tr = Tr::new(archeion_core::settings::Language::English);
+        let backup = Summary::Backup(BackupReport { changed_outside: true, ..BackupReport::default() });
+        let (text, attention) = summary_text(&tr, Op::Backup, &backup);
+        assert!(text.contains("removed or put back") && attention, "{text}");
+        let merge =
+            Summary::Merge(archeion_core::MergeReport { changed_outside: true, ..Default::default() });
+        let (text, attention) = summary_text(&tr, Op::Delete, &merge);
+        assert!(text.contains("removed or put back") && attention, "{text}");
+        let (text, attention) = summary_text(&tr, Op::Merge, &Summary::Merge(Default::default()));
+        assert!(!text.contains("removed or put back") && !attention, "{text}");
     }
 }
