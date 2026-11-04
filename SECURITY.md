@@ -29,7 +29,10 @@ In short:
 
 ## Releases
 
-Each release on GitHub comes with `SHA256SUMS.txt` and a build provenance
-attestation: `gh attestation verify <zip> --repo MR1999develop/archeion`
-checks that the zip was built by this repository's workflow from the
-tagged commit.
+Each release on GitHub comes with `SHA256SUMS.txt`, a software bill of
+materials (`Archeion-<version>.cdx.json`, CycloneDX: every crate inside
+the executable, with its version) and build provenance attestations:
+`gh attestation verify <zip> --repo MR1999develop/archeion` checks that
+the zip was built by this repository's workflow from the tagged commit.
+The executable is signed with Authenticode when the release was built
+with a code-signing certificate (see the README).

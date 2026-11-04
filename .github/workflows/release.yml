@@ -70,6 +70,17 @@ jobs:
           Get-ChildItem dist/*.zip | ForEach-Object {
             "$((Get-FileHash -Algorithm SHA256 $_).Hash.ToLowerInvariant())  $($_.Name)"
           } | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+      - name: Software bill of materials (CycloneDX)
+        shell: pwsh
+        run: |
+          cargo install cargo-cyclonedx --version 0.5.9 --locked
+          cargo cyclonedx --manifest-path app/Cargo.toml --format json --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) { throw "SBOM failed" }
+          Copy-Item app/archeion.cdx.json "dist/Archeion-$env:GITHUB_REF_NAME.cdx.json"
+      - uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34 # v3
+        with:
+          subject-path: target/release/archeion.exe
+          sbom-path: dist/Archeion-${{ github.ref_name }}.cdx.json
       - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: |
@@ -80,4 +91,5 @@ jobs:
           files: |
             dist/*.zip
             dist/SHA256SUMS.txt
+            dist/*.cdx.json
           generate_release_notes: true

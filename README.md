@@ -126,6 +126,17 @@ tools\release.bat    optimised build, step by step on screen and in
                      tools\release.log (same options)
 ```
 
+To sign the executable with Authenticode, install a code-signing
+certificate in the user's certificate store (its key on a token or in a
+cloud service, never in a file) and set its thumbprint before
+`tools\release.bat`; the script finds `signtool.exe` in the Windows SDK,
+signs with a SHA-256 RFC 3161 time stamp and checks the signature:
+
+```
+$env:ARCHEION_SIGN_THUMBPRINT = '<40 hex digits>'
+$env:ARCHEION_SIGN_TIMESTAMP = 'http://timestamp.digicert.com'   # optional
+```
+
 The executable is `target\release\archeion.exe`.
 
 ## Development

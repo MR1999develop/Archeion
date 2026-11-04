@@ -8,7 +8,16 @@ trigger it. Remove an item when it is done or no longer applies.
 - **Publish on GitHub**: `tools\github_publish.bat` (needs the GitHub CLI signed in; creates the
   private repository `MR1999develop/archeion` and pushes). Then on GitHub:
   protect `main` (require the CI check before merging) if pull requests
-  are used.
+  are used; two-factor sign-in with a security key or passkey; Settings >
+  Code security: secret scanning with push protection, Dependabot alerts,
+  private vulnerability reporting; Settings > Rules: tags `v*` protected
+  and signed (`git config tag.gpgSign true` with an SSH signing key).
+- **Code-signing certificate**: `tools\release.ps1` signs when
+  `ARCHEION_SIGN_THUMBPRINT` names one; the GitHub release workflow does
+  not sign (the key would have to live in GitHub). Until then Windows
+  SmartScreen warns about the downloaded executable.
+- **The SBOM step of the release workflow** (cargo-cyclonedx 0.5.9) has
+  not run yet: check its output on the first tag.
 - **Try the git scripts on the PC** (written without a Windows shell to
   run them): `tools\git_status.bat`, then `tools\git_commit.bat` on
   `feature/automatic-backup`, `tools\github_publish.bat` (pushes `main`

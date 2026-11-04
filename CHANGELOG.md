@@ -32,6 +32,12 @@ All notable changes to Archeion are listed here. The format follows
   backup can no longer fill the disk before its content is found wrong.
 - `archeion extract` no longer takes `--password` or `--recovery-key`:
   secrets come from standard input (`--stdin`) or the environment only.
+- CI: the dependency check also runs every day; a check refuses hidden
+  bidirectional characters in the sources (`tools/bidi_check.py`, also in
+  `tools\check.bat`); Dependabot waits 3 days (7 for actions) before
+  proposing a new version. Releases add a CycloneDX software bill of
+  materials with its attestation; `toolselease.bat` signs the
+  executable with Authenticode when a certificate is named.
 - New passwords: at least 15 characters and at most 1024, without
   composition rules (common passwords, runs, the profile name and a weak
   estimate are still refused).
