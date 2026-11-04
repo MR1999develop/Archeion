@@ -8,7 +8,7 @@ edition = "2024"
 rust-version = "1.99"
 license = "GPL-3.0-only"
 authors = ["MR"]
-repository = "https://github.com/MR1999develop/archeion"
+repository = "https://github.com/MR1999develop/Archeion"
 
 [workspace.dependencies]
 archeion_core = { path = "crates/core" }

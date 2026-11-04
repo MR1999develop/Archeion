@@ -1,5 +1,5 @@
 @echo off
-rem Creates the private GitHub repository MR1999develop/archeion (or links it
+rem Creates the private GitHub repository MR1999develop/Archeion (or links it
 rem if it exists) and pushes main, the current branch and the tags. Needs
 rem tools\git_init.bat first, and the GitHub CLI (https://cli.github.com)
 rem signed in once with "gh auth login" unless origin is already set.

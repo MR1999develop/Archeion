@@ -15,7 +15,7 @@ use Block::{Cli, Text};
 
 /// Opens the guide.
 pub const DOCUMENTATION: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F1);
-const REPOSITORY: &str = "https://github.com/MR1999develop/archeion";
+const REPOSITORY: &str = "https://github.com/MR1999develop/Archeion";
 const DOCS_ID: &str = "help-docs";
 const ABOUT_ID: &str = "help-about";
 const ABOUT_WIDTH: f32 = 420.0;

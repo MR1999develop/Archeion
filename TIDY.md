@@ -5,11 +5,11 @@ trigger it. Remove an item when it is done or no longer applies.
 
 ## Before the first release
 
-- **Publish on GitHub**: `tools\github_publish.bat`. With `origin` already
-  set (as now) it only pushes, with the repository's own fine-grained
-  token kept by Git Credential Manager (`credential.useHttpPath` in
-  `.git/config`); without `origin` it needs the GitHub CLI signed in to
-  create the private repository `MR1999develop/archeion`. Then on GitHub:
+- **Finish the GitHub setup**: `main` was published on 4 November with
+  `tools\github_publish.bat` (with `origin` set it only pushes, using the
+  repository's own fine-grained token kept by Git Credential Manager,
+  `credential.useHttpPath` in `.git/config`). Still to do: see the first
+  CI run green in Actions, then on GitHub:
   protect `main` (require the CI check before merging) if pull requests
   are used; two-factor sign-in with a security key or passkey; Settings >
   Code security: secret scanning with push protection, Dependabot alerts,
@@ -31,7 +31,8 @@ trigger it. Remove an item when it is done or no longer applies.
   stopped on a syntax error, now fixed and caught by
   `tools\script_check.ps1`; mistakes the parser cannot see (a wrong
   command, an unhandled exit code) show only by running them. The path
-  "origin points elsewhere" was tried on a copy; a real push has not run.
+  "origin points elsewhere" was tried on a copy, and the first real push
+  of `main` worked; the push of another branch and of tags has not run.
 - **Commands typed in a terminal print nothing** (3 November): the
   executable is a windows-subsystem program, so `archeion extract` run by
   hand in `cmd` or PowerShell does not show its output (it does through a

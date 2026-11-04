@@ -22,10 +22,12 @@ far cancellare il membro più recente, caso segnalato dalla scheda OSTEP)
 e della correzione di `tools\github_publish.ps1` (`fix/publish-script-parse`:
 errore di sintassi alla riga 69, `$Repo:`; nuovo passo 6/6 di
 `tools\check.bat` e della CI, `tools\script_check.ps1`, che analizza
-tutti gli script PowerShell senza eseguirli); `tools\check.bat` verde.
-Non ancora inviato su GitHub: `origin` e la credenziale per repository
-(`credential.https://github.com.useHttpPath`) sono impostati, il push lo
-lancia l'utente con `tools\github_publish.bat`.
+tutti gli script PowerShell senza eseguirli) e del nome esatto del
+repository (`chore/repository-name`: `MR1999develop/Archeion` con la
+maiuscola, come su GitHub, in `origin`, `Cargo.toml`, README, SECURITY,
+CHANGELOG, finestra Aiuto e script); `tools\check.bat` verde.
+Su GitHub (4 novembre) c'è `main` fino a `2a7f96b`; il commit del nome
+esatto parte con il prossimo push, che lancia l'utente.
 
 ## Lavoro in corso
 
@@ -38,6 +40,9 @@ lancia l'utente con `tools\github_publish.bat`.
   apertura che porta avanti la finestra, profilo importato con la
   pianificazione in pausa, avviso sulle unità FAT32/exFAT.
 - Misurare su un disco USB lento il costo del flush per file (TIDY).
+- GitHub: vedere verde la prima esecuzione della CI, poi le impostazioni
+  del repository (regole per `main` e per i tag `v*`, sicurezza del
+  codice) e, per ultimo, il cambio di visibilità (TIDY).
 - Il workflow di rilascio (due job, passaggio dei file come artefatto,
   controllo che il tag sia su `main`, attestazioni) non è ancora stato
   eseguito su GitHub.
@@ -61,7 +66,8 @@ lancia l'utente con `tools\github_publish.bat`.
   l'altro progetto: Git Credential Manager lo tiene per l'URL del
   repository (`useHttpPath` in `.git/config`), `gh` resta con il token
   dell'altro progetto e non si usa per Archeion; con `origin` impostato
-  `tools\github_publish.bat` non chiama `gh`.
+  `tools\github_publish.bat` non chiama `gh`. Il repository si chiama
+  `Archeion` con la maiuscola: ogni riferimento usa quel nome esatto.
 - Il recupero non cancella mai l'unica copia (OSTEP): un `.old` si toglie
   solo se l'archivio al suo posto si legge; un archivio illeggibile va in
   `<archivio>.damaged`, che Archeion non cancella mai (il controllo lo
