@@ -70,6 +70,21 @@ impl fmt::Display for ArchiveName {
     }
 }
 
+/// Written as its name. Reading one parses the name, so a file that lists
+/// archives (the merge journal) can name nothing but archive folders.
+impl serde::Serialize for ArchiveName {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.collect_str(self)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ArchiveName {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        text.parse().map_err(serde::de::Error::custom)
+    }
+}
+
 /// The text is not an archive name.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("not an archive name")]
@@ -136,6 +151,16 @@ mod tests {
             "2026-1a-29_213005_C",
         ] {
             assert!(s.parse::<ArchiveName>().is_err(), "{s}");
+        }
+    }
+
+    #[test]
+    fn json_holds_only_archive_names() {
+        let n: ArchiveName = "2026-10-29_213005_C".parse().unwrap();
+        assert_eq!(serde_json::to_string(&n).unwrap(), r#""2026-10-29_213005_C""#);
+        assert_eq!(serde_json::from_str::<ArchiveName>(r#""2026-10-29_213005_C""#).unwrap(), n);
+        for s in [r#""C:\\Users\\me\\Documents""#, r#""..\\..\\x""#, r#""2026-10-29_213005_C\\..""#] {
+            assert!(serde_json::from_str::<ArchiveName>(s).is_err(), "{s}");
         }
     }
 

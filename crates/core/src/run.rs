@@ -226,6 +226,10 @@ pub struct BackupReport {
     /// destination that is not encrypted.
     #[serde(default)]
     pub files_efs_in_clear: u64,
+    /// The encrypted destination held another list of backups than the one
+    /// Archeion signed: backups were removed or put back from outside.
+    #[serde(default)]
+    pub changed_outside: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -234,6 +238,9 @@ pub struct MergeReport {
     pub archives_before: u64,
     pub archives_after: u64,
     pub bytes_freed: u64,
+    /// As [`BackupReport::changed_outside`].
+    #[serde(default)]
+    pub changed_outside: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

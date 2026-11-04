@@ -7,10 +7,17 @@ Aggiornato alla fine di ogni blocco di lavoro (vedi `CLAUDE.md`).
 `main` con i rami della revisione di sicurezza (`fix/security-review-2`:
 cartelle di rete da confermare, ripristino limitato alla dimensione,
 regole delle password), della catena di fornitura (`chore/supply-chain-2`:
-controllo giornaliero, SBOM, firma facoltativa) e dei test di proprietà
+controllo giornaliero, SBOM, firma facoltativa), dei test di proprietà
 (`test/property-parsers`: proptest sui lettori di manifest, chiavi, righe
 del worker, esclusioni tipizzate, esadecimale e note sigillate, file di
-profilo); `tools\check.bat` verde. Non ancora inviato su GitHub.
+profilo) e della terza revisione di sicurezza (`fix/security-review-3`,
+4 novembre: giornale delle unioni solo con nomi di archivio, firma
+dell'elenco controllata a ogni apertura, percorsi di rete in ogni grafia,
+collegamenti e junction non seguiti, file piccoli limitati a 1 MiB,
+password lasciata da un profilo eliminato, confronti a tempo costante,
+release in due job; test in `crates/engine/tests/hostile.rs` e in
+`app/tests/cli.rs`); `tools\check.bat` verde. Non ancora inviato su
+GitHub.
 
 ## Lavoro in corso
 
@@ -23,11 +30,28 @@ profilo); `tools\check.bat` verde. Non ancora inviato su GitHub.
   apertura che porta avanti la finestra, profilo importato con la
   pianificazione in pausa, avviso sulle unità FAT32/exFAT.
 - Misurare su un disco USB lento il costo del flush per file (TIDY).
-- Il workflow di rilascio con azioni fissate per commit e l'attestazione
-  non è ancora stato eseguito su GitHub.
+- Il workflow di rilascio (due job, passaggio dei file come artefatto,
+  controllo che il tag sia su `main`, attestazioni) non è ancora stato
+  eseguito su GitHub.
+- Misurare su un NAS il costo del controllo del percorso reale dei file
+  letti dai backup in chiaro (TIDY).
 
 ## Decisioni
 
+- Destinazione non fidata anche per dove si legge e si scrive sul PC (4
+  novembre): il giornale delle unioni contiene solo `ArchiveName` (serde
+  in `archeion_core::archive`), la ripresa tocca solo cartelle
+  `<archivio>.old/.merging/.deleting`, le chiavi si aprono prima della
+  ripresa. Collegamenti e junction: un backup interrotto che ne contiene
+  non si riprende; i file in chiaro si leggono solo se il loro percorso
+  reale (`archeion_win::real_path`) è dentro la destinazione. La firma
+  dell'elenco si controlla a ogni apertura: backup, unione ed eliminazione
+  avvisano (`changed_outside` nei rapporti, notifica e nota nel
+  riepilogo), poi firmano l'elenco trovato; la ripresa non rifirma un
+  elenco che non corrisponde.
+- Un percorso di un profilo importato è locale solo se è su un'unità di
+  questo PC (`X:\…`, `\\?\X:\…`); ogni altra grafia chiede conferma
+  (`archeion_core::profile::remote_part`).
 - Licenza `GPL-3.0-only`, copyright e autori `MR`. Cronologia riscritta
   (2 novembre) senza nome, email né percorsi locali, e di nuovo il 4
   novembre prima della pubblicazione: gli esempi di rete e la cartella di

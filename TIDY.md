@@ -16,8 +16,11 @@ trigger it. Remove an item when it is done or no longer applies.
   `ARCHEION_SIGN_THUMBPRINT` names one; the GitHub release workflow does
   not sign (the key would have to live in GitHub). Until then Windows
   SmartScreen warns about the downloaded executable.
-- **The SBOM step of the release workflow** (cargo-cyclonedx 0.5.9) has
-  not run yet: check its output on the first tag.
+- **The release workflow has not run yet**: two jobs (build with a
+  read-only token, publish with the release and attestation rights)
+  handing the files over as an artifact, the check that the tag is on
+  `main`, and the SBOM step (cargo-cyclonedx 0.5.9). Check all of it on
+  the first tag.
 - **Try the git scripts on the PC** (written without a Windows shell to
   run them): `tools\git_status.bat`, then `tools\git_commit.bat` on
   `feature/automatic-backup`, `tools\github_publish.bat` (pushes `main`
@@ -84,8 +87,9 @@ trigger it. Remove an item when it is done or no longer applies.
 - **Argon2id cost** is fixed at 64 MiB / 3 passes; measure on slow PCs and
   make it adaptive if unlocking takes more than a second.
 - **Deleting a profile keeps its saved password** in Credential Manager
-  while Undo is offered; it is removed when the Undo bar is closed with ✕,
-  but not when the window is closed with the bar still showing.
+  while Undo is offered; it is removed when the Undo bar is closed with ✕
+  or the window closes. If Archeion is ended abruptly meanwhile it stays
+  (harmless: importing a profile with that id forgets it).
 - **Deleting a later complete backup** is refused; the user must merge it.
   Allow it by merging it with the next archive if that is ever asked for.
 - **Skipped files in a complete backup** keep pointing to the older
@@ -362,3 +366,18 @@ trigger it. Remove an item when it is done or no longer applies.
   the doctored-destination fuzz in `deep.rs`, not by properties of their
   own.
 
+## Security review 3 (added 04/11)
+
+- **Backups changed outside are notified by backups, merges and
+  deletions**; a restore says nothing, a check reports it among its
+  problems. Notifying from the check too would need the check's report to
+  carry it apart from damage.
+- **A false "changed outside"** after an interrupted merge on exFAT or a
+  share whose journal was lost (see the threat model). Rare; a journal
+  sealed with the keys, written beside the signature, would tell.
+- **The real-path check of plain files** costs one
+  `GetFinalPathNameByHandleW` per file read from a plain backup (and the
+  canonical destination once per backup read). Measure a merge of many
+  small files on a NAS.
+- **Chunk files are linked without that check** during a merge (only a
+  file whose name is a 64-digit hex hash could be reached).

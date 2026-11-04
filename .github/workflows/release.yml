@@ -1,9 +1,15 @@
 # Pushing a tag vX.Y.Z builds archeion.exe and publishes a GitHub release
-# with the portable zip, its SHA-256 and a build provenance attestation.
-# The tag must match the version in Cargo.toml. As tools\release.ps1, the
+# with the portable zip, its SHA-256, a software bill of materials and
+# build provenance attestations. The tag must match the version in
+# Cargo.toml and point at a commit of main. As tools\release.ps1, the
 # build rewrites the runner's folders in the paths the compiler embeds and
 # checks that none is left in the executable. Actions are pinned to a
 # commit (the tag in the comment).
+#
+# Two jobs: `build` runs the code (tests, build scripts of every
+# dependency, cargo-cyclonedx) with a read-only token and no way to sign;
+# `publish` runs no code of the project or of crates.io, and alone may
+# write the release and request the signing token for the attestations.
 name: Release
 
 on:
@@ -17,20 +23,19 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  release:
+  build:
     runs-on: windows-latest
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: 1.99.1
-      - name: Check that the tag matches the version
+      - name: Check that the tag matches the version and is on main
         shell: pwsh
         run: |
           $meta = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
@@ -38,6 +43,8 @@ jobs:
           if ("v$version" -ne $env:GITHUB_REF_NAME) {
             throw "Tag $env:GITHUB_REF_NAME does not match version $version in Cargo.toml"
           }
+          git merge-base --is-ancestor $env:GITHUB_SHA origin/main
+          if ($LASTEXITCODE -ne 0) { throw "Tag $env:GITHUB_REF_NAME is not a commit of main" }
       - name: Tests
         run: cargo test --workspace --locked
       - name: Build
@@ -70,6 +77,9 @@ jobs:
           Get-ChildItem dist/*.zip | ForEach-Object {
             "$((Get-FileHash -Algorithm SHA256 $_).Hash.ToLowerInvariant())  $($_.Name)"
           } | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+          Remove-Item -Recurse $dir
+          New-Item -ItemType Directory -Force dist/exe | Out-Null
+          Copy-Item target/release/archeion.exe dist/exe/
       - name: Software bill of materials (CycloneDX)
         shell: pwsh
         run: |
@@ -77,15 +87,34 @@ jobs:
           cargo cyclonedx --manifest-path app/Cargo.toml --format json --target x86_64-pc-windows-msvc
           if ($LASTEXITCODE -ne 0) { throw "SBOM failed" }
           Copy-Item app/archeion.cdx.json "dist/Archeion-$env:GITHUB_REF_NAME.cdx.json"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: release
+          path: dist/
       - uses: actions/attest-sbom@4651f806c01d8637787e274ac3bdf724ef169f34 # v3
         with:
-          subject-path: target/release/archeion.exe
+          subject-path: dist/exe/archeion.exe
           sbom-path: dist/Archeion-${{ github.ref_name }}.cdx.json
       - uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
         with:
           subject-path: |
             dist/*.zip
-            target/release/archeion.exe
+            dist/exe/archeion.exe
       - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3
         with:
           files: |

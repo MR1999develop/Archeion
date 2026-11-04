@@ -354,7 +354,12 @@ impl ArcheionApp {
         let file = || arg(path.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned()));
         match profile_file::import(&path) {
             Ok(profile) => {
-                let id = profile_file::add(&mut self.settings, profile);
+                let held: Vec<ProfileId> = self.removed.iter().map(|p| p.id).collect();
+                let id = profile_file::add(&mut self.settings, profile, &held);
+                // No profile here had this id: a password saved for it was
+                // left by a profile deleted before (the window closed
+                // abruptly), and must not open the backups the file names.
+                forget_password(id);
                 self.selected = Some(id);
                 self.tab = Tab::Settings;
                 self.restore.invalidate();
@@ -1594,8 +1599,9 @@ fn show_window(ctx: &egui::Context) {
 /// Status line for a finished run and whether it needs attention.
 fn outcome_text(tr: &Tr, name: &str, op: Op, o: &Outcome) -> (String, bool) {
     match o {
-        Outcome::Finished(Summary::Merge(_)) if op == Op::Delete => {
-            (tr.t_args("delete-finished", &[("name", arg(name.to_owned()))]), false)
+        Outcome::Finished(Summary::Merge(r)) if op == Op::Delete => {
+            let text = tr.t_args("delete-finished", &[("name", arg(name.to_owned()))]);
+            (super::activity::with_changed_outside(tr, text, r.changed_outside), r.changed_outside)
         }
         Outcome::Finished(Summary::Backup(r)) => {
             let text = tr.t_args(
@@ -1610,14 +1616,14 @@ fn outcome_text(tr: &Tr, name: &str, op: Op, o: &Outcome) -> (String, bool) {
             );
             let text = super::activity::with_resumed(tr, text, r);
             if r.skipped.is_empty() {
-                (text, false)
+                (text, r.changed_outside)
             } else {
                 let extra = tr.t_args("skipped-count", &[("count", arg(r.skipped.len()))]);
                 (format!("{text} · {extra}"), true)
             }
         }
-        Outcome::Finished(Summary::Merge(r)) => (
-            tr.t_args(
+        Outcome::Finished(Summary::Merge(r)) => {
+            let text = tr.t_args(
                 "merge-finished",
                 &[
                     ("name", arg(name.to_owned())),
@@ -1625,9 +1631,9 @@ fn outcome_text(tr: &Tr, name: &str, op: Op, o: &Outcome) -> (String, bool) {
                     ("after", arg(r.archives_after)),
                     ("freed", arg(tr.bytes(r.bytes_freed))),
                 ],
-            ),
-            false,
-        ),
+            );
+            (super::activity::with_changed_outside(tr, text, r.changed_outside), r.changed_outside)
+        }
         Outcome::Finished(Summary::Restore(r)) => {
             (tr.t_args("restore-finished", &[("count", arg(r.files_restored))]), !r.skipped.is_empty())
         }

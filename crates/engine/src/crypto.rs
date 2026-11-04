@@ -208,7 +208,13 @@ impl Keys {
         let split = bytes.len().checked_sub(NOTE_TAG)?;
         let tag = bytes.split_off(split);
         self.note_keystream(id, &mut bytes);
-        (self.note_tag(id, &bytes).as_slice() == tag.as_slice()).then(|| String::from_utf8(bytes).ok())?
+        same_secret(&self.note_tag(id, &bytes), &tag).then(|| String::from_utf8(bytes).ok())?
+    }
+
+    /// True when `saved`, one line of the list's signature file, is the
+    /// signature of `archives` (compared in constant time).
+    pub(crate) fn list_signed_as(&self, archives: &[ArchiveName], saved: &str) -> bool {
+        same_secret(self.list_mac(archives).as_bytes(), saved.trim().as_bytes())
     }
 
     fn note_keystream(&self, id: &str, bytes: &mut [u8]) {
@@ -248,9 +254,7 @@ impl Keys {
     /// # Errors
     /// [`EngineError::WrongPassword`] when it does not open the key file.
     pub(crate) fn unlock(root: &Path, password: &Password) -> Result<Self> {
-        let path = root.join(KEY_FILE);
-        let text =
-            std::fs::read_to_string(&path).map_err(EngineError::io(format!("reading {}", path.display())))?;
+        let text = crate::repo::read_small(&root.join(KEY_FILE))?;
         let damaged =
             |message: &str| EngineError::Damaged { archive: KEY_FILE.to_owned(), message: message.into() };
         let file: KeyFile = serde_json::from_str(&text).map_err(|e| damaged(&e.to_string()))?;
@@ -312,6 +316,12 @@ fn random(buf: &mut [u8]) -> Result<()> {
         context: "generating a random key".into(),
         source: std::io::Error::other(e.to_string()),
     })
+}
+
+/// `a == b` in a time that depends on their lengths only, not on where they
+/// differ: for authentication tags and signatures.
+fn same_secret(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && std::hint::black_box(a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y))) == 0
 }
 
 pub(crate) fn to_hex(bytes: &[u8]) -> String {
@@ -519,6 +529,21 @@ mod tests {
     fn debug_hides_the_password() {
         assert!(!format!("{:?}", pw("hunter2")).contains("hunter2"));
         assert_eq!(Password::new(String::new()), None);
+    }
+
+    #[test]
+    fn secrets_compare_whole() {
+        assert!(same_secret(b"abcd", b"abcd"));
+        assert!(same_secret(b"", b""));
+        assert!(!same_secret(b"abcd", b"abce"), "the last byte");
+        assert!(!same_secret(b"abcd", b"bbcd"), "the first byte");
+        assert!(!same_secret(b"abcd", b"abc"), "a prefix");
+        let keys = Keys::from_master([7; 32]);
+        let list: Vec<ArchiveName> = vec!["2026-10-29_213000_C".parse().unwrap()];
+        let mac = keys.list_mac(&list);
+        assert!(keys.list_signed_as(&list, &format!(" {mac} ")), "around spaces");
+        assert!(!keys.list_signed_as(&list, &mac[..63]));
+        assert!(!keys.list_signed_as(&[], &mac));
     }
 
     mod properties {

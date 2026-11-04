@@ -61,13 +61,17 @@ impl EncryptionInfo {
 }
 
 /// The swap of a merge, written before any archive is moved.
+///
+/// Read from the destination, which others may write to: its names are
+/// archive names or the journal does not read, so recovering a merge can
+/// only ever rename and remove archive folders of the destination.
 #[derive(Serialize, Deserialize)]
 struct Journal {
     /// [`JOURNAL_FORMAT`]; journals of earlier versions have none.
     #[serde(default)]
     format: u32,
-    target: String,
-    members: Vec<String>,
+    target: ArchiveName,
+    members: Vec<ArchiveName>,
 }
 
 /// Format of [`Journal`]: a newer one is left alone.
@@ -80,6 +84,9 @@ pub(crate) struct Repo {
     _lock: File,
     /// Set for an encrypted destination.
     keys: Option<Keys>,
+    /// Whether the list of backups matched its signature once opened
+    /// (encrypted destinations).
+    list_signed: Option<bool>,
 }
 
 /// The profile that owns the destination of `profile`, as its descriptor
@@ -367,8 +374,17 @@ impl Repo {
             Err(TryLockError::WouldBlock) => return Err(EngineError::Busy),
             Err(TryLockError::Error(e)) => return Err(EngineError::io("locking the destination")(e)),
         }
-        let mut repo = Self { root, _lock: lock, keys: None };
-        let recovered = repo.recover()?;
+        let mut repo = Self { root, _lock: lock, keys: None, list_signed: None };
+        let encryption = descriptor.as_ref().and_then(|d| d.encryption.clone());
+        // The keys before anything is recovered: whether an interrupted
+        // merge finished shows in its sealed manifest, and a plain manifest
+        // put in an encrypted destination must not count. Without them (no
+        // password: a destination about to be made plain again) nothing is
+        // recovered.
+        if let (Some(info), Some(_)) = (&encryption, password) {
+            repo.keys = info.unlock(&repo.root, password).ok();
+        }
+        let recovered = if encryption.is_some() && repo.keys.is_none() { false } else { repo.recover()? };
 
         let empty = archives_in(&repo.root)?.is_empty();
         // Backups of an encrypted profile are never written in the clear: a
@@ -386,14 +402,31 @@ impl Repo {
             // An unfinished backup made with the old setting cannot be resumed.
             repo.remove_partials(None)?;
             repo.keys = repo.write_descriptor(profile, profile.encrypted && empty, password)?;
-        } else if let Some(info) = descriptor.and_then(|d| d.encryption) {
-            repo.keys = Some(info.unlock(&repo.root, password)?);
-            if recovered {
-                // An interrupted merge was completed: the list changed legitimately.
+        } else if let Some(info) = encryption {
+            if repo.keys.is_none() {
+                repo.keys = Some(info.unlock(&repo.root, password)?);
+            }
+            repo.list_signed = repo.list_matches()?;
+            if recovered && repo.list_signed == Some(true) {
+                // A merge or a deletion completed or undone, as signed before
+                // it began: the signature becomes one line again. A list that
+                // matches no signed line keeps the old signature, so the
+                // check still sees it.
                 repo.refresh_list_mac()?;
+            }
+            if repo.list_signed == Some(false) {
+                tracing::warn!("the list of backups does not match its signature");
             }
         }
         Ok(Some(repo))
+    }
+
+    /// True when, once opened, the destination held another list of backups
+    /// than the one Archeion signed: backups removed or put back from
+    /// outside. The run goes on (and signs the new list); the caller tells
+    /// the user.
+    pub(crate) fn changed_outside(&self) -> bool {
+        self.list_signed == Some(false)
     }
 
     /// Signs the current list of archives (encrypted destinations), so a
@@ -429,9 +462,9 @@ impl Repo {
     pub(crate) fn list_matches(&self) -> Result<Option<bool>> {
         let Some(keys) = &self.keys else { return Ok(None) };
         let archives = self.archives()?;
-        let saved = fs::read_to_string(self.root.join(LIST_MAC_FILE)).unwrap_or_default();
-        let mac = keys.list_mac(&archives);
-        Ok(Some(archives.is_empty() && saved.trim().is_empty() || saved.lines().any(|l| l.trim() == mac)))
+        let saved = read_small_io(&self.root.join(LIST_MAC_FILE)).unwrap_or_default();
+        let signed = saved.lines().any(|l| keys.list_signed_as(&archives, l));
+        Ok(Some(archives.is_empty() && saved.trim().is_empty() || signed))
     }
 
     /// Re-wraps the master key with a new password.
@@ -524,7 +557,7 @@ impl Repo {
         let mut list: Vec<ArchiveName> = fs::read_dir(&self.root)
             .map_err(EngineError::io("listing the destination"))?
             .flatten()
-            .filter(|e| e.path().is_dir())
+            .filter(is_real_dir)
             .filter_map(|e| {
                 let name = e.file_name().to_str()?.to_owned();
                 name.strip_suffix(&suffix)?.parse().ok()
@@ -544,10 +577,18 @@ impl Repo {
 
     /// The unfinished backup that the next backup can resume: the newest
     /// one started after the newest archive. The others are removed (an
-    /// older one would sort before archives made since).
+    /// older one would sort before archives made since). One holding a
+    /// link (symbolic link, junction) is not resumed: Archeion never makes
+    /// one, and writing through it could reach any folder of the computer.
     pub(crate) fn take_partial(&self, archives: &[ArchiveName]) -> Result<Option<ArchiveName>> {
         let latest = archives.last().map(|a| a.time);
-        let keep = self.partials()?.into_iter().rev().find(|p| latest.is_none_or(|t| p.time > t));
+        let mut keep = self.partials()?.into_iter().rev().find(|p| latest.is_none_or(|t| p.time > t));
+        if let Some(p) = keep
+            && holds_links(&self.partial_dir(&p))
+        {
+            tracing::warn!(archive = %p, "an unfinished backup holds links: not resumed");
+            keep = None;
+        }
         self.remove_partials(keep)?;
         Ok(keep)
     }
@@ -602,11 +643,7 @@ impl Repo {
         target: &ArchiveName,
         members: &[ArchiveName],
     ) -> Result<()> {
-        let journal = Journal {
-            format: JOURNAL_FORMAT,
-            target: target.to_string(),
-            members: members.iter().map(ToString::to_string).collect(),
-        };
+        let journal = Journal { format: JOURNAL_FORMAT, target: *target, members: members.to_vec() };
         let mut future: Vec<ArchiveName> =
             self.archives()?.into_iter().filter(|a| !members.contains(a)).collect();
         future.push(*target);
@@ -629,7 +666,7 @@ impl Repo {
     /// what is left.
     fn finish_merge(&self, staging: &Path, journal: &Journal) -> Result<()> {
         for m in &journal.members {
-            let dir = self.root.join(m);
+            let dir = self.dir(m);
             let old = self.root.join(format!("{m}.{OLD}"));
             // With `name.old` there, `name` is the merged archive (it takes
             // the name of the newest member) or the move was done already.
@@ -638,7 +675,7 @@ impl Repo {
                     .map_err(EngineError::io(format!("moving {}", dir.display())))?;
             }
         }
-        let target = self.root.join(&journal.target);
+        let target = self.dir(&journal.target);
         if staging.exists() && !target.exists() {
             retry(|| archeion_win::rename_durably(staging, &target))
                 .map_err(EngineError::io(format!("committing {}", target.display())))?;
@@ -666,15 +703,14 @@ impl Repo {
     /// True when the merged archive of `journal` is in place and its
     /// manifest reads.
     fn merged_in_place(&self, journal: &Journal) -> bool {
-        let Ok(name) = journal.target.parse::<ArchiveName>() else { return false };
-        let dir = self.root.join(&journal.target);
-        dir.is_dir() && read_manifest(&dir, &name, self.keys()).is_ok()
+        let dir = self.dir(&journal.target);
+        dir.is_dir() && read_manifest(&dir, &journal.target, self.keys()).is_ok()
     }
 
     /// `name.old` becomes `name` again, when there is no `name`.
-    fn put_back(&self, name: &str) -> Result<()> {
+    fn put_back(&self, name: &ArchiveName) -> Result<()> {
         let old = self.root.join(format!("{name}.{OLD}"));
-        let dir = self.root.join(name);
+        let dir = self.dir(name);
         if old.is_dir() && !dir.exists() {
             retry(|| archeion_win::rename_durably(&old, &dir))
                 .map_err(EngineError::io(format!("putting back {}", dir.display())))?;
@@ -695,11 +731,13 @@ impl Repo {
     /// Nothing is removed that may be the only copy: an `.old` member whose
     /// archive is not in place gets its name back, whatever the journal
     /// says (on exFAT or a share the journal itself may have been lost).
+    /// Only folders named after an archive are touched: `<archive>.old`,
+    /// `.merging`, `.deleting`; anything else in the folder is not Archeion's.
     fn recover(&self) -> Result<bool> {
         let jpath = self.root.join(JOURNAL);
         let mut changed = jpath.exists();
         if changed {
-            let text = fs::read_to_string(&jpath).map_err(EngineError::io("reading the merge journal"))?;
+            let text = read_small(&jpath)?;
             match serde_json::from_str::<Journal>(&text) {
                 Ok(journal) if journal.format > JOURNAL_FORMAT => {
                     return Err(EngineError::Damaged {
@@ -720,36 +758,39 @@ impl Repo {
                 }
             }
         }
-        let folders: Vec<String> = fs::read_dir(&self.root)
+        // (folder name, archive, suffix) of every `<archive>.<suffix>` folder.
+        let leftovers: Vec<(String, ArchiveName, &str)> = fs::read_dir(&self.root)
             .map_err(EngineError::io("listing the destination"))?
             .flatten()
-            .filter(|e| e.path().is_dir())
-            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(is_real_dir)
+            .filter_map(|e| {
+                let name = e.file_name().to_str()?.to_owned();
+                let (stem, suffix) = name.rsplit_once('.')?;
+                let suffix = [MERGING, DELETING, OLD].into_iter().find(|s| *s == suffix)?;
+                Some((name.clone(), stem.parse().ok()?, suffix))
+            })
             .collect();
         // A member moved aside whose archive is not back: its name again.
-        for name in &folders {
-            if let Some(member) = name.strip_suffix(&format!(".{OLD}"))
-                && !self.root.join(member).exists()
-            {
+        for (_, member, suffix) in &leftovers {
+            if *suffix == OLD && !self.dir(member).exists() {
                 tracing::warn!(
-                    archive = member,
+                    archive = %member,
                     "putting back an archive left aside by an interrupted merge"
                 );
                 self.put_back(member)?;
                 changed = true;
             }
         }
-        for name in &folders {
+        for (name, _, suffix) in &leftovers {
             let path = self.root.join(name);
             // With the journal handled above, an `.old` folder still there
             // has its archive in place: a leftover.
-            let abandoned = [MERGING, DELETING, OLD].iter().any(|s| name.ends_with(&format!(".{s}")));
-            if abandoned && path.is_dir() {
+            if path.is_dir() {
                 tracing::info!(folder = %name, "removing an interrupted run");
                 // Still in use: tried again next time; the run goes on.
                 remove_dir_best_effort(&path);
                 // An interrupted deletion had already removed an archive.
-                changed |= name.ends_with(&format!(".{DELETING}"));
+                changed |= *suffix == DELETING;
             }
         }
         Ok(changed)
@@ -802,7 +843,7 @@ pub(crate) enum Purpose {
 
 fn read_descriptor(root: &Path) -> Result<Option<Descriptor>> {
     let path = root.join(DESCRIPTOR);
-    match fs::read_to_string(&path) {
+    match read_small_io(&path) {
         Ok(text) => serde_json::from_str(&text)
             .map(Some)
             .map_err(|e| EngineError::Damaged { archive: DESCRIPTOR.to_owned(), message: e.to_string() }),
@@ -836,11 +877,27 @@ pub(crate) fn holds_sealed_archives(root: &Path) -> Result<bool> {
     Ok(archives_in(root)?.iter().any(|a| root.join(a.to_string()).join(MANIFEST_ZIP).exists()))
 }
 
+/// A folder itself, not a link to one: a symbolic link or junction in a
+/// destination was not made by Archeion, and following it could reach
+/// any folder of the computer.
+fn is_real_dir(entry: &fs::DirEntry) -> bool {
+    entry.file_type().is_ok_and(|t| t.is_dir())
+}
+
+/// True when `dir` holds a symbolic link or a junction anywhere below it
+/// (one that cannot be listed counts as one).
+pub(crate) fn holds_links(dir: &Path) -> bool {
+    walkdir::WalkDir::new(dir).into_iter().any(|e| match e {
+        Ok(e) => e.path_is_symlink(),
+        Err(_) => true,
+    })
+}
+
 pub(crate) fn archives_in(root: &Path) -> Result<Vec<ArchiveName>> {
     let mut list: Vec<ArchiveName> = fs::read_dir(root)
         .map_err(EngineError::io(format!("listing {}", root.display())))?
         .flatten()
-        .filter(|e| e.path().is_dir())
+        .filter(is_real_dir)
         .filter_map(|e| e.file_name().to_str().and_then(|n| n.parse().ok()))
         .collect();
     list.sort_unstable();
@@ -883,6 +940,28 @@ fn read_limited(path: &Path) -> Result<Vec<u8>> {
         return Err(EngineError::io(ctx())(std::io::Error::other("the manifest is too large")));
     }
     Ok(bytes)
+}
+
+/// Largest small file of a destination read: the descriptor, the key file,
+/// the signature of the list and the merge journal are a few kilobytes.
+const MAX_SMALL_BYTES: u64 = 1024 * 1024;
+
+/// The text of `path`, a small file of the destination: refused (as
+/// `InvalidData`) beyond [`MAX_SMALL_BYTES`] or when it is not UTF-8, so a
+/// huge file put there cannot fill the memory.
+pub(crate) fn read_small_io(path: &Path) -> std::io::Result<String> {
+    use std::io::Read as _;
+    let mut bytes = Vec::new();
+    File::open(path)?.take(MAX_SMALL_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_SMALL_BYTES {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "the file is too large"));
+    }
+    String::from_utf8(bytes).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))
+}
+
+/// [`read_small_io`] with the file named in the error.
+pub(crate) fn read_small(path: &Path) -> Result<String> {
+    read_small_io(path).map_err(EngineError::io(format!("reading {}", path.display())))
 }
 
 /// Writes `manifest.jsonl`, or the encrypted `manifest.zip` with `keys`.

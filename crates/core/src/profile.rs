@@ -241,22 +241,16 @@ impl Profile {
         !self.schedule_paused && (self.schedule.is_automatic() || self.events.any())
     }
 
-    /// The computers this profile's folders are on, for shares (`\\server\x`
-    /// gives `server`), each once, in the order met: destination, then sources.
+    /// The computers this profile's folders may be on, each once, in the
+    /// order met (destination, then sources): every folder that is not on a
+    /// drive of this computer (see [`remote_part`]). Empty when all are.
     #[must_use]
     pub fn network_hosts(&self) -> Vec<String> {
         let mut hosts: Vec<String> = Vec::new();
         let paths = std::iter::once(self.destination.path()).chain(self.sources.iter().map(PathBuf::as_path));
-        for p in paths {
-            let text = p.to_string_lossy();
-            let unc = text.strip_prefix(r"\\?\UNC\").or_else(|| text.strip_prefix(r"\\"));
-            if let Some(rest) = unc
-                && !rest.starts_with(r"?\")
-                && !rest.starts_with(r".\")
-                && let Some(host) = rest.split(['\\', '/']).next().filter(|h| !h.is_empty())
-                && !hosts.iter().any(|h| h.eq_ignore_ascii_case(host))
-            {
-                hosts.push(host.to_owned());
+        for host in paths.filter_map(remote_part) {
+            if !hosts.iter().any(|h| h.eq_ignore_ascii_case(&host)) {
+                hosts.push(host);
             }
         }
         hosts
@@ -297,9 +291,64 @@ pub fn path_within(path: &Path, base: &Path) -> bool {
     !base.is_empty() && path.len() >= base.len() && path.iter().zip(&base).all(|(a, b)| a == b)
 }
 
+/// Where Windows may go to another computer to reach `path`: `None` only
+/// for a folder of this one (a drive letter, `\\?\C:\…`, `\\.\C:\…`, a
+/// relative path); otherwise the computer to name: `server` for
+/// `\\server\x`, `//server/x`, `\\?\UNC\server\x`, `\\.\UNC\…` or
+/// `\??\UNC\…`, and the whole path for any other device path
+/// (`\\?\GLOBALROOT\…`, `\\?\Volume{…}\…`), which may lead anywhere.
+/// Windows reads `/` as `\`, and so does this.
+#[must_use]
+pub fn remote_part(path: &Path) -> Option<String> {
+    let text = path.to_string_lossy().replace('/', "\\");
+    let is_drive = |rest: &str| {
+        let b = rest.as_bytes();
+        b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b.len() == 2 || b[2] == b'\\')
+    };
+    let device = [r"\\?\", r"\\.\", r"\??\"].into_iter().find_map(|p| text.strip_prefix(p));
+    let rest = match device {
+        Some(rest) if is_drive(rest) => return None,
+        Some(rest) => match rest.get(..4) {
+            Some(unc) if unc.eq_ignore_ascii_case(r"UNC\") => rest.get(4..).unwrap_or_default(),
+            _ => return Some(text),
+        },
+        None => text.strip_prefix(r"\\")?,
+    };
+    match rest.split('\\').next() {
+        Some(host) if !host.is_empty() => Some(host.to_owned()),
+        _ => Some(text),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Every spelling Windows takes for a folder on another computer needs
+    /// the user's confirmation; folders on this computer's drives do not.
+    #[test]
+    fn any_way_to_another_computer_is_found() {
+        let remote = |p: &str| remote_part(Path::new(p));
+        for (path, host) in [
+            (r"\\server\share\x", "server"),
+            (r"//server/share/x", "server"),
+            (r"\/server\share", "server"),
+            (r"\\?\UNC\server\share", "server"),
+            (r"\\?\unc\server\share", "server"),
+            (r"\\.\UNC\server\share", "server"),
+            (r"\??\UNC\server\share", "server"),
+            (r"//?/UNC/server/share", "server"),
+        ] {
+            assert_eq!(remote(path).as_deref(), Some(host), "{path}");
+        }
+        for path in [r"\\?\GLOBALROOT\Device\Mup\server\share", r"\\?\Volume{0000}\x", r"\\.\pipe\x", r"\\\x"]
+        {
+            assert_eq!(remote(path).as_deref(), Some(path.replace('/', "\\").as_str()), "{path}");
+        }
+        for path in [r"C:\Users\me", r"\\?\C:\long", r"\\.\D:\x", r"\\?\E:", "relative", r"\rooted", "E:"] {
+            assert_eq!(remote(path), None, "{path}");
+        }
+    }
 
     #[test]
     fn the_computers_of_network_folders_are_listed_once() {

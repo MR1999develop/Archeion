@@ -410,3 +410,26 @@ fn extract_takes_no_secret_on_the_command_line() {
         assert!(!s.root.join("out").join("C").exists(), "nothing restored with {flag}");
     }
 }
+
+/// A merge journal put at the destination by someone else, naming a folder
+/// of the computer: the next scheduled backup runs as usual and leaves that
+/// folder alone (it used to rename it and then delete it for good).
+#[test]
+fn a_planted_merge_journal_cannot_reach_the_users_folders() {
+    let s = sandbox(Container::Folder, false);
+    backup(&s, None);
+    let newest = archives(&s, None).remove(0);
+    let victim = s.root.join("Documents");
+    write(&victim.join("thesis.docx"), b"the only copy");
+    let journal = serde_json::json!({
+        "format": 1,
+        "target": newest,
+        "members": [victim.display().to_string()],
+    });
+    fs::write(s.profile.destination.path().join("merge.journal"), journal.to_string()).unwrap();
+    let id = s.profile.id.to_string();
+    ok(&archeion(&s, &["run", &id, "--scheduled"], None));
+    assert_eq!(fs::read(victim.join("thesis.docx")).unwrap(), b"the only copy");
+    assert!(!s.root.join("Documents.old").exists());
+    assert!(!s.profile.destination.path().join("merge.journal").exists(), "the journal is done with");
+}

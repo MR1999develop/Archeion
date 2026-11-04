@@ -23,6 +23,40 @@ All notable changes to Archeion are listed here. The format follows
 
 ### Security
 
+- A merge journal put at the destination by someone else can no longer
+  make the next run rename and delete a folder of the computer: the
+  journal names archives only, or it is not read. Recovering an
+  interrupted run touches only folders named after an archive
+  (`<archive>.old`, `.merging`, `.deleting`), so a folder of the user's
+  own in the destination (`Holidays.old`) stays. An encrypted destination
+  is unlocked before it is recovered, so a plain manifest put there no
+  longer counts.
+- Backups removed or put back at an encrypted destination from outside
+  Archeion are noticed by the next backup, merge or deletion too, not only
+  by a check that runs before them: a notification, and a note in the
+  summary. A leftover folder no longer makes the run sign the list it
+  found.
+- An imported profile's folder spelled `//server/share`, `\\.\UNC\…`,
+  `\??\UNC\…` or as another device path (`\\?\GLOBALROOT\…`) waits for the
+  user's confirmation like `\\server\share`: only folders on a drive of
+  this computer do not.
+- Links and junctions put in a destination are not followed: an
+  unfinished backup holding one is not resumed (writing through it could
+  overwrite the files being backed up), a merge reads a plain file only
+  when it really lies inside the destination, and folders that are links
+  are not taken for backups.
+- The small files of a destination (description, key, signature, merge
+  journal) are read up to 1 MiB, and a resume journal larger than the
+  largest manifest starts again: a huge file put there cannot fill the
+  memory.
+- Importing a profile forgets a password saved for its id by a profile
+  deleted before, and does not take the id of a profile just deleted
+  whose Undo is still offered.
+- Signatures and authentication tags are compared in constant time.
+- Release workflow: the build (tests, dependencies' build scripts,
+  cargo-cyclonedx) runs in a job of its own with a read-only token; a
+  second job, which runs no project or crates.io code, writes the release
+  and signs the attestations. The tag must be a commit of `main`.
 - An imported profile whose folders are on other computers (a share as
   destination or source) contacts none of them until the user confirms
   the computers named in its settings ("Use these network folders"):
