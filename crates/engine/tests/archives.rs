@@ -11,6 +11,8 @@ use archeion_engine::{
 };
 use std::{fs, path::PathBuf, sync::Mutex, thread::sleep, time::Duration};
 
+mod common;
+
 #[derive(Default)]
 struct Recorder(Mutex<Vec<RunEvent>>);
 
@@ -22,6 +24,8 @@ impl EventSink for Recorder {
 
 struct Fixture {
     _dir: tempfile::TempDir,
+    /// The backups' folder when it is elsewhere (`ARCHEION_TEST_DEST`).
+    _elsewhere: Option<tempfile::TempDir>,
     source: PathBuf,
     restore_to: PathBuf,
     profile: Profile,
@@ -38,11 +42,12 @@ fn fixture(container: Container) -> Fixture {
     let mut profile = Profile::new("Test");
     profile.sources.push(source.clone());
     profile.excludes.push(archeion_core::Exclusion::extension("tmp").unwrap());
-    profile.destination = Destination::Local { path: dir.path().join("backups") };
+    let (backups, elsewhere) = common::backups_folder(dir.path().join("backups"));
+    profile.destination = Destination::Local { path: backups };
     profile.container = container;
     profile.merge.rules = Retention::KEEP_ALL;
     let restore_to = dir.path().join("restored");
-    Fixture { _dir: dir, source, restore_to, profile }
+    Fixture { _dir: dir, _elsewhere: elsewhere, source, restore_to, profile }
 }
 
 fn run_backup(p: &Profile) -> archeion_core::BackupReport {
@@ -456,17 +461,33 @@ fn recycled(dir: &std::path::Path, name: &str) -> bool {
     })
 }
 
+/// The answer of `trash_destination` where the backups are; `None` after
+/// checking that nothing moved, when that drive has no Recycle Bin (a
+/// network share given by `ARCHEION_TEST_DEST`).
+fn trashed_or_refused(f: &Fixture) -> Option<archeion_engine::DestinationTrashed> {
+    let before = list_archives(&f.profile, None).unwrap().len();
+    match archeion_engine::trash_destination(&f.profile) {
+        Ok(done) => Some(done),
+        Err(EngineError::NoRecycleBin(_)) if common::elsewhere() => {
+            assert_eq!(list_archives(&f.profile, None).unwrap().len(), before, "nothing moved");
+            None
+        }
+        Err(e) => panic!("{e}"),
+    }
+}
+
 #[test]
 fn trashing_the_backups_moves_the_whole_folder_to_the_recycle_bin() {
     let f = fixture(Container::ZipPerFile);
-    let _clean = RecycledUnder(f._dir.path().to_path_buf());
-    run_backup(&f.profile);
-    run_backup(&f.profile);
     let root = f.profile.destination.path().to_path_buf();
-    let done = archeion_engine::trash_destination(&f.profile).unwrap();
+    let parent = root.parent().unwrap().to_path_buf();
+    let _clean = RecycledUnder(parent.clone());
+    run_backup(&f.profile);
+    run_backup(&f.profile);
+    let Some(done) = trashed_or_refused(&f) else { return };
     assert_eq!(done, archeion_engine::DestinationTrashed { folder_trashed: true, left: Vec::new() });
     assert!(!root.exists());
-    assert!(recycled(f._dir.path(), "backups"), "the folder is in the Recycle Bin");
+    assert!(recycled(&parent, "backups"), "the folder is in the Recycle Bin");
     let probes = trash::os_limited::list().unwrap();
     assert!(
         !probes.iter().any(|i| i.name.to_string_lossy().starts_with("archeion.recycle-probe")),
@@ -478,13 +499,13 @@ fn trashing_the_backups_moves_the_whole_folder_to_the_recycle_bin() {
 #[test]
 fn trashing_the_backups_leaves_other_files_and_their_folder() {
     let f = fixture(Container::Folder);
-    let _clean = RecycledUnder(f._dir.path().to_path_buf());
-    run_backup(&f.profile);
     let root = f.profile.destination.path().to_path_buf();
+    let _clean = RecycledUnder(root.parent().unwrap().to_path_buf());
+    run_backup(&f.profile);
     let archive = list_archives(&f.profile, None).unwrap().remove(0).name;
     fs::write(root.join("notes.txt"), "mine").unwrap();
     fs::create_dir(root.join("Photos")).unwrap();
-    let done = archeion_engine::trash_destination(&f.profile).unwrap();
+    let Some(done) = trashed_or_refused(&f) else { return };
     assert!(!done.folder_trashed);
     assert_eq!(done.left, vec!["Photos".to_owned(), "notes.txt".to_owned()]);
     let mut names: Vec<String> =

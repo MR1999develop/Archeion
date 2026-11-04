@@ -29,6 +29,8 @@ const EXIT_PASSWORD: i32 = 4;
 
 struct Sandbox {
     _dir: tempfile::TempDir,
+    /// The backups' folder when it is elsewhere (`ARCHEION_TEST_DEST`).
+    _elsewhere: Option<tempfile::TempDir>,
     root: PathBuf,
     data: PathBuf,
     source: PathBuf,
@@ -50,7 +52,8 @@ fn sandbox(container: Container, encrypted: bool) -> Sandbox {
 
     let mut profile = Profile::new("End to end");
     profile.sources.push(source.clone());
-    profile.destination = Destination::Local { path: root.join("backups") };
+    let (backups, elsewhere) = backups_folder(root.join("backups"));
+    profile.destination = Destination::Local { path: backups };
     profile.container = container;
     profile.encrypted = encrypted;
     profile.large_files.threshold_mb = 1;
@@ -59,7 +62,23 @@ fn sandbox(container: Container, encrypted: bool) -> Sandbox {
     fs::create_dir_all(&data).unwrap();
     let settings = Settings { profiles: vec![profile.clone()], ..Settings::default() };
     fs::write(data.join("settings.toml"), toml::to_string_pretty(&settings).unwrap()).unwrap();
-    Sandbox { _dir: dir, root, data, source, profile }
+    Sandbox { _dir: dir, _elsewhere: elsewhere, root, data, source, profile }
+}
+
+/// Where a test keeps its backups: `local`, or a new folder below
+/// `ARCHEION_TEST_DEST` when it is set, to run the tests against another
+/// drive or a network share. The guard removes that folder at the end.
+fn backups_folder(local: PathBuf) -> (PathBuf, Option<tempfile::TempDir>) {
+    match std::env::var_os("ARCHEION_TEST_DEST").filter(|d| !d.is_empty()) {
+        Some(root) => {
+            let dir = tempfile::Builder::new()
+                .prefix("archeion-test-")
+                .tempdir_in(&root)
+                .unwrap_or_else(|e| panic!("a folder in ARCHEION_TEST_DEST {}: {e}", root.to_string_lossy()));
+            (dir.path().join("backups"), Some(dir))
+        }
+        None => (local, None),
+    }
 }
 
 fn write(path: &Path, bytes: &[u8]) {
