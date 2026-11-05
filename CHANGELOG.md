@@ -12,7 +12,8 @@ All notable changes to Archeion are listed here. The format follows
   portable one, or two versions) opened two windows, which then fought
   over the daily check task and the start with Windows. There is now one
   window per Windows user: starting another copy brings the open window
-  forward and says which copy is open and how to close it.
+  forward and says which copy is open and how to close it. A window of
+  0.2.0, which keeps its lock in the data folder, is found too.
 
 ## [0.2.0] - 2026-11-05
 

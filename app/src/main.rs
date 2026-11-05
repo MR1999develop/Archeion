@@ -178,7 +178,10 @@ fn main() -> ExitCode {
         Some(Command::Extract(args)) => extract::run(args),
         None => {
             let outside = std::env::var_os(storage::DATA_DIR_VAR).is_some_and(|d| !d.is_empty());
-            let claimed = instance::user_dir(storage.dir(), outside).and_then(|dir| instance::claim(&dir));
+            // The user's lock, and the data folder's, where versions up to
+            // 0.2 keep theirs: a window of any version is found.
+            let claimed = instance::user_dir(storage.dir(), outside)
+                .and_then(|user| instance::claim(&[user, storage.dir().to_path_buf()]));
             let primary = match claimed {
                 Ok(instance::Claim::Primary(p)) => Some(p),
                 Ok(instance::Claim::Secondary { other }) => {

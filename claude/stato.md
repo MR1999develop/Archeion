@@ -110,9 +110,10 @@ prossimo push, che lancia l'utente.
   ora" non è offerto; riaccenderla è come stringere le regole.
 - Una finestra per utente Windows, qualunque copia si avvii (5 novembre):
   `window.lock` e `window.port` stanno in `%LOCALAPPDATA%\Archeion`
-  (`instance::user_dir`), non nella cartella dati che una copia portatile
-  tiene accanto a sé; con `ARCHEION_DATA_DIR` restano nella cartella di
-  prova. Una seconda copia diversa porta avanti la finestra e lo dice con
+  (`instance::user_dir`) e anche nella cartella dati, dove li cercano le
+  versioni fino alla 0.2 (provato con gli eseguibili veri: 0.2.0 e nuova in
+  entrambi gli ordini, una sola finestra); con `ARCHEION_DATA_DIR` restano
+  nella cartella di prova. Una seconda copia diversa porta avanti la finestra e lo dice con
   un messaggio (percorso della copia aperta, File > Esci).
 - La finestra riceve l'Utilità di pianificazione come dipendenza
   (`Tasks`, trait `archeion_scheduler::Scheduler` con `apply_watch`): i
