@@ -19,11 +19,11 @@ trigger it. Remove an item when it is done or no longer applies.
   `ARCHEION_SIGN_THUMBPRINT` names one; the GitHub release workflow does
   not sign (the key would have to live in GitHub). Until then Windows
   SmartScreen warns about the downloaded executable.
-- **The release workflow has not run yet**: two jobs (build with a
-  read-only token, publish with the release and attestation rights)
-  handing the files over as an artifact, the check that the tag is on
-  `main`, and the SBOM step (cargo-cyclonedx 0.5.9). Check all of it on
-  the first tag.
+- **The attestations of the releases are not verified yet**: v0.2.0 was
+  published by the workflow (5 November: zip, SHA256SUMS, SBOM), and the
+  zip downloaded from GitHub matches its checksum and runs; `gh
+  attestation verify` (see `SECURITY.md`) needs the GitHub CLI signed in
+  with a token that sees Archeion.
 - **Try the git scripts on the PC** (written without a Windows shell to
   run them): `tools\git_status.bat`, `tools\git_commit.bat`,
   `tools\github_publish.bat`, `tools\git_push.bat -PullRequest`; read the
