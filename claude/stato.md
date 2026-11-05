@@ -49,11 +49,7 @@ prossimo push, che lancia l'utente.
 
 ## Lavoro in corso
 
-- Release 0.2.0 (5 novembre), la prima pubblicata: versione e CHANGELOG
-  su `main`, tag `v0.2.0` locale, eseguibile costruito con
-  `tools\release.bat`. Su GitHub parte quando l'utente invia `main` e il
-  tag (`tools\github_publish.bat`): il workflow di rilascio, mai eseguito
-  finora, costruisce il pacchetto e crea la release.
+- Nessuno.
 
 ## Punti aperti
 
@@ -62,12 +58,11 @@ prossimo push, che lancia l'utente.
   apertura che porta avanti la finestra, profilo importato con la
   pianificazione in pausa, avviso sulle unità FAT32/exFAT.
 - Misurare su un disco USB lento il costo del flush per file (TIDY).
-- GitHub: vedere verde la prima esecuzione della CI, poi le impostazioni
-  del repository (regole per `main` e per i tag `v*`, sicurezza del
-  codice) e, per ultimo, il cambio di visibilità (TIDY).
-- Il workflow di rilascio (due job, passaggio dei file come artefatto,
-  controllo che il tag sia su `main`, attestazioni) non è ancora stato
-  eseguito su GitHub.
+- Release 0.2.0 pubblicata su GitHub il 5 novembre dal workflow (Release
+  #1 e CI #7 verdi; repository pubblico): zip portatile, SHA256SUMS, SBOM.
+  Lo zip scaricato corrisponde all'impronta, parte ed è senza percorsi
+  locali. Non firmato (manca il certificato); attestazioni da verificare
+  con `gh attestation verify` (TIDY).
 - Misurare su un NAS il costo del controllo del percorso reale dei file
   letti dai backup in chiaro (TIDY).
 
