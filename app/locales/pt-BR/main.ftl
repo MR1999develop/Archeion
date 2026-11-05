@@ -518,6 +518,11 @@ language = Idioma
 language-system = Idioma do sistema
 language-tray-restart = O menu do ícone da área de notificação muda de idioma na próxima vez que o Archeion for iniciado.
 quit-hint = Fecha o Archeion; os backups agendados continuam sendo executados pelo Agendador de Tarefas do Windows.
+already-open-title = O Archeion já está aberto
+already-open-other =
+    O Archeion já está aberto a partir de outra cópia: { $path }
+
+    A janela dela foi trazida para a frente. Para usar esta cópia, feche aquela com Arquivo > Sair e inicie esta novamente.
 tray-open = Abrir o Archeion
 tray-quit = Sair
 tray-running = operação em andamento

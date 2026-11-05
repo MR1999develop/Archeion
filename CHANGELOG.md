@@ -6,6 +6,14 @@ All notable changes to Archeion are listed here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- Two copies of Archeion in different folders (an installed one and a
+  portable one, or two versions) opened two windows, which then fought
+  over the daily check task and the start with Windows. There is now one
+  window per Windows user: starting another copy brings the open window
+  forward and says which copy is open and how to close it.
+
 ## [0.2.0] - 2026-11-05
 
 First published release.

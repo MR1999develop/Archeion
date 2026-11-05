@@ -108,6 +108,12 @@ prossimo push, che lancia l'utente.
   automatica si può spegnere (`merge.enabled`, acceso per i profili
   esistenti): spenta non unisce nulla, nemmeno `engine::merge`, e "Unisci
   ora" non è offerto; riaccenderla è come stringere le regole.
+- Una finestra per utente Windows, qualunque copia si avvii (5 novembre):
+  `window.lock` e `window.port` stanno in `%LOCALAPPDATA%\Archeion`
+  (`instance::user_dir`), non nella cartella dati che una copia portatile
+  tiene accanto a sé; con `ARCHEION_DATA_DIR` restano nella cartella di
+  prova. Una seconda copia diversa porta avanti la finestra e lo dice con
+  un messaggio (percorso della copia aperta, File > Esci).
 - La finestra riceve l'Utilità di pianificazione come dipendenza
   (`Tasks`, trait `archeion_scheduler::Scheduler` con `apply_watch`): i
   test della finestra usano un registratore e non toccano mai le attività

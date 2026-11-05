@@ -500,6 +500,11 @@ language = 语言
 language-system = 系统语言
 language-tray-restart = 通知区域图标的菜单将在下次启动 Archeion 时更改语言。
 quit-hint = 关闭 Archeion；计划的备份仍会通过 Windows 任务计划程序运行。
+already-open-title = Archeion 已经打开
+already-open-other =
+    Archeion 已从另一个副本打开：{ $path }
+
+    已将其窗口置于前台。要改用此副本，请先通过“文件 > 退出”关闭那个副本，然后重新启动此副本。
 tray-open = 打开 Archeion
 tray-quit = 退出
 tray-running = 操作进行中
