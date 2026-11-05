@@ -189,7 +189,7 @@ fn screens() {
             // Tighter rules than the ones confirmed: the merge waits.
             {
                 let merge = &mut h.state_mut().settings.profiles[0].merge;
-                merge.approved = Some(merge.rules);
+                merge.approved = Some(archeion_core::ConfirmedMerge { enabled: true, rules: merge.rules });
                 merge.rules = archeion_core::Retention {
                     keep_within_days: 0,
                     keep_last: 1,
@@ -205,6 +205,13 @@ fn screens() {
                 n.scroll_to_me();
             }
             shot(&mut h, &out, &name("11b-merge-waits"));
+            // The automatic merge turned off.
+            {
+                let merge = &mut h.state_mut().settings.profiles[0].merge;
+                merge.restore_approved();
+                merge.enabled = false;
+            }
+            shot(&mut h, &out, &name("11c-merge-off"));
             // The exclusions, open, with a typed rule refused.
             if let Some(n) = h.query_all_by(|n| n.label().as_deref() == Some(merge.as_str())).last() {
                 n.click();

@@ -57,58 +57,94 @@ pub enum Container {
 /// ignored when read.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MergePolicy {
+    /// The automatic merge runs. Off, every backup stays until the user
+    /// merges or deletes it by hand. On unless the user turns it off.
+    #[serde(default = "yes")]
+    pub enabled: bool,
     /// Which archives survive.
     #[serde(default)]
     pub rules: Retention,
     /// A merged backup keeps the files deleted at the source between the
     /// backups it fuses, with their last content, instead of dropping
     /// them. On unless the user turns it off.
-    #[serde(default = "keep_deleted_default")]
+    #[serde(default = "yes")]
     pub keep_deleted: bool,
-    /// The rules last confirmed, while new ones would merge backups those
-    /// kept: the automatic merge waits for the user ([`Self::set_rules`]).
-    /// `None`: the current rules are confirmed.
+    /// The merge last confirmed, while the current one would merge backups
+    /// that one kept: the automatic merge waits for the user
+    /// ([`Self::set_rules`], [`Self::set_enabled`]). `None`: the current
+    /// merge is confirmed.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub approved: Option<Retention>,
+    pub approved: Option<ConfirmedMerge>,
 }
 
-fn keep_deleted_default() -> bool {
+/// A merge the user confirmed: on or off, and its rules.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConfirmedMerge {
+    /// Rules confirmed before the switch existed were on.
+    #[serde(default = "yes")]
+    pub enabled: bool,
+    #[serde(flatten)]
+    pub rules: Retention,
+}
+
+fn yes() -> bool {
     true
 }
 
 impl Default for MergePolicy {
     fn default() -> Self {
-        Self { rules: Retention::default(), keep_deleted: true, approved: None }
+        Self { enabled: true, rules: Retention::default(), keep_deleted: true, approved: None }
     }
 }
 
 impl MergePolicy {
+    /// The merge as it is now, to remember as confirmed.
+    fn current(&self) -> ConfirmedMerge {
+        ConfirmedMerge { enabled: self.enabled, rules: self.rules }
+    }
+
     /// New rules chosen by the user, for the backups `archives` (oldest
     /// first) at local time `now`. When they would merge backups that the
-    /// rules confirmed so far keep, those rules are remembered and the
-    /// automatic merge waits for [`Self::confirm`]; otherwise the new rules
-    /// are confirmed at once. With `archives` unknown (the destination not
+    /// merge confirmed so far keeps, that merge is remembered and the
+    /// automatic merge waits for [`Self::confirm`]; otherwise the change is
+    /// confirmed at once. With `archives` unknown (the destination not
     /// read yet) nothing is confirmed.
     pub fn set_rules(&mut self, rules: Retention, archives: Option<&[ArchiveName]>, now: DateTime) {
-        if rules == self.rules {
-            return;
+        if rules != self.rules {
+            self.approved.get_or_insert(self.current());
+            self.rules = rules;
+            self.settle(archives, now);
         }
-        self.approved.get_or_insert(self.rules);
-        self.rules = rules;
+    }
+
+    /// The automatic merge turned on or off, as [`Self::set_rules`]:
+    /// turning it off never waits, turning it on waits when its rules would
+    /// merge backups.
+    pub fn set_enabled(&mut self, enabled: bool, archives: Option<&[ArchiveName]>, now: DateTime) {
+        if enabled != self.enabled {
+            self.approved.get_or_insert(self.current());
+            self.enabled = enabled;
+            self.settle(archives, now);
+        }
+    }
+
+    /// Confirms the change at once when it holds nothing back.
+    fn settle(&mut self, archives: Option<&[ArchiveName]>, now: DateTime) {
         if archives.is_some_and(|a| !crate::merge_plan::preview(a, self, now).waits()) {
             self.approved = None;
         }
     }
 
-    /// The user accepts what the current rules merge.
+    /// The user accepts what the current merge does.
     pub fn confirm(&mut self) {
         self.approved = None;
     }
 
-    /// Back to the rules last confirmed.
+    /// Back to the merge last confirmed (rules, and on or off).
     pub fn restore_approved(&mut self) {
-        if let Some(rules) = self.approved.take() {
-            self.rules = rules;
+        if let Some(c) = self.approved.take() {
+            self.enabled = c.enabled;
+            self.rules = c.rules;
         }
     }
 }

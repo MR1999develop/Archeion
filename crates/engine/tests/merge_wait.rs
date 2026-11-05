@@ -54,3 +54,27 @@ fn tighter_rules_merge_only_once_confirmed() {
     assert_eq!(archive_names(&profile).unwrap().len(), 3);
     assert!(!merge_pending(&profile).unwrap());
 }
+
+/// Turned off, the merge keeps every backup, whatever the rules.
+#[test]
+fn a_merge_turned_off_keeps_every_backup() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("src");
+    fs::create_dir_all(&source).unwrap();
+    let mut profile = Profile::new("Off");
+    profile.sources.push(source.clone());
+    profile.destination = Destination::Local { path: dir.path().join("backups") };
+    profile.container = Container::Folder;
+    profile.merge.rules = keep_last(1);
+    profile.merge.enabled = false;
+    for i in 0..3 {
+        fs::write(source.join("a.txt"), format!("version {i}")).unwrap();
+        backup(&profile, None, BackupMode::Auto, &Quiet).unwrap();
+        sleep(Duration::from_millis(1100));
+    }
+    assert!(!merge_pending(&profile).unwrap());
+    merge(&profile, None, &Quiet).unwrap();
+    assert_eq!(archive_names(&profile).unwrap().len(), 3, "every backup stays");
+    profile.merge.enabled = true;
+    assert!(merge_pending(&profile).unwrap(), "on: the rules apply");
+}

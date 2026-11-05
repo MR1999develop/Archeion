@@ -54,16 +54,17 @@ pub struct Job {
 }
 
 impl Job {
-    /// Starts the worker process for `profile`, with `extra` arguments; it
-    /// writes its log to `log`.
+    /// Starts the worker `exe` (this program, in the window) for `profile`,
+    /// with `extra` arguments; it writes its log to `log`.
     pub fn start(
         ctx: &eframe::egui::Context,
+        exe: &std::path::Path,
         profile: ProfileId,
         op: Op,
         extra: Vec<OsString>,
         log: PathBuf,
     ) -> std::io::Result<Self> {
-        let mut cmd = Command::new(std::env::current_exe()?);
+        let mut cmd = Command::new(exe);
         cmd.args([op.command(), &profile.to_string()])
             .args(extra)
             .arg("--log")

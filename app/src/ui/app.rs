@@ -118,6 +118,9 @@ pub struct ArcheionApp {
     tasks: Tasks,
     /// The list of profiles: a rename in progress.
     profile_list: ProfileList,
+    /// The program started as worker; `None`: this one. The tests name
+    /// another, so that they never start themselves.
+    worker_exe: Option<std::path::PathBuf>,
     /// When the window took a size not saved yet: it is saved once the
     /// resizing stops.
     resized_at: Option<Instant>,
@@ -231,6 +234,7 @@ impl ArcheionApp {
             backup_import: BackupImport::default(),
             tasks: Tasks(Box::new(WindowsTaskScheduler)),
             profile_list: ProfileList::default(),
+            worker_exe: None,
             fitted: false,
         }
     }
@@ -471,6 +475,10 @@ impl ArcheionApp {
                 self.start_with(ctx, id, Op::Backup, vec!["--kind".into(), "complete".into()])
             }
             RunChoice::Merge => {
+                // Off, there is nothing to merge by the rules.
+                if self.settings.profile(id).is_some_and(|p| !p.merge.enabled) {
+                    return;
+                }
                 // Merging by hand accepts what the rules merge.
                 if let Some(p) = self.settings.profile_mut(id)
                     && p.merge.approved.is_some()
@@ -480,6 +488,14 @@ impl ArcheionApp {
                 }
                 self.start(ctx, id, Op::Merge);
             }
+        }
+    }
+
+    /// The program to start as worker.
+    fn worker(&self) -> std::io::Result<std::path::PathBuf> {
+        match &self.worker_exe {
+            Some(exe) => Ok(exe.clone()),
+            None => std::env::current_exe(),
         }
     }
 
@@ -505,7 +521,7 @@ impl ArcheionApp {
             return;
         }
         let log = crate::history::new_log_path(self.storage.dir(), op, id);
-        match Job::start(ctx, id, op, extra, log) {
+        match self.worker().and_then(|exe| Job::start(ctx, &exe, id, op, extra, log)) {
             Ok(job) => {
                 self.job = Some(job);
                 if show {
@@ -822,9 +838,15 @@ impl ArcheionApp {
                     if let Some(s) = shortcut {
                         button = button.shortcut_text(s);
                     }
+                    let merge_off = choice == RunChoice::Merge
+                        && self
+                            .selected
+                            .and_then(|id| self.settings.profile(id))
+                            .is_some_and(|p| !p.merge.enabled);
+                    let why = if merge_off { "merge-off-run-hint" } else { "fix-profile-hint" };
                     if ui
-                        .add_enabled(can, button)
-                        .on_disabled_hover_text(self.tr.t("fix-profile-hint"))
+                        .add_enabled(can && !merge_off, button)
+                        .on_disabled_hover_text(self.tr.t(why))
                         .clicked()
                         && let Some(id) = self.selected
                     {
@@ -1066,7 +1088,8 @@ impl ArcheionApp {
             return;
         }
         let log = crate::history::new_log_path(self.storage.dir(), Op::Restore, id);
-        match Job::start(ctx, id, Op::Restore, vec!["--request".into(), path.into_os_string()], log) {
+        let extra = vec!["--request".into(), path.into_os_string()];
+        match self.worker().and_then(|exe| Job::start(ctx, &exe, id, Op::Restore, extra, log)) {
             Ok(job) => {
                 self.job = Some(job);
                 self.tab = Tab::Activity;
