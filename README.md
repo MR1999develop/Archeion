@@ -77,7 +77,10 @@ progress; Cancel kills the process. Exit codes: 0 success, 1 failure, 2 destinat
 missing, 3 busy, 4 password missing or wrong, 5 not enough free space.
 
 Settings: `%APPDATA%\Archeion\config\settings.toml` (or `data\` next to the
-executable when a `portable.txt` file is there). They are the source of
+executable when a `portable.txt` file is there). One window per Windows
+user, whichever copy is started: its lock and port are in
+`%LOCALAPPDATA%\Archeion`, and starting another copy brings the open
+window forward and says which copy it is. They are the source of
 truth; the copy each backup keeps at its destination is read only by
 File > Import profile from backups…, to bring a profile back on another
 computer (the password, never in either, is asked for).

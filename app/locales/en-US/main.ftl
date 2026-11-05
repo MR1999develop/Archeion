@@ -518,6 +518,11 @@ language = Language
 language-system = System language
 language-tray-restart = The menu of the notification-area icon changes language the next time Archeion starts.
 quit-hint = Close Archeion; scheduled backups still run from Windows Task Scheduler.
+already-open-title = Archeion is already open
+already-open-other =
+    Archeion is already open from another copy: { $path }
+
+    Its window has been brought forward. To use this copy instead, close that one with File > Quit, then start this one again.
 tray-open = Open Archeion
 tray-quit = Quit
 tray-running = operation in progress

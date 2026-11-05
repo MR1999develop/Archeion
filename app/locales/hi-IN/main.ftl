@@ -515,6 +515,11 @@ language = भाषा
 language-system = सिस्टम की भाषा
 language-tray-restart = सूचना क्षेत्र के आइकन के मेनू की भाषा अगली बार Archeion शुरू होने पर बदलेगी।
 quit-hint = Archeion बंद करें; शेड्यूल किए गए बैकअप फिर भी Windows कार्य शेड्यूलर से चलते हैं।
+already-open-title = Archeion पहले से खुला है
+already-open-other =
+    Archeion किसी दूसरी कॉपी से पहले से खुला है: { $path }
+
+    उसकी विंडो सामने लाई गई है। इस कॉपी का उपयोग करने के लिए, उसे फ़ाइल > बाहर निकलें से बंद करें, फिर इसे दोबारा शुरू करें।
 tray-open = Archeion खोलें
 tray-quit = बाहर निकलें
 tray-running = कार्रवाई जारी है

@@ -500,6 +500,11 @@ language = 言語
 language-system = システムの言語
 language-tray-restart = 通知領域のアイコンのメニューは、次回 Archeion を起動したときに言語が切り替わります。
 quit-hint = Archeion を終了します。スケジュールされたバックアップは引き続き Windows タスク スケジューラから実行されます。
+already-open-title = Archeion はすでに開いています
+already-open-other =
+    Archeion は別のコピーからすでに開いています: { $path }
+
+    そのウィンドウを前面に表示しました。このコピーを使うには、[ファイル] > [終了] でそちらを閉じてから、もう一度このコピーを起動してください。
 tray-open = Archeion を開く
 tray-quit = 終了
 tray-running = 操作を実行中

@@ -177,10 +177,15 @@ fn main() -> ExitCode {
         }
         Some(Command::Extract(args)) => extract::run(args),
         None => {
-            let primary = match instance::claim(storage.dir()) {
+            let outside = std::env::var_os(storage::DATA_DIR_VAR).is_some_and(|d| !d.is_empty());
+            let claimed = instance::user_dir(storage.dir(), outside).and_then(|dir| instance::claim(&dir));
+            let primary = match claimed {
                 Ok(instance::Claim::Primary(p)) => Some(p),
-                Ok(instance::Claim::Secondary) => {
-                    tracing::info!("Archeion is already open: brought it forward");
+                Ok(instance::Claim::Secondary { other }) => {
+                    tracing::info!(?other, "Archeion is already open: brought it forward");
+                    if let Some(other) = other {
+                        tell_another_copy_is_open(&storage, &other);
+                    }
                     return ExitCode::SUCCESS;
                 }
                 Err(e) => {
@@ -201,6 +206,21 @@ fn main() -> ExitCode {
 
 /// Logs go to a file in the data folder (the window has no console).
 /// `RUST_LOG` overrides the default `info` level.
+/// The window open belongs to another copy of Archeion (another folder or
+/// version): it was brought forward, and this copy says why it does not
+/// open, in the user's language, with the copy to close.
+fn tell_another_copy_is_open(storage: &storage::Storage, other: &std::path::Path) {
+    let language = storage.load().map(|s| s.language).unwrap_or_default();
+    let tr = i18n::Tr::new(language);
+    let text = tr.t_args("already-open-other", &[("path", i18n::arg(other.display().to_string()))]);
+    rfd::MessageDialog::new()
+        .set_level(rfd::MessageLevel::Info)
+        .set_title(tr.t("already-open-title"))
+        .set_description(text)
+        .set_buttons(rfd::MessageButtons::Ok)
+        .show();
+}
+
 fn init_logging(storage: &storage::Storage) {
     use tracing_subscriber::EnvFilter;
     let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
