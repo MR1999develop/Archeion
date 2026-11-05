@@ -296,7 +296,7 @@ dependencies = [
 
 [[package]]
 name = "archeion"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "archeion_core",
@@ -331,7 +331,7 @@ dependencies = [
 
 [[package]]
 name = "archeion_core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "jiff",
  "proptest",
@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "archeion_engine"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "archeion_core",
  "archeion_win",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "archeion_scheduler"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "archeion_core",
  "archeion_win",
@@ -378,7 +378,7 @@ dependencies = [
 
 [[package]]
 name = "archeion_win"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "tempfile",
  "tracing",
