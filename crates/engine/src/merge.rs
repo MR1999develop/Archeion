@@ -45,12 +45,17 @@ use std::{
 /// the group are kept with their last content when the profile says so
 /// ([`archeion_core::MergePolicy::keep_deleted`]), dropped otherwise. The
 /// initial complete archive and the backups of the recent days are always
-/// kept.
+/// kept. With the merge turned off ([`archeion_core::MergePolicy::enabled`])
+/// nothing is merged.
 ///
 /// # Errors
 /// See [`EngineError`].
 pub fn merge(profile: &Profile, password: Option<&Password>, sink: &dyn EventSink) -> Result<MergeReport> {
     run(profile, password, sink, profile.merge.keep_deleted, |archives| {
+        // Turned off: every backup stays.
+        if !profile.merge.enabled {
+            return Ok(Vec::new());
+        }
         Ok(merge_groups(&automatic_keep_set(archives, &profile.merge.rules, local_now()))
             .into_iter()
             .map(Step::Merge)

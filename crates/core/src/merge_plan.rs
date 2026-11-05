@@ -96,8 +96,12 @@ impl MergePreview {
 /// first) at local time `now`.
 #[must_use]
 pub fn preview(archives: &[ArchiveName], policy: &MergePolicy, now: DateTime) -> MergePreview {
-    let keep = automatic_keep_set(archives, &policy.rules, now);
-    let confirmed = policy.approved.map(|rules| automatic_keep_set(archives, &rules, now));
+    // A merge turned off keeps every backup.
+    let keeps = |enabled: bool, rules: &Retention| {
+        if enabled { automatic_keep_set(archives, rules, now) } else { vec![true; archives.len()] }
+    };
+    let keep = keeps(policy.enabled, &policy.rules);
+    let confirmed = policy.approved.map(|c| keeps(c.enabled, &c.rules));
     let mut out = MergePreview::default();
     for (i, archive) in archives.iter().enumerate() {
         if keep[i] {
@@ -253,6 +257,41 @@ mod tests {
         MergePolicy { rules, ..MergePolicy::default() }
     }
 
+    fn on(rules: Retention) -> crate::ConfirmedMerge {
+        crate::ConfirmedMerge { enabled: true, rules }
+    }
+
+    /// Off, nothing is merged; turned on again with rules that merge, it
+    /// waits, and restoring turns it off again.
+    #[test]
+    fn the_merge_can_be_turned_off_and_on() {
+        let archives = daily(6);
+        let mut m = policy(rules(3, 0, 0, 0, 0));
+        assert!(preview(&archives, &m, later()).runs());
+        m.set_enabled(false, Some(&archives), later());
+        assert_eq!(preview(&archives, &m, later()), MergePreview::default(), "off: nothing merged");
+        assert_eq!(m.approved, None, "turning it off needs no confirmation");
+
+        m.set_enabled(true, Some(&archives), later());
+        let p = preview(&archives, &m, later());
+        assert!(p.waits() && p.held_back == archives[1..3].to_vec(), "on again: it waits");
+        m.restore_approved();
+        assert!(!m.enabled && m.approved.is_none(), "restored: off again");
+
+        m.set_enabled(true, Some(&archives), later());
+        m.confirm();
+        assert!(preview(&archives, &m, later()).runs());
+    }
+
+    /// Rules confirmed before the switch existed read back as "on".
+    #[test]
+    fn confirmed_rules_of_before_read_as_on() {
+        // As the previous version saved them: the rules alone.
+        let text = toml::to_string(&rules(4, 0, 0, 0, 0)).unwrap();
+        let c: crate::ConfirmedMerge = toml::from_str(&text).unwrap();
+        assert_eq!(c, on(rules(4, 0, 0, 0, 0)));
+    }
+
     /// Six daily backups, the first complete: keeping the last 5 merges
     /// nothing automatically (the complete one stays), the last 3 merges
     /// days 2 and 3.
@@ -272,14 +311,14 @@ mod tests {
         let archives = daily(6);
         let mut m = policy(rules(5, 0, 0, 0, 0));
         m.set_rules(rules(3, 0, 0, 0, 0), Some(&archives), later());
-        assert_eq!(m.approved, Some(rules(5, 0, 0, 0, 0)), "the confirmed rules are remembered");
+        assert_eq!(m.approved, Some(on(rules(5, 0, 0, 0, 0))), "the confirmed rules are remembered");
         let p = preview(&archives, &m, later());
         assert_eq!(p.held_back, archives[1..3].to_vec());
         assert!(p.waits() && !p.runs());
 
         // Tightened again: still compared with the rules confirmed.
         m.set_rules(rules(2, 0, 0, 0, 0), Some(&archives), later());
-        assert_eq!(m.approved, Some(rules(5, 0, 0, 0, 0)));
+        assert_eq!(m.approved, Some(on(rules(5, 0, 0, 0, 0))));
         m.restore_approved();
         assert_eq!((m.rules, m.approved), (rules(5, 0, 0, 0, 0), None));
 
@@ -300,7 +339,7 @@ mod tests {
     fn with_the_backups_unknown_a_change_waits() {
         let mut m = policy(rules(5, 0, 0, 0, 0));
         m.set_rules(rules(10, 0, 0, 0, 0), None, later());
-        assert_eq!(m.approved, Some(rules(5, 0, 0, 0, 0)));
+        assert_eq!(m.approved, Some(on(rules(5, 0, 0, 0, 0))));
         assert!(!preview(&daily(6), &m, later()).waits(), "looser rules hold nothing back");
     }
 

@@ -37,7 +37,9 @@ pub use destination::Destination;
 pub use exclusion::{Exclusion, TypedKind, TypedRuleError};
 pub use large_files::LargeFiles;
 pub use manifest::{ChunkId, ChunkRef, Chunks, Entry, EntryKind, Manifest, ManifestHeader};
-pub use profile::{Alerts, Container, EventTriggers, MergePolicy, Profile, ProfileError, ProfileId};
+pub use profile::{
+    Alerts, ConfirmedMerge, Container, EventTriggers, MergePolicy, Profile, ProfileError, ProfileId,
+};
 pub use restore::{RestoreItem, RestoreRequest, RestoreTarget};
 pub use retention::Retention;
 pub use run::{

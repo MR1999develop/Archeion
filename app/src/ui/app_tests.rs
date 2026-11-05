@@ -603,3 +603,104 @@ fn tighter_merge_rules_wait_for_a_confirmation_in_the_form() {
     assert!(pending(&storage), "confirmed: the automatic merge may run");
     assert!(h.query_by_label_contains("the next merge takes 1 backup").is_some(), "the preview");
 }
+
+/// A profile "Docs" with four backups and its merge rules, saved in a new
+/// data folder; the window never starts a worker (`worker_exe` names a
+/// program that does not exist).
+fn four_backups(
+    rules: archeion_core::Retention,
+) -> (tempfile::TempDir, Storage, Harness<'static, ArcheionApp>) {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source");
+    fs::create_dir_all(&source).unwrap();
+    let mut profile = Profile::new("Docs");
+    profile.sources.push(source.clone());
+    profile.destination = Destination::Local { path: dir.path().join("backups") };
+    profile.container = Container::Folder;
+    profile.merge.rules = rules;
+    for i in 0..4 {
+        fs::write(source.join("a.txt"), format!("version {i}")).unwrap();
+        archeion_engine::backup(&profile, None, BackupMode::Auto, &Quiet).unwrap();
+        std::thread::sleep(Duration::from_millis(1100));
+    }
+    let storage = Storage::at(dir.path().join("data")).unwrap();
+    storage
+        .save(&Settings { language: Language::English, profiles: vec![profile], ..Settings::default() })
+        .unwrap();
+    let mut h = harness(storage.clone());
+    h.state_mut().worker_exe = Some(dir.path().join("no such program.exe"));
+    steps(&mut h);
+    (dir, storage, h)
+}
+
+fn keep_last(n: u32) -> archeion_core::Retention {
+    archeion_core::Retention {
+        keep_within_days: 0,
+        keep_last: n,
+        keep_daily: 0,
+        keep_weekly: 0,
+        keep_monthly: 0,
+        keep_yearly: 0,
+    }
+}
+
+/// Tighter rules wait; Backup > Merge now is the user's yes: the rules are
+/// confirmed before the merge starts.
+#[test]
+fn merge_now_confirms_the_rules_waiting() {
+    let (_dir, storage, mut h) = four_backups(keep_last(2));
+    {
+        let mut settings = storage.load().unwrap();
+        settings.profiles[0].merge.approved =
+            Some(archeion_core::ConfirmedMerge { enabled: true, rules: keep_last(6) });
+        storage.save(&settings).unwrap();
+        h.state_mut().settings = settings;
+    }
+    assert!(!archeion_engine::merge_pending(&storage.load().unwrap().profiles[0]).unwrap(), "it waits");
+    button(&h, "Backup").click();
+    steps(&mut h);
+    button(&h, "Merge now").click();
+    steps(&mut h);
+    assert_eq!(storage.load().unwrap().profiles[0].merge.approved, None, "confirmed");
+    let error = h.state().error.clone().unwrap_or_default();
+    assert!(error.starts_with("The operation could not start"), "the merge was started: {error}");
+}
+
+/// The switch: off, nothing is merged and Merge now is not offered; on
+/// again, the merge waits for a confirmation, and restoring turns it off.
+#[test]
+fn the_automatic_merge_can_be_turned_off_and_on() {
+    let (_dir, storage, mut h) = four_backups(keep_last(2));
+    let merge = |s: &Storage| s.load().unwrap().profiles[0].merge;
+    let pending = |s: &Storage| archeion_engine::merge_pending(&s.load().unwrap().profiles[0]).unwrap();
+    assert!(pending(&storage), "on: the rules merge");
+    h.query_all_by(|n| n.label().is_some_and(|l| l == "Merge old backups"))
+        .next()
+        .expect("the section")
+        .click();
+    let started = Instant::now();
+    while h.query_by_label_contains("the next merge takes").is_none() {
+        assert!(started.elapsed() < Duration::from_secs(20), "the backups were not read");
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+
+    checkbox(&h, "Merge old backups automatically").click();
+    steps(&mut h);
+    assert!(!merge(&storage).enabled && merge(&storage).approved.is_none(), "off, at once");
+    assert!(!pending(&storage), "off: nothing to merge");
+    assert!(h.query_by_label_contains("The automatic merge is off").is_some());
+    button(&h, "Backup").click();
+    steps(&mut h);
+    assert!(button(&h, "Merge now").accesskit_node().is_disabled(), "Merge now is not offered");
+    h.key_press(egui::Key::Escape);
+    steps(&mut h);
+
+    checkbox(&h, "Merge old backups automatically").click();
+    steps(&mut h);
+    assert!(merge(&storage).enabled && merge(&storage).approved.is_some(), "on again: it waits");
+    assert!(!pending(&storage));
+    button(&h, "Restore the previous rules").click();
+    steps(&mut h);
+    assert!(!merge(&storage).enabled, "restored: off again");
+}

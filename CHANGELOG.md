@@ -29,6 +29,11 @@ All notable changes to Archeion are listed here. The format follows
   previous rules" (Merge now counts as a yes). Looser rules, or tighter
   ones that merge nothing more, need no confirmation. Before, a value
   passed through while typing could be what the next automatic merge used.
+- "Merge old backups automatically" turns the automatic merge on or off
+  (on for existing profiles). Off, every backup stays until merged or
+  deleted by hand in Manage backups, and Merge now is not offered; turned
+  on again with rules that would merge backups, it waits for the user's
+  confirmation like tighter rules.
 
 ### Changed
 

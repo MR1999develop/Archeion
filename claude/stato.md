@@ -39,7 +39,11 @@ più pulsante sotto le impostazioni; modulo `ui/profile_list.rs`, test in
 `app/src/ui/app_tests.rs`) e della conferma delle regole di unione
 (`feature/merge-preview`: `MergePolicy::approved`, `merge_plan::preview`,
 `archive_names`; test in `merge_plan.rs`, `crates/engine/tests/merge_wait.rs`
-e `app_tests.rs`); `tools\check.bat` verde.
+e `app_tests.rs`) e dell'interruttore dell'unione automatica
+(`feature/merge-switch`: `MergePolicy::enabled`, `ConfirmedMerge` con
+acceso/spento e regole; la finestra riceve anche il programma del worker,
+`worker_exe`, così i test non avviano mai sé stessi; test di "Unisci ora"
+che conferma); `tools\check.bat` verde.
 Su GitHub (4 novembre) c'è `main` fino a `542a215`; il resto parte con il
 prossimo push, che lancia l'utente.
 
@@ -101,7 +105,10 @@ prossimo push, che lancia l'utente.
   sceglie "Unisci con le nuove regole" o "Ripristina le regole
   precedenti"; "Unisci ora" vale come conferma. Regole più larghe, o più
   strette ma senza effetto sui backup presenti, si confermano da sole; con
-  i backup non ancora letti una modifica resta in attesa.
+  i backup non ancora letti una modifica resta in attesa. L'unione
+  automatica si può spegnere (`merge.enabled`, acceso per i profili
+  esistenti): spenta non unisce nulla, nemmeno `engine::merge`, e "Unisci
+  ora" non è offerto; riaccenderla è come stringere le regole.
 - La finestra riceve l'Utilità di pianificazione come dipendenza
   (`Tasks`, trait `archeion_scheduler::Scheduler` con `apply_watch`): i
   test della finestra usano un registratore e non toccano mai le attività

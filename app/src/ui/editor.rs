@@ -244,16 +244,24 @@ pub fn show(
     });
     section(ui, "merge", &tr.t("merge"), false, false, |ui| {
         ui.weak(tr.t("merge-hint"));
-        ui.weak(tr.t("merge-automatic-hint"));
+        let now = jiff::Zoned::now().datetime();
+        let archives = dest.archives.as_deref();
+        let mut on = p.merge.enabled;
+        let switch = widgets::checkbox(ui, &mut on, tr.t("merge-enabled"));
+        if switch.on_hover_text(tr.t("merge-enabled-hint")).changed() {
+            p.merge.set_enabled(on, archives, now);
+            out.changed = true;
+        }
+        ui.weak(tr.t(if p.merge.enabled { "merge-automatic-hint" } else { "merge-off-hint" }));
+        // Merges by hand use it too: never disabled.
         let keep = widgets::checkbox(ui, &mut p.merge.keep_deleted, tr.t("merge-keep-deleted"));
         out.changed |= keep.on_hover_text(tr.t("merge-keep-deleted-hint")).changed();
         let mut rules = p.merge.rules;
-        retention(ui, tr, &mut rules, &mut out);
-        let now = jiff::Zoned::now().datetime();
+        ui.add_enabled_ui(p.merge.enabled, |ui| retention(ui, tr, &mut rules, &mut out));
         if rules != p.merge.rules {
-            p.merge.set_rules(rules, dest.archives.as_deref(), now);
+            p.merge.set_rules(rules, archives, now);
         }
-        merge_preview(ui, tr, p, dest.archives.as_deref(), now, &mut out);
+        merge_preview(ui, tr, p, archives, now, &mut out);
     });
     section(ui, "checks", &tr.t("verify-section"), false, false, |ui| {
         verification(ui, tr, p, format, &mut out, busy);
@@ -356,6 +364,10 @@ fn run_now(
     }
 
     let started = format != FormatLock::Free;
+    // With the merge turned off, "Merge" is not a choice.
+    if !p.merge.enabled && drafts.run == RunChoice::Merge {
+        drafts.run = RunChoice::Incremental;
+    }
     if started {
         ui.horizontal_wrapped(|ui| {
             ui.label(tr.t("run-now"));
@@ -364,7 +376,12 @@ fn run_now(
                 (RunChoice::Complete, "run-complete", "run-complete-hint"),
                 (RunChoice::Merge, "run-merge", "merge-now-hint"),
             ] {
-                ui.radio_value(&mut drafts.run, choice, tr.t(label)).on_hover_text(tr.t(hint));
+                let usable = choice != RunChoice::Merge || p.merge.enabled;
+                ui.add_enabled_ui(usable, |ui| {
+                    ui.radio_value(&mut drafts.run, choice, tr.t(label))
+                        .on_hover_text(tr.t(hint))
+                        .on_disabled_hover_text(tr.t("merge-off-run-hint"));
+                });
             }
         });
     }
@@ -1379,6 +1396,10 @@ fn merge_preview(
 ) {
     let Some(archives) = archives.filter(|a| !a.is_empty()) else { return };
     let preview = merge_plan::preview(archives, &p.merge, now);
+    if !p.merge.enabled && !preview.waits() {
+        // Off: its hint above says it all.
+        return;
+    }
     if preview.waits() {
         let count = arg(preview.held_back.len());
         ui.colored_label(
