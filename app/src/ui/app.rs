@@ -6,6 +6,7 @@ use super::{
     editor::{self, Drafts, FormatLock, PasswordStatus, RunChoice},
     help::{self, Help},
     history::HistoryView,
+    profile_list::{self, ProfileList},
     restore::{Action, RestoreView},
     settings::{self, Preferences},
     symbol, theme,
@@ -115,6 +116,8 @@ pub struct ArcheionApp {
     backup_import: BackupImport,
     /// Where scheduled tasks are registered.
     tasks: Tasks,
+    /// The list of profiles: a rename in progress.
+    profile_list: ProfileList,
     /// When the window took a size not saved yet: it is saved once the
     /// resizing stops.
     resized_at: Option<Instant>,
@@ -227,6 +230,7 @@ impl ArcheionApp {
             adopting: None,
             backup_import: BackupImport::default(),
             tasks: Tasks(Box::new(WindowsTaskScheduler)),
+            profile_list: ProfileList::default(),
             fitted: false,
         }
     }
@@ -711,6 +715,31 @@ impl ArcheionApp {
         if ctx.input_mut(|i| i.consume_shortcut(&help::DOCUMENTATION)) {
             self.help.open_docs();
         }
+        // The commands of the selected profile, unless a field is being typed in.
+        if !ctx.egui_wants_keyboard_input() && !self.profile_list.renaming() {
+            let pressed = |s| ctx.input_mut(|i| i.consume_shortcut(s));
+            let at = self.selected.and_then(|id| self.settings.profiles.iter().position(|p| p.id == id));
+            let action = match at {
+                Some(i) if pressed(&profile_list::RENAME) => {
+                    let p = self.settings.profiles[i].clone();
+                    self.profile_list.start_rename(&p);
+                    None
+                }
+                Some(i) if i > 0 && pressed(&profile_list::MOVE_UP) => {
+                    Some(profile_list::Action::Move { from: i, to: i - 1 })
+                }
+                Some(i) if i + 1 < self.settings.profiles.len() && pressed(&profile_list::MOVE_DOWN) => {
+                    Some(profile_list::Action::Move { from: i, to: i + 1 })
+                }
+                Some(i) if pressed(&profile_list::DELETE) => {
+                    Some(profile_list::Action::Delete(self.settings.profiles[i].id))
+                }
+                _ => None,
+            };
+            if let Some(action) = action {
+                self.apply_list_action(ctx, action);
+            }
+        }
         if ctx.input_mut(|i| i.consume_shortcut(&NEW_PROFILE)) {
             self.new_profile();
         }
@@ -756,6 +785,8 @@ impl ArcheionApp {
                 {
                     self.export_profile();
                 }
+                ui.separator();
+                self.profile_commands(ui);
                 ui.separator();
                 let preferences = egui::Button::new(self.tr.t("menu-preferences")).shortcut_text("Ctrl+,");
                 if ui.add(preferences).clicked() {
@@ -820,23 +851,55 @@ impl ArcheionApp {
     fn profile_list(&mut self, ui: &mut Ui) {
         ui.add_space(theme::SPACE_M);
         widgets::section_title(ui, self.tr.t("profiles"));
-        let mut clicked = None;
-        for p in &self.settings.profiles {
-            let name = if p.name.trim().is_empty() { self.tr.t("unnamed") } else { p.name.clone() };
-            let running = self.job.as_ref().is_some_and(|j| j.profile() == p.id);
-            let text = if running { symbol::with(symbol::RUNNING, name) } else { name };
-            if widgets::list_item(ui, self.selected == Some(p.id), egui::RichText::new(text), None).clicked()
-            {
-                clicked = Some(p.id);
-            }
-        }
-        if let Some(id) = clicked {
-            let ctx = ui.ctx().clone();
-            self.select(&ctx, id);
+        let running = self.job.as_ref().map(Job::profile);
+        let action = self.profile_list.show(ui, &self.tr, &self.settings.profiles, self.selected, running);
+        if let Some(action) = action {
+            self.apply_list_action(ui.ctx(), action);
         }
         ui.add_space(theme::SPACE_S);
         if ui.button(format!("+ {}", self.tr.t("new-profile"))).clicked() {
             self.new_profile();
+        }
+    }
+
+    /// Carries out what the user did in the list of profiles, in its context
+    /// menu, in the File menu or with a shortcut.
+    fn apply_list_action(&mut self, ctx: &egui::Context, action: profile_list::Action) {
+        match action {
+            profile_list::Action::Select(id) => self.select(ctx, id),
+            profile_list::Action::Rename(id, name) => {
+                if let Some(p) = self.settings.profile_mut(id) {
+                    p.name = name;
+                    self.save();
+                    // The task's description names the profile.
+                    self.schedule_pending = Some((id, Instant::now()));
+                }
+            }
+            profile_list::Action::Move { from, to } => {
+                let profiles = &mut self.settings.profiles;
+                if from < profiles.len() && to < profiles.len() {
+                    let p = profiles.remove(from);
+                    profiles.insert(to, p);
+                    self.save();
+                }
+            }
+            profile_list::Action::Delete(id) => {
+                self.select(ctx, id);
+                self.drafts.ask_delete(id);
+            }
+        }
+    }
+
+    /// The commands of the selected profile for the File menu.
+    fn profile_commands(&mut self, ui: &mut Ui) {
+        let Some(i) = self.selected.and_then(|id| self.settings.profiles.iter().position(|p| p.id == id))
+        else {
+            return;
+        };
+        let last = self.settings.profiles.len() - 1;
+        let p = self.settings.profiles[i].clone();
+        if let Some(action) = self.profile_list.commands(ui, &self.tr, &p, i, last) {
+            self.apply_list_action(ui.ctx(), action);
         }
     }
 
@@ -946,7 +1009,6 @@ impl ArcheionApp {
                 let ctx = ui.ctx().clone();
                 self.verify(&ctx, id, sample);
             }
-            Some(editor::Command::Delete { backups }) => self.delete(id, backups),
             Some(editor::Command::AdoptDestination) => self.adopt_destination(&ui.ctx().clone(), id),
             None => {}
         }
@@ -1470,6 +1532,13 @@ impl eframe::App for ArcheionApp {
         egui::CentralPanel::default().show(ui, |ui| self.central(ui));
         self.help.show(&ctx, &self.tr, &self.storage);
         self.backup_import.show(&ctx, &self.tr);
+        // The "Delete profile" warning, over whatever tab is shown.
+        if let Some(p) = self.selected.and_then(|id| self.settings.profile(id)).cloned()
+            && let Some(backups) =
+                editor::delete_dialog(ui, &self.tr, &p, &mut self.drafts, self.job.is_some())
+        {
+            self.delete(p.id, backups);
+        }
         let current = settings::Values { language: self.settings.language, window: self.settings.window };
         let changed = self.preferences.show(&ctx, &self.tr, self.storage.dir(), self.tray.is_some(), current);
         if let Some(values) = changed {

@@ -177,6 +177,28 @@ pub fn icon_button(ui: &mut Ui, icon: &str, hint: impl Into<String>) -> Response
 /// weak second line, selected and hovered as one (egui's selectable label
 /// covers only its own text), with the accent mark of Windows 11 lists.
 pub fn list_item(ui: &mut Ui, selected: bool, title: RichText, detail: Option<&str>) -> Response {
+    list_item_sensing(ui, Sense::click(), selected, title, detail)
+}
+
+/// A [`list_item`] that can also be dragged, to change the order of a list.
+pub fn draggable_list_item(ui: &mut Ui, selected: bool, title: RichText) -> Response {
+    list_item_sensing(ui, Sense::click_and_drag(), selected, title, None)
+}
+
+/// The line where a dragged item will go: above `rect` or below it.
+pub fn drop_line(ui: &Ui, rect: egui::Rect, above: bool) {
+    let t = Tokens::current(ui);
+    let y = if above { rect.top() } else { rect.bottom() };
+    ui.painter().hline(rect.x_range(), y, Stroke::new(theme::DROP_LINE_WIDTH, t.accent));
+}
+
+fn list_item_sensing(
+    ui: &mut Ui,
+    sense: Sense,
+    selected: bool,
+    title: RichText,
+    detail: Option<&str>,
+) -> Response {
     let t = Tokens::current(ui);
     let pad = egui::vec2(theme::SPACE_S, theme::SPACE_XS);
     let width = ui.available_width() - 2.0 * pad.x;
@@ -189,7 +211,7 @@ pub fn list_item(ui: &mut Ui, selected: bool, title: RichText, detail: Option<&s
     });
     let text_height = title_galley.size().y + detail_galley.as_ref().map_or(0.0, |g| g.size().y);
     let height = (text_height + 2.0 * pad.y).max(ui.spacing().interact_size.y);
-    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), Sense::click());
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(ui.available_width(), height), sense);
     resp.widget_info(|| WidgetInfo::selected(Role::ListItem, true, selected, title.text()));
     if ui.is_rect_visible(rect) {
         let fill = if selected { Some(t.selected) } else { resp.hovered().then_some(t.control_hover) };

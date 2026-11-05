@@ -105,6 +105,30 @@ fn button<'h>(h: &'h Harness<'_, ArcheionApp>, label: &'h str) -> egui_kittest::
         .unwrap_or_else(|| panic!("no button {label}"))
 }
 
+/// The item of `name` in the list of profiles.
+fn list_item<'h>(h: &'h Harness<'_, ArcheionApp>, name: &'h str) -> egui_kittest::Node<'h> {
+    h.query_all_by(move |n| n.role() == Role::ListItem && n.label().as_deref() == Some(name))
+        .next()
+        .unwrap_or_else(|| panic!("no profile {name} in the list"))
+}
+
+/// Chooses `command` in the context menu of the profile `name`.
+fn from_list_menu(h: &mut Harness<'_, ArcheionApp>, name: &str, command: &str) {
+    list_item(h, name).click_secondary();
+    steps(h);
+    // A menu item's name ends with its shortcut ("Move up Alt+Up").
+    h.query_all_by(|n| n.role() == Role::Button && n.label().is_some_and(|l| l.starts_with(command)))
+        .next()
+        .unwrap_or_else(|| panic!("no command {command}"))
+        .click();
+    steps(h);
+}
+
+/// The names of the saved profiles, in their order.
+fn names(storage: &Storage) -> Vec<String> {
+    storage.load().unwrap().profiles.into_iter().map(|p| p.name).collect()
+}
+
 fn checkbox<'h>(h: &'h Harness<'_, ArcheionApp>, starts: &'h str) -> egui_kittest::Node<'h> {
     h.query_all_by(move |n| n.role() == Role::CheckBox && n.label().is_some_and(|l| l.starts_with(starts)))
         .last()
@@ -133,8 +157,7 @@ fn deleting_a_profile_with_its_backups_moves_them_to_the_recycle_bin() {
     let _clean = RecycledUnder(dir.path().to_path_buf());
     let mut h = harness(storage.clone());
     steps(&mut h);
-    button(&h, "Delete profile").click();
-    steps(&mut h);
+    from_list_menu(&mut h, "Docs", "Delete profile…");
     checkbox(&h, "Also move the backups in").click();
     steps(&mut h);
     assert!(h.query_by_label_contains("can be restored from the Recycle Bin").is_some(), "the warning");
@@ -173,8 +196,7 @@ fn deleting_a_profile_alone_keeps_its_backups_and_offers_undo() {
     let (_dir, storage, backups) = sandbox();
     let mut h = harness(storage.clone());
     steps(&mut h);
-    button(&h, "Delete profile").click();
-    steps(&mut h);
+    from_list_menu(&mut h, "Docs", "Delete profile…");
     button(&h, "Delete profile").click();
     steps(&mut h);
     assert!(storage.load().unwrap().profiles.is_empty());
@@ -385,4 +407,120 @@ fn an_encrypted_profile_comes_back_from_its_backups_with_its_password() {
     assert!(!calls.iter().any(|c| c.contains("Monthly")), "no automatic task: {calls:?}");
     assert!(h.state().error.is_none(), "{:?}", h.state().error);
     assert!(!field(&h), "the dialog closed");
+}
+
+/// The sandbox's profile and two more, A and B, in the list: Docs, A, B.
+fn three_profiles() -> (tempfile::TempDir, Storage) {
+    let (dir, storage, _backups) = sandbox();
+    let mut settings = storage.load().unwrap();
+    settings.profiles.push(Profile::new("A"));
+    settings.profiles.push(Profile::new("B"));
+    storage.save(&settings).unwrap();
+    (dir, storage)
+}
+
+#[test]
+fn a_profile_is_renamed_in_place_from_its_context_menu() {
+    let (_dir, storage, _backups) = sandbox();
+    let mut h = harness(storage.clone());
+    steps(&mut h);
+    from_list_menu(&mut h, "Docs", "Rename");
+    // The whole name is selected: typing replaces it.
+    h.query_all_by(|n| n.role() == Role::TextInput && n.value().as_deref() == Some("Docs"))
+        .next()
+        .expect("the name becomes a field")
+        .type_text("Papers");
+    steps(&mut h);
+    h.key_press(egui::Key::Enter);
+    steps(&mut h);
+    assert_eq!(names(&storage), ["Papers"]);
+    assert!(
+        h.query_all_by(|n| n.role() == Role::ListItem && n.label().as_deref() == Some("Papers"))
+            .next()
+            .is_some()
+    );
+
+    // F2 on the selected profile, then Esc: nothing changes.
+    h.key_press(egui::Key::F2);
+    steps(&mut h);
+    h.query_all_by(|n| n.role() == Role::TextInput && n.value().as_deref() == Some("Papers"))
+        .next()
+        .expect("F2 renames")
+        .type_text("Trash");
+    steps(&mut h);
+    h.key_press(egui::Key::Escape);
+    steps(&mut h);
+    assert_eq!(names(&storage), ["Papers"]);
+    list_item(&h, "Papers");
+
+    // A blank name is not taken.
+    from_list_menu(&mut h, "Papers", "Rename");
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.key_press(egui::Key::Backspace);
+    h.key_press(egui::Key::Enter);
+    steps(&mut h);
+    assert_eq!(names(&storage), ["Papers"]);
+}
+
+#[test]
+fn profiles_keep_the_order_they_are_dragged_to() {
+    let (_dir, storage) = three_profiles();
+    let mut h = harness(storage.clone());
+    steps(&mut h);
+    let from = list_item(&h, "B").rect().center();
+    let onto = list_item(&h, "Docs").rect();
+    // B dropped on the upper half of Docs: first.
+    let to = egui::pos2(onto.center().x, onto.top() + 3.0);
+    let pointer = |h: &mut Harness<'_, ArcheionApp>, event: egui::Event| {
+        h.input_mut().events.push(event);
+        h.step();
+    };
+    pointer(&mut h, egui::Event::PointerMoved(from));
+    pointer(&mut h, press(from, true));
+    for step in 1..=10 {
+        pointer(&mut h, egui::Event::PointerMoved(from.lerp(to, step as f32 / 10.0)));
+    }
+    pointer(&mut h, press(to, false));
+    steps(&mut h);
+    assert_eq!(names(&storage), ["B", "Docs", "A"]);
+}
+
+fn press(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
+#[test]
+fn profiles_move_up_and_down_from_the_menu_and_the_keyboard() {
+    let (_dir, storage) = three_profiles();
+    let mut h = harness(storage.clone());
+    steps(&mut h);
+    from_list_menu(&mut h, "A", "Move up");
+    assert_eq!(names(&storage), ["A", "Docs", "B"]);
+    // A stays selected: Alt+Down twice takes it to the bottom, a third
+    // time does nothing.
+    for _ in 0..3 {
+        h.key_press_modifiers(egui::Modifiers::ALT, egui::Key::ArrowDown);
+        steps(&mut h);
+    }
+    assert_eq!(names(&storage), ["Docs", "B", "A"]);
+}
+
+/// The warning opens over any tab: from the keyboard on the Backups tab.
+#[test]
+fn the_delete_warning_opens_from_any_tab() {
+    let (_dir, storage, _backups) = sandbox();
+    let mut h = harness(storage.clone());
+    steps(&mut h);
+    h.state_mut().tab = super::Tab::Backups;
+    steps(&mut h);
+    h.key_press(egui::Key::Delete);
+    steps(&mut h);
+    button(&h, "Delete profile").click();
+    steps(&mut h);
+    assert!(storage.load().unwrap().profiles.is_empty());
 }

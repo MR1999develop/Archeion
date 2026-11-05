@@ -43,6 +43,7 @@ const SECTIONS: &[Section] = &[
         title: "doc-profiles-title",
         blocks: &[
             Text("doc-profiles-body"),
+            Text("doc-profiles-list"),
             Text("doc-profiles-exclusions"),
             Text("doc-profiles-format"),
             Text("doc-profiles-delete"),
