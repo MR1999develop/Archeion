@@ -462,13 +462,15 @@ fn recycled(dir: &std::path::Path, name: &str) -> bool {
 }
 
 /// The answer of `trash_destination` where the backups are; `None` after
-/// checking that nothing moved, when that drive has no Recycle Bin (a
-/// network share given by `ARCHEION_TEST_DEST`).
+/// checking that nothing moved, when there is no Recycle Bin to use: a
+/// network share given by `ARCHEION_TEST_DEST`, or an account without one
+/// (CI runners).
 fn trashed_or_refused(f: &Fixture) -> Option<archeion_engine::DestinationTrashed> {
     let before = list_archives(&f.profile, None).unwrap().len();
     match archeion_engine::trash_destination(&f.profile) {
         Ok(done) => Some(done),
-        Err(EngineError::NoRecycleBin(_)) if common::elsewhere() => {
+        Err(EngineError::NoRecycleBin(_)) if common::elsewhere() || !common::recycle_bin_works() => {
+            eprintln!("no Recycle Bin here: checked that nothing was moved");
             assert_eq!(list_archives(&f.profile, None).unwrap().len(), before, "nothing moved");
             None
         }
