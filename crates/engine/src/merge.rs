@@ -28,7 +28,7 @@ use crate::{
 use archeion_core::{
     ArchiveKind, ArchiveName, ChunkId, ChunkRef, Chunks, Entry, EntryKind, FileAction, FileDone, Manifest,
     MergeGroup, MergeReport, Phase, Profile, RunEvent, Summary, keys,
-    merge_plan::{Deletion, automatic_keep_set, deletion, merge_groups, range_group},
+    merge_plan::{Deletion, automatic_keep_set, deletion, merge_groups, preview, range_group},
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -107,21 +107,33 @@ pub fn delete_archive(
     })
 }
 
-/// True when the profile's merge rules would merge something now. Reads
-/// only the archive names: no lock, no password, cheap enough to ask
-/// often.
+/// True when the automatic merge has work and may do it now: the rules
+/// would merge something, and nothing that the rules last confirmed keep
+/// ([`archeion_core::merge_plan::preview`]). Reads only the archive names:
+/// no lock, no password, cheap enough to ask often.
 ///
 /// # Errors
 /// [`EngineError::DestinationUnavailable`] when the drive or share is not
 /// reachable.
 pub fn merge_pending(profile: &Profile) -> Result<bool> {
+    let archives = archive_names(profile)?;
+    Ok(preview(&archives, &profile.merge, local_now()).runs())
+}
+
+/// The names of the backups of `profile`, oldest first; none when the
+/// folder does not exist yet. Reads only the folder names: no lock, no
+/// password.
+///
+/// # Errors
+/// [`EngineError::DestinationUnavailable`] when the drive or share is not
+/// reachable.
+pub fn archive_names(profile: &Profile) -> Result<Vec<ArchiveName>> {
     let root = crate::repo::destination_of(profile)?;
     crate::repo::ensure_reachable(root)?;
     if root.as_os_str().is_empty() || !root.exists() {
-        return Ok(false);
+        return Ok(Vec::new());
     }
-    let archives = crate::repo::archives_in(root)?;
-    Ok(!merge_groups(&automatic_keep_set(&archives, &profile.merge.rules, local_now())).is_empty())
+    crate::repo::archives_in(root)
 }
 
 /// Local wall-clock time, the clock archive names are written in.

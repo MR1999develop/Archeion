@@ -12,7 +12,7 @@
 //! ([`automatic_keep_set`]); a manual merge of chosen archives may include
 //! it ([`range_group`]).
 
-use crate::{ArchiveKind, ArchiveName, Retention};
+use crate::{ArchiveKind, ArchiveName, MergePolicy, Retention};
 use jiff::civil::DateTime;
 use std::ops::RangeInclusive;
 
@@ -66,6 +66,49 @@ pub fn automatic_keep_set(archives: &[ArchiveName], rules: &Retention, now: Date
         *k = true;
     }
     keep
+}
+
+/// What the automatic merge would do now.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MergePreview {
+    /// The backups it would merge away, oldest first.
+    pub merged: Vec<ArchiveName>,
+    /// Those of them the rules last confirmed keep: while there is one,
+    /// the automatic merge waits for the user.
+    pub held_back: Vec<ArchiveName>,
+}
+
+impl MergePreview {
+    /// True while the automatic merge waits for the user's confirmation.
+    #[must_use]
+    pub fn waits(&self) -> bool {
+        !self.held_back.is_empty()
+    }
+
+    /// True when the automatic merge has work and may do it now.
+    #[must_use]
+    pub fn runs(&self) -> bool {
+        !self.merged.is_empty() && !self.waits()
+    }
+}
+
+/// What the automatic merge of `policy` would do to `archives` (oldest
+/// first) at local time `now`.
+#[must_use]
+pub fn preview(archives: &[ArchiveName], policy: &MergePolicy, now: DateTime) -> MergePreview {
+    let keep = automatic_keep_set(archives, &policy.rules, now);
+    let confirmed = policy.approved.map(|rules| automatic_keep_set(archives, &rules, now));
+    let mut out = MergePreview::default();
+    for (i, archive) in archives.iter().enumerate() {
+        if keep[i] {
+            continue;
+        }
+        out.merged.push(*archive);
+        if confirmed.as_ref().is_some_and(|c| c[i]) {
+            out.held_back.push(*archive);
+        }
+    }
+    out
 }
 
 /// Why a manual selection cannot be merged.
@@ -204,6 +247,61 @@ mod tests {
             keep_monthly: monthly,
             keep_yearly: yearly,
         }
+    }
+
+    fn policy(rules: Retention) -> MergePolicy {
+        MergePolicy { rules, ..MergePolicy::default() }
+    }
+
+    /// Six daily backups, the first complete: keeping the last 5 merges
+    /// nothing automatically (the complete one stays), the last 3 merges
+    /// days 2 and 3.
+    #[test]
+    fn the_preview_lists_what_the_merge_would_take() {
+        let archives = daily(6);
+        assert_eq!(preview(&archives, &policy(rules(5, 0, 0, 0, 0)), later()), MergePreview::default());
+        let p = preview(&archives, &policy(rules(3, 0, 0, 0, 0)), later());
+        assert_eq!(p.merged, archives[1..3].to_vec());
+        assert!(p.held_back.is_empty() && p.runs());
+    }
+
+    /// Tighter rules wait for the user; looser ones, or tighter ones that
+    /// change nothing for the backups there are, do not.
+    #[test]
+    fn tighter_rules_wait_for_the_user() {
+        let archives = daily(6);
+        let mut m = policy(rules(5, 0, 0, 0, 0));
+        m.set_rules(rules(3, 0, 0, 0, 0), Some(&archives), later());
+        assert_eq!(m.approved, Some(rules(5, 0, 0, 0, 0)), "the confirmed rules are remembered");
+        let p = preview(&archives, &m, later());
+        assert_eq!(p.held_back, archives[1..3].to_vec());
+        assert!(p.waits() && !p.runs());
+
+        // Tightened again: still compared with the rules confirmed.
+        m.set_rules(rules(2, 0, 0, 0, 0), Some(&archives), later());
+        assert_eq!(m.approved, Some(rules(5, 0, 0, 0, 0)));
+        m.restore_approved();
+        assert_eq!((m.rules, m.approved), (rules(5, 0, 0, 0, 0), None));
+
+        m.set_rules(rules(3, 0, 0, 0, 0), Some(&archives), later());
+        m.confirm();
+        assert!(preview(&archives, &m, later()).runs(), "confirmed: it merges");
+
+        // Looser: confirmed at once.
+        m.set_rules(rules(10, 0, 0, 0, 0), Some(&archives), later());
+        assert_eq!(m.approved, None);
+        // Tighter but still keeping every backup there is: nothing to confirm.
+        m.set_rules(rules(6, 0, 0, 0, 0), Some(&archives), later());
+        assert_eq!(m.approved, None);
+    }
+
+    /// The destination not read yet: a change waits, to be safe.
+    #[test]
+    fn with_the_backups_unknown_a_change_waits() {
+        let mut m = policy(rules(5, 0, 0, 0, 0));
+        m.set_rules(rules(10, 0, 0, 0, 0), None, later());
+        assert_eq!(m.approved, Some(rules(5, 0, 0, 0, 0)));
+        assert!(!preview(&daily(6), &m, later()).waits(), "looser rules hold nothing back");
     }
 
     #[test]

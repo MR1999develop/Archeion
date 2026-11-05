@@ -524,3 +524,82 @@ fn the_delete_warning_opens_from_any_tab() {
     steps(&mut h);
     assert!(storage.load().unwrap().profiles.is_empty());
 }
+
+/// Four backups kept by "Most recent: 6". Lowering it to 2 would merge a
+/// backup the confirmed rules kept: the form says so, the automatic merge
+/// waits, and the two buttons confirm or restore.
+#[test]
+fn tighter_merge_rules_wait_for_a_confirmation_in_the_form() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("source");
+    fs::create_dir_all(&source).unwrap();
+    let mut profile = Profile::new("Docs");
+    profile.sources.push(source.clone());
+    profile.destination = Destination::Local { path: dir.path().join("backups") };
+    profile.container = Container::Folder;
+    profile.merge.rules = archeion_core::Retention {
+        keep_within_days: 0,
+        keep_last: 6,
+        keep_daily: 0,
+        keep_weekly: 0,
+        keep_monthly: 0,
+        keep_yearly: 0,
+    };
+    for i in 0..4 {
+        fs::write(source.join("a.txt"), format!("version {i}")).unwrap();
+        archeion_engine::backup(&profile, None, BackupMode::Auto, &Quiet).unwrap();
+        std::thread::sleep(Duration::from_millis(1100));
+    }
+    let storage = Storage::at(dir.path().join("data")).unwrap();
+    storage
+        .save(&Settings { language: Language::English, profiles: vec![profile], ..Settings::default() })
+        .unwrap();
+    let mut h = harness(storage.clone());
+    steps(&mut h);
+    h.query_all_by(|n| n.label().is_some_and(|l| l == "Merge old backups"))
+        .next()
+        .expect("the section")
+        .click();
+    let started = Instant::now();
+    while h.query_by_label_contains("nothing to merge now").is_none() {
+        assert!(started.elapsed() < Duration::from_secs(20), "the backups were not read");
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+
+    // As a user types a number: a click on it, everything selected, the
+    // new value, Enter.
+    let set_last = |h: &mut Harness<'_, ArcheionApp>, value: u32| {
+        let last = storage.load().unwrap().profiles[0].merge.rules.keep_last;
+        h.query_all_by(|n| n.role() == Role::SpinButton && n.value() == Some(last.to_string()))
+            .next()
+            .expect("the Most recent field")
+            .click();
+        steps(h);
+        h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+        h.query_all_by(|n| n.is_focused())
+            .next()
+            .expect("the field being edited")
+            .type_text(&value.to_string());
+        h.key_press(egui::Key::Enter);
+        steps(h);
+    };
+    let pending = |s: &Storage| archeion_engine::merge_pending(&s.load().unwrap().profiles[0]).unwrap();
+    // 6 keeps all four backups; 2 would merge the second.
+    set_last(&mut h, 2);
+    assert_eq!(storage.load().unwrap().profiles[0].merge.rules.keep_last, 2);
+    assert!(h.query_by_label_contains("would merge 1 backup that the previous rules kept").is_some());
+    assert!(!pending(&storage), "the automatic merge waits");
+
+    button(&h, "Restore the previous rules").click();
+    steps(&mut h);
+    let merge = storage.load().unwrap().profiles[0].merge;
+    assert_eq!((merge.rules.keep_last, merge.approved), (6, None), "back to the rules last confirmed");
+
+    set_last(&mut h, 2);
+    button(&h, "Merge with the new rules").click();
+    steps(&mut h);
+    assert_eq!(storage.load().unwrap().profiles[0].merge.approved, None);
+    assert!(pending(&storage), "confirmed: the automatic merge may run");
+    assert!(h.query_by_label_contains("the next merge takes 1 backup").is_some(), "the preview");
+}

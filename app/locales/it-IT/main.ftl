@@ -65,6 +65,18 @@ merge-automatic-hint = L'unione è automatica: mentre Archeion è in esecuzione 
 merge-keep-deleted = Mantieni nel backup unito i file eliminati dall'origine
 merge-keep-deleted-hint = Un file eliminato tra i backup che si uniscono resta nel backup unito con il suo ultimo contenuto, così si può ancora ripristinare. Togli la spunta per scartarlo e liberare il suo spazio.
 retention-hint = Un backup resta se almeno una regola lo sceglie. I backup degli ultimi giorni indicati in "Tutti, per giorni" non vengono mai uniti.
+merge-preview = { $count ->
+    [one] Con queste regole la prossima unione unisce 1 backup ({ $from }) al successivo che resta.
+   *[other] Con queste regole la prossima unione unisce { $count } backup (dal { $from } al { $to }) ai successivi che restano.
+}
+merge-preview-none = Con queste regole ora non c'è niente da unire.
+merge-waits = { $count ->
+    [one] Le nuove regole unirebbero 1 backup che con quelle precedenti restava: l'unione automatica aspetta la tua conferma.
+   *[other] Le nuove regole unirebbero { $count } backup che con quelle precedenti restavano: l'unione automatica aspetta la tua conferma.
+}
+merge-confirm = Unisci con le nuove regole
+merge-confirm-hint = L'unione non si può annullare: le versioni di quei backup vanno perse.
+merge-restore-rules = Ripristina le regole precedenti
 keep-within = Tutti, per giorni
 keep-last = Più recenti
 keep-daily = Uno al giorno, per giorni
@@ -543,6 +555,7 @@ doc-auto-now = Puoi sempre avviare un backup tu: Esegui backup nelle impostazion
 doc-merge-title = Unione dei backup vecchi
 doc-merge-body = I backup vecchi non vengono cancellati ma uniti al successivo che resta: ogni data conservata rimane completa e si libera lo spazio delle versioni che non servono più. L'unione è automatica: avviene mentre Archeion è in esecuzione, mai mentre un backup o un'altra operazione sta usando la destinazione. Il backup unito mantiene i file eliminati dall'origine tra i backup che fonde, con il loro ultimo contenuto, a meno che tu non tolga la spunta a "Mantieni nel backup unito i file eliminati dall'origine": nelle impostazioni del profilo per l'unione automatica, in Gestisci i backup per un'unione a mano.
 doc-merge-rules = Le regole in "Unione dei backup vecchi" dicono quali backup tenere, e un backup resta se almeno una regola lo sceglie: tutti i backup degli ultimi giorni, i più recenti, uno al giorno, uno a settimana, uno al mese e uno all'anno, ciascuno per il numero che imposti. Con tutte le regole a 0 ogni backup resta e non si unisce nulla.
+doc-merge-confirm = Regole che unirebbero backup che con quelle precedenti restavano non si applicano da sole: l'unione automatica aspetta che tu scelga "Unisci con le nuove regole" o "Ripristina le regole precedenti" (Unisci ora vale come un sì). Sotto le regole, una riga dice che cosa unirebbe la prossima unione.
 doc-merge-first = Il primo backup completo non viene mai unito in automatico.
 doc-merge-manual = In Backup > Gestisci i backup, "Scegli i backup da unire…" unisce a mano: spunta il backup più vecchio e quello più recente, e tutto quello che c'è in mezzo diventa un solo backup. Se l'intervallo comprende il primo backup completo, Archeion avvisa prima, perché le date precedenti non saranno più ripristinabili.
 doc-merge-delete = "Elimina questo backup…" in Backup > Gestisci i backup toglie una data; i backup successivi restano completi. Un backup completo da cui dipendono i successivi non si può eliminare (uniscilo invece ai successivi). L'eliminazione non si può annullare.

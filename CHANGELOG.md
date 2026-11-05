@@ -22,6 +22,13 @@ All notable changes to Archeion are listed here. The format follows
   also in the File menu: Rename (F2), in place, and Delete profile… (Del).
   The Delete profile button below the settings is gone; its warning opens
   over any tab.
+- Merge rules: below them, a line says what the next merge would take
+  ("takes 3 backups, from … to …"). Rules that would merge backups the
+  rules confirmed before kept are not applied by themselves: the
+  automatic merge waits until "Merge with the new rules" or "Restore the
+  previous rules" (Merge now counts as a yes). Looser rules, or tighter
+  ones that merge nothing more, need no confirmation. Before, a value
+  passed through while typing could be what the next automatic merge used.
 
 ### Changed
 

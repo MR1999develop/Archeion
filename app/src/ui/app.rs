@@ -22,7 +22,7 @@ use crate::{
     profile_file::{self, ImportError},
     storage::Storage,
 };
-use archeion_core::{Destination, Profile, ProfileId, Schedule, Settings, Summary};
+use archeion_core::{ArchiveName, Destination, Profile, ProfileId, Schedule, Settings, Summary};
 use archeion_engine::{EngineError, Password};
 use archeion_scheduler::{Scheduler, SchedulerError, TaskKind, TaskSpec, WindowsTaskScheduler};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, Ui};
@@ -470,7 +470,16 @@ impl ArcheionApp {
             RunChoice::Complete => {
                 self.start_with(ctx, id, Op::Backup, vec!["--kind".into(), "complete".into()])
             }
-            RunChoice::Merge => self.start(ctx, id, Op::Merge),
+            RunChoice::Merge => {
+                // Merging by hand accepts what the rules merge.
+                if let Some(p) = self.settings.profile_mut(id)
+                    && p.merge.approved.is_some()
+                {
+                    p.merge.confirm();
+                    self.save();
+                }
+                self.start(ctx, id, Op::Merge);
+            }
         }
     }
 
@@ -1150,7 +1159,7 @@ impl ArcheionApp {
 
 /// What one look at the destination found: the format lock, the free
 /// space, and the owner when it is another profile.
-type DestinationLook = (FormatLock, Option<u64>, Option<ProfileId>, Option<String>);
+type DestinationLook = (FormatLock, Option<u64>, Option<ProfileId>, Option<String>, Option<Vec<ArchiveName>>);
 
 /// Background look at a profile's destination: does it already hold backups,
 /// and in which format? Never blocks the window (a share may be slow).
@@ -1164,6 +1173,8 @@ struct FormatCheck {
     foreign: Option<ProfileId>,
     /// File system of the destination's drive, when known.
     file_system: Option<String>,
+    /// The backups at the destination, oldest first, once read.
+    archives: Option<Vec<ArchiveName>>,
     rx: Option<mpsc::Receiver<DestinationLook>>,
 }
 
@@ -1177,6 +1188,7 @@ impl FormatCheck {
             self.free = None;
             self.foreign = None;
             self.file_system = None;
+            self.archives = None;
             // Looked at once confirmed.
             self.key = None;
             return if profile.network_unconfirmed { FormatLock::Unconfirmed } else { FormatLock::Free };
@@ -1188,6 +1200,7 @@ impl FormatCheck {
             self.free = None;
             self.foreign = None;
             self.file_system = None;
+            self.archives = None;
             let (tx, rx) = mpsc::channel();
             let (p, ctx) = (profile.clone(), ctx.clone());
             let spawned = std::thread::Builder::new().name("format-check".into()).spawn(move || {
@@ -1199,7 +1212,8 @@ impl FormatCheck {
                 let free = archeion_engine::free_space(&p);
                 let foreign = archeion_engine::destination_owner(&p).ok().flatten().filter(|o| *o != p.id);
                 let file_system = archeion_engine::destination_file_system(&p);
-                let _ = tx.send((lock, free, foreign, file_system));
+                let archives = archeion_engine::archive_names(&p).ok();
+                let _ = tx.send((lock, free, foreign, file_system, archives));
                 ctx.request_repaint();
             });
             self.rx = spawned.ok().map(|_| rx);
@@ -1208,12 +1222,13 @@ impl FormatCheck {
             }
         }
         if let Some(rx) = &self.rx
-            && let Ok((lock, free, foreign, file_system)) = rx.try_recv()
+            && let Ok((lock, free, foreign, file_system, archives)) = rx.try_recv()
         {
             self.state = Some(lock);
             self.free = free;
             self.foreign = foreign;
             self.file_system = file_system;
+            self.archives = archives;
             self.rx = None;
         }
         self.state.unwrap_or(FormatLock::Checking)
@@ -1226,7 +1241,12 @@ impl FormatCheck {
             Some(p) => editor::Foreign::Profile(p.name.clone()),
             None => editor::Foreign::Deleted,
         });
-        editor::DestinationInfo { free: self.free, foreign, file_system: self.file_system.clone() }
+        editor::DestinationInfo {
+            free: self.free,
+            foreign,
+            file_system: self.file_system.clone(),
+            archives: self.archives.clone(),
+        }
     }
 }
 

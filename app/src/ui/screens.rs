@@ -39,6 +39,9 @@ fn sandbox(root: &Path, language: Language) -> Storage {
     std::thread::sleep(Duration::from_millis(1100));
     fs::write(source.join("Lavoro").join("relazione.docx"), "v2").unwrap();
     let _ = worker::run(&storage, docs.id, backup(), false, None);
+    std::thread::sleep(Duration::from_millis(1100));
+    fs::write(source.join("note.txt"), "note 2").unwrap();
+    let _ = worker::run(&storage, docs.id, backup(), false, None);
     storage
 }
 
@@ -183,6 +186,25 @@ fn screens() {
                 n.click();
             }
             shot(&mut h, &out, &name("11-merge-settings"));
+            // Tighter rules than the ones confirmed: the merge waits.
+            {
+                let merge = &mut h.state_mut().settings.profiles[0].merge;
+                merge.approved = Some(merge.rules);
+                merge.rules = archeion_core::Retention {
+                    keep_within_days: 0,
+                    keep_last: 1,
+                    keep_daily: 0,
+                    keep_weekly: 0,
+                    keep_monthly: 0,
+                    keep_yearly: 0,
+                };
+            }
+            settle(&mut h);
+            let restore = h.state().tr.t("merge-restore-rules");
+            if let Some(n) = h.query_all_by(|n| n.label().as_deref() == Some(restore.as_str())).next() {
+                n.scroll_to_me();
+            }
+            shot(&mut h, &out, &name("11b-merge-waits"));
             // The exclusions, open, with a typed rule refused.
             if let Some(n) = h.query_all_by(|n| n.label().as_deref() == Some(merge.as_str())).last() {
                 n.click();
