@@ -106,6 +106,12 @@ pub trait Scheduler {
     /// # Errors
     /// See [`SchedulerError`].
     fn remove(&self, id: ProfileId, kind: TaskKind) -> Result<(), SchedulerError>;
+
+    /// Creates or replaces [`WATCH_TASK`] when `wanted`, removes it otherwise.
+    ///
+    /// # Errors
+    /// See [`SchedulerError`].
+    fn apply_watch(&self, wanted: bool, executable: &Path, user: &str) -> Result<(), SchedulerError>;
 }
 
 /// Task path inside Task Scheduler.
@@ -347,6 +353,14 @@ impl Scheduler for WindowsTaskScheduler {
     fn remove(&self, id: ProfileId, kind: TaskKind) -> Result<(), SchedulerError> {
         delete_task(&task_name(id, kind)).map(|_| ())
     }
+
+    fn apply_watch(&self, wanted: bool, executable: &Path, user: &str) -> Result<(), SchedulerError> {
+        if wanted {
+            create_task(WATCH_TASK, &watch_task_xml(executable, user))
+        } else {
+            delete_task(WATCH_TASK).map(|_| ())
+        }
+    }
 }
 
 impl WindowsTaskScheduler {
@@ -369,18 +383,6 @@ impl WindowsTaskScheduler {
     /// See [`SchedulerError`].
     pub fn watch_executable(&self) -> Result<Option<PathBuf>, SchedulerError> {
         registered_executable_of(WATCH_TASK)
-    }
-
-    /// Creates or replaces [`WATCH_TASK`] when `wanted`, removes it otherwise.
-    ///
-    /// # Errors
-    /// See [`SchedulerError`].
-    pub fn apply_watch(&self, wanted: bool, executable: &Path, user: &str) -> Result<(), SchedulerError> {
-        if wanted {
-            create_task(WATCH_TASK, &watch_task_xml(executable, user))
-        } else {
-            delete_task(WATCH_TASK).map(|_| ())
-        }
     }
 }
 

@@ -23,7 +23,7 @@ use crate::{
 };
 use archeion_core::{Destination, Profile, ProfileId, Schedule, Settings, Summary};
 use archeion_engine::{EngineError, Password};
-use archeion_scheduler::{Scheduler as _, SchedulerError, TaskKind, TaskSpec, WindowsTaskScheduler};
+use archeion_scheduler::{Scheduler, SchedulerError, TaskKind, TaskSpec, WindowsTaskScheduler};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, Ui};
 use std::{
     sync::mpsc,
@@ -113,11 +113,25 @@ pub struct ArcheionApp {
     adopting: Option<mpsc::Receiver<Result<(), String>>>,
     /// A profile being imported from a folder of backups.
     backup_import: BackupImport,
+    /// Where scheduled tasks are registered.
+    tasks: Tasks,
     /// When the window took a size not saved yet: it is saved once the
     /// resizing stops.
     resized_at: Option<Instant>,
     /// The first size was checked against the screen.
     fitted: bool,
+}
+
+/// Where the window registers and removes scheduled tasks: Windows Task
+/// Scheduler, or a recorder in the tests, which must never touch the
+/// user's tasks (the daily watch task is removed when no test profile
+/// wants it).
+struct Tasks(Box<dyn Scheduler>);
+
+impl std::fmt::Debug for Tasks {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Tasks(…)")
+    }
 }
 
 /// The automatic merge, which runs while the window is open (it has no
@@ -212,6 +226,7 @@ impl ArcheionApp {
             wipe: None,
             adopting: None,
             backup_import: BackupImport::default(),
+            tasks: Tasks(Box::new(WindowsTaskScheduler)),
             fitted: false,
         }
     }
@@ -321,7 +336,7 @@ impl ArcheionApp {
         };
         let user = windows_user();
         for spec in task_specs(p, &exe, &user) {
-            if let Err(e) = WindowsTaskScheduler.apply(&spec) {
+            if let Err(e) = self.tasks.0.apply(&spec) {
                 tracing::error!(error = %e, kind = ?spec.kind, "updating scheduled task");
                 self.error = Some(self.tr.t_args("schedule-failed", &[("detail", arg(e.to_string()))]));
                 return;
@@ -329,7 +344,7 @@ impl ArcheionApp {
         }
         // The daily "no recent backup" check exists while a profile wants it.
         let watch = watch_wanted(&self.settings.profiles);
-        if let Err(e) = WindowsTaskScheduler.apply_watch(watch, &exe, &user) {
+        if let Err(e) = self.tasks.0.apply_watch(watch, &exe, &user) {
             tracing::error!(error = %e, "updating the watch task");
             self.error = Some(self.tr.t_args("schedule-failed", &[("detail", arg(e.to_string()))]));
         }
@@ -594,7 +609,7 @@ impl ArcheionApp {
         }
         // The tasks go; the archives stay, so Undo works.
         for kind in TaskKind::ALL {
-            if let Err(e) = WindowsTaskScheduler.remove(id, kind) {
+            if let Err(e) = self.tasks.0.remove(id, kind) {
                 tracing::warn!(error = %e, ?kind, "removing scheduled task");
             }
         }

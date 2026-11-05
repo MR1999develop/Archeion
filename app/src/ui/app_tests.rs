@@ -2,14 +2,18 @@
 //! data folder, the profile settings, the confirmation dialogs.
 
 use super::ArcheionApp;
-use crate::storage::Storage;
-use archeion_core::{BackupMode, Container, Destination, Language, Profile, RunEvent, Settings};
-use archeion_engine::EventSink;
+use crate::{credentials, storage::Storage};
+use archeion_core::{
+    BackupMode, Container, Destination, Language, Profile, ProfileId, RunEvent, Schedule, Settings, TimeOfDay,
+};
+use archeion_engine::{EventSink, Password};
+use archeion_scheduler::{Scheduler, SchedulerError, TaskKind, TaskSpec};
 use eframe::egui::{self, accesskit::Role};
 use egui_kittest::{
     Harness,
     kittest::{NodeT as _, Queryable as _},
 };
+use std::path::Path;
 use std::{
     fs,
     path::PathBuf,
@@ -40,13 +44,51 @@ fn sandbox() -> (tempfile::TempDir, Storage, PathBuf) {
     (dir, storage, backups)
 }
 
+/// What the window asked of Task Scheduler, recorded instead of done: the
+/// tests never touch the user's scheduled tasks.
+#[derive(Clone, Default)]
+struct Recorder(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+
+impl Recorder {
+    fn calls(&self) -> Vec<String> {
+        self.0.lock().unwrap().clone()
+    }
+
+    fn push(&self, call: String) {
+        self.0.lock().unwrap().push(call);
+    }
+}
+
+impl Scheduler for Recorder {
+    fn apply(&self, spec: &TaskSpec) -> Result<(), SchedulerError> {
+        self.push(format!("apply {} {:?} {:?}", spec.profile_id, spec.kind, spec.schedule));
+        Ok(())
+    }
+
+    fn remove(&self, id: ProfileId, kind: TaskKind) -> Result<(), SchedulerError> {
+        self.push(format!("remove {id} {kind:?}"));
+        Ok(())
+    }
+
+    fn apply_watch(&self, wanted: bool, _: &Path, _: &str) -> Result<(), SchedulerError> {
+        self.push(format!("watch {wanted}"));
+        Ok(())
+    }
+}
+
 fn harness(storage: Storage) -> Harness<'static, ArcheionApp> {
-    Harness::builder().with_size(egui::vec2(1200.0, 1000.0)).build_eframe(move |cc| {
+    harness_recording(storage, Recorder::default())
+}
+
+fn harness_recording(storage: Storage, tasks: Recorder) -> Harness<'static, ArcheionApp> {
+    let mut h = Harness::builder().with_size(egui::vec2(1200.0, 1000.0)).build_eframe(move |cc| {
         cc.egui_ctx
             .add_font_provider(std::sync::Arc::new(egui_system_font_provider::SystemFontProvider::new()));
         super::theme::apply(&cc.egui_ctx);
         ArcheionApp::state(storage)
-    })
+    });
+    h.state_mut().tasks = super::Tasks(Box::new(tasks));
+    h
 }
 
 fn steps(h: &mut Harness<'_, ArcheionApp>) {
@@ -265,4 +307,82 @@ fn network_folders_of_an_imported_profile_wait_for_the_user() {
     steps(&mut h);
     assert!(!storage.load().unwrap().profiles[0].network_unconfirmed);
     assert!(h.query_all_by_label_contains(warning).next().is_none(), "the warning is gone");
+}
+
+/// Removes the saved password of a test profile, even when the test fails:
+/// the import saves it in the user's real Credential Manager, under the
+/// test profile's random id.
+struct ForgetPassword(ProfileId);
+
+impl Drop for ForgetPassword {
+    fn drop(&mut self) {
+        let _ = credentials::delete(self.0);
+    }
+}
+
+/// A new computer: its settings are empty, the encrypted backups are on a
+/// drive. The import asks their password, brings the profile back with
+/// its id and every rule, saves the password, and registers its tasks
+/// with the schedule paused.
+#[test]
+fn an_encrypted_profile_comes_back_from_its_backups_with_its_password() {
+    const SECRET: &str = "a long enough test password";
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("Thesis");
+    fs::create_dir_all(&source).unwrap();
+    fs::write(source.join("chapter1.docx"), "text").unwrap();
+    let mut old = Profile::new("Thesis");
+    old.sources.push(source);
+    old.destination = Destination::Local { path: dir.path().join("old drive letter") };
+    old.encrypted = true;
+    old.schedule = Schedule::Monthly { day: 3, at: TimeOfDay::new(21, 30).unwrap() };
+    let password = Password::new(SECRET.into()).unwrap();
+    archeion_engine::backup(&old, Some(&password), BackupMode::Auto, &Quiet).unwrap();
+    let _forget = ForgetPassword(old.id);
+    // The drive has another letter on the new computer.
+    let drive = dir.path().join("new drive letter");
+    fs::rename(old.destination.path(), &drive).unwrap();
+
+    let storage = Storage::at(dir.path().join("new computer")).unwrap();
+    storage.save(&Settings { language: Language::English, ..Settings::default() }).unwrap();
+    let tasks = Recorder::default();
+    let mut h = harness_recording(storage.clone(), tasks.clone());
+    steps(&mut h);
+    let ctx = h.ctx.clone();
+    h.state_mut().backup_import.start(&ctx, drive.clone());
+    let started = Instant::now();
+    let field =
+        |h: &Harness<'_, ArcheionApp>| h.query_all_by(|n| n.role() == Role::PasswordInput).next().is_some();
+    while !field(&h) {
+        assert!(started.elapsed() < Duration::from_secs(20), "the password was not asked");
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+    h.query_all_by(|n| n.role() == Role::PasswordInput).next().unwrap().focus();
+    steps(&mut h);
+    h.query_all_by(|n| n.role() == Role::PasswordInput).next().unwrap().type_text(SECRET);
+    steps(&mut h);
+    button(&h, "Import").click();
+    let started = Instant::now();
+    while storage.load().unwrap().profiles.is_empty() {
+        assert!(started.elapsed() < Duration::from_secs(20), "the profile was not imported");
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+    steps(&mut h);
+
+    let settings = storage.load().unwrap();
+    let back = &settings.profiles[0];
+    assert_eq!(back.id, old.id, "it goes on with its backups");
+    assert_eq!(back.destination, Destination::Local { path: drive });
+    assert_eq!((&back.sources, &back.schedule, back.encrypted), (&old.sources, &old.schedule, true));
+    assert!(back.schedule_paused, "the schedule waits to be turned on");
+    assert_eq!(h.state().selected, Some(old.id));
+    let saved = credentials::get(old.id).unwrap().expect("the password is saved");
+    assert_eq!(saved.as_str(), SECRET);
+    let calls = tasks.calls();
+    assert!(calls.contains(&format!("apply {} Backup Manual", old.id)), "paused: {calls:?}");
+    assert!(!calls.iter().any(|c| c.contains("Monthly")), "no automatic task: {calls:?}");
+    assert!(h.state().error.is_none(), "{:?}", h.state().error);
+    assert!(!field(&h), "the dialog closed");
 }

@@ -44,10 +44,7 @@ prossimo push, che lancia l'utente.
 - Provare a mano: Annulla durante un backup (si ferma al file successivo),
   spegnimento con un backup in corso (messaggio di Windows), seconda
   apertura che porta avanti la finestra, profilo importato con la
-  pianificazione in pausa, avviso sulle unità FAT32/exFAT; importazione da
-  un backup cifrato fino al salvataggio della password in Gestione
-  credenziali (i test automatici si fermano prima, per non toccare quella
-  vera) e da un disco con un'altra lettera.
+  pianificazione in pausa, avviso sulle unità FAT32/exFAT.
 - Misurare su un disco USB lento il costo del flush per file (TIDY).
 - GitHub: vedere verde la prima esecuzione della CI, poi le impostazioni
   del repository (regole per `main` e per i tag `v*`, sicurezza del
@@ -90,6 +87,13 @@ prossimo push, che lancia l'utente.
   irraggiungibile quando il disco è staccato, memoria anti-rollback da
   tenere sul PC) e copia per archivio (più complessa con unioni ed
   eliminazioni, senza un bisogno attuale).
+- La finestra riceve l'Utilità di pianificazione come dipendenza
+  (`Tasks`, trait `archeion_scheduler::Scheduler` con `apply_watch`): i
+  test della finestra usano un registratore e non toccano mai le attività
+  dell'utente. Il test completo dell'importazione cifrata
+  (`an_encrypted_profile_comes_back_from_its_backups_with_its_password`)
+  scrive in Gestione credenziali vera con l'id casuale del profilo di
+  prova e lo cancella alla fine (accettato dall'utente il 5 novembre).
 - Il recupero non cancella mai l'unica copia (OSTEP): un `.old` si toglie
   solo se l'archivio al suo posto si legge; un archivio illeggibile va in
   `<archivio>.damaged`, che Archeion non cancella mai (il controllo lo
