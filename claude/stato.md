@@ -31,7 +31,12 @@ destinazione (`feature/profile-copy`: ogni backup scrive
 File > Importa profilo da un backup… la legge; formato del testo spostato
 in `archeion_core::profile_text`; test in
 `crates/engine/tests/profile_copy.rs`, `app/src/ui/backup_import.rs` e
-`app/tests/cli.rs`); `tools\check.bat` verde.
+`app/tests/cli.rs`), del test completo dell'importazione
+(`test/full-import`) e dell'elenco dei profili (`feature/profile-list`, 5
+novembre: ordine per trascinamento e con Alt+Su/Giù, menu del tasto
+destro e del menu File con Rinomina sul posto e Elimina profilo…, niente
+più pulsante sotto le impostazioni; modulo `ui/profile_list.rs`, test in
+`app/src/ui/app_tests.rs`); `tools\check.bat` verde.
 Su GitHub (4 novembre) c'è `main` fino a `542a215`; il resto parte con il
 prossimo push, che lancia l'utente.
 

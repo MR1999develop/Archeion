@@ -127,13 +127,39 @@ fn screens() {
             // The deletion warning, with the backups ticked.
             h.state_mut().selected = h.state().settings.profiles.first().map(|p| p.id);
             settle(&mut h);
-            let delete = h.state().tr.t("delete-profile");
-            h.query_all_by(|n| {
-                n.role() == egui::accesskit::Role::Button && n.label().as_deref() == Some(delete.as_str())
-            })
-            .last()
-            .unwrap()
-            .click();
+            // The commands of a profile, from the right button.
+            let list_item = |h: &Harness<'_, ArcheionApp>, name: &str| {
+                let name = name.to_owned();
+                h.query_all_by(move |n| {
+                    n.role() == egui::accesskit::Role::ListItem && n.label().as_deref() == Some(name.as_str())
+                })
+                .next()
+                .map(|n| n.rect().center())
+            };
+            if let Some(at) = list_item(&h, "Documenti") {
+                h.input_mut().events.push(egui::Event::PointerMoved(at));
+                h.input_mut().events.push(egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Secondary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                });
+                h.input_mut().events.push(egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Secondary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            shot(&mut h, &out, &name("9b-profile-menu"));
+            h.key_press(egui::Key::Escape);
+            settle(&mut h);
+            let first = h.state().settings.profiles[0].clone();
+            h.state_mut().profile_list.start_rename(&first);
+            shot(&mut h, &out, &name("9c-profile-rename"));
+            h.key_press(egui::Key::Escape);
+            settle(&mut h);
+            h.state_mut().drafts.ask_delete(first.id);
             settle(&mut h);
             // The text up to the folder, which sits inside the sentence.
             let marker = "\u{1}";

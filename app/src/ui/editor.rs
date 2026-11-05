@@ -73,6 +73,11 @@ pub struct Drafts {
 }
 
 impl Drafts {
+    /// Opens the "Delete profile" warning for the profile `id`.
+    pub fn ask_delete(&mut self, id: ProfileId) {
+        self.delete = Some(DeleteDialog { profile: id, focus_cancel: true, backups: false });
+    }
+
     /// Forgets the typed passwords (after saving, or on another profile).
     /// Forgets what was typed, overwriting the memory it used.
     pub fn clear_password(&mut self) {
@@ -134,10 +139,6 @@ impl PasswordForm {
 #[derive(Debug, Clone)]
 pub enum Command {
     Run(RunChoice),
-    /// Delete the profile; `backups`: and its backups at the destination.
-    Delete {
-        backups: bool,
-    },
     /// Check the password against the destination, then save it.
     SavePassword(Password),
     /// Save the typed password as [`Command::SavePassword`], then run: the
@@ -253,7 +254,6 @@ pub fn show(
 
     ui.add_space(theme::SPACE_S);
     run_now(ui, tr, p, format, password, drafts, busy, dest.foreign.is_some(), &mut out);
-    delete_dialog(ui, tr, p, drafts, busy, &mut out);
     out
 }
 
@@ -375,34 +375,21 @@ fn run_now(
                 _ => Command::Run(choice),
             });
         }
-        ui.add_space(theme::SPACE_L);
-        // At the far end of the row, away from Run; it only opens the
-        // warning.
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let text = RichText::new(tr.t("delete-profile")).color(ui.visuals().error_fg_color);
-            if ui
-                .add_enabled(!busy, egui::Button::new(text))
-                .on_hover_text(tr.t("delete-profile-hint"))
-                .on_disabled_hover_text(tr.t("busy-hint"))
-                .clicked()
-            {
-                drafts.delete = Some(DeleteDialog { profile: p.id, focus_cancel: true, backups: false });
-            }
-        });
     });
 }
 
-/// The warning opened by "Delete profile": what goes, what stays, and
-/// [`Command::Delete`] once confirmed. The backups at the destination can
-/// go to the Recycle Bin too, with a tick; the warning then says where
-/// they go and that Undo no longer brings the profile back. Cancel, Esc
-/// and a click outside close it; Enter does not delete. Deleting waits
-/// while a job runs.
-fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool, out: &mut Outcome) {
-    let Some(dialog) = &mut drafts.delete else { return };
+/// The warning opened by "Delete profile…" ([`Drafts::ask_delete`]), shown
+/// whatever the tab: what goes, what stays, and once confirmed whether the
+/// backups go too (`Some(backups)`). The backups at the destination can go
+/// to the Recycle Bin too, with a tick; the warning then says where they
+/// go and that Undo no longer brings the profile back. Cancel, Esc and a
+/// click outside close it; Enter does not delete. Deleting waits while a
+/// job runs.
+pub fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool) -> Option<bool> {
+    let dialog = drafts.delete.as_mut()?;
     if dialog.profile != p.id {
         drafts.delete = None;
-        return;
+        return None;
     }
     let focus_cancel = std::mem::take(&mut dialog.focus_cancel);
     let (mut delete, mut cancel) = (false, false);
@@ -451,10 +438,12 @@ fn delete_dialog(ui: &Ui, tr: &Tr, p: &Profile, drafts: &mut Drafts, busy: bool,
     if delete {
         let backups = dialog.backups;
         drafts.delete = None;
-        out.command = Some(Command::Delete { backups });
-    } else if cancel || response.should_close() {
+        return Some(backups);
+    }
+    if cancel || response.should_close() {
         drafts.delete = None;
     }
+    None
 }
 
 /// Encryption switch and password, below the format.

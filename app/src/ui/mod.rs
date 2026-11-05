@@ -10,6 +10,7 @@ mod history;
 mod icon;
 mod load;
 mod platform;
+mod profile_list;
 mod restore;
 mod settings;
 mod shell;

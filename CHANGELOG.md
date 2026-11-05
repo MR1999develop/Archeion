@@ -16,6 +16,12 @@ All notable changes to Archeion are listed here. The format follows
   that folder (whatever drive letter it has now), the schedule waits to be
   turned on, and encrypted backups ask for their password first, which is
   then saved with the profile. The copy is never used otherwise.
+- The list of profiles keeps the order the user gives it: drag a profile
+  up or down (a line shows where it goes), or Move up / Move down
+  (Alt+Up, Alt+Down). The right button on a profile opens its commands,
+  also in the File menu: Rename (F2), in place, and Delete profile… (Del).
+  The Delete profile button below the settings is gone; its warning opens
+  over any tab.
 
 ### Changed
 

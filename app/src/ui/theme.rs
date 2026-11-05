@@ -33,6 +33,8 @@ pub const RULE_FIELD_WIDTH: f32 = 240.0;
 pub const PASSWORD_FIELD_WIDTH: f32 = 240.0;
 /// The text of a modal dialog: wider ones are hard to read.
 pub const DIALOG_WIDTH: f32 = 440.0;
+/// The line showing where a dragged list item will go.
+pub const DROP_LINE_WIDTH: f32 = 2.0;
 /// Corners of controls, list items and highlighted cards.
 pub const RADIUS: u8 = 4;
 /// Corners of windows, menus and popups.
