@@ -151,6 +151,29 @@ impl Drop for RecycledUnder {
     }
 }
 
+/// True when this Windows account has a Recycle Bin that works: a probe
+/// file sent there is found in it, then removed for good. The accounts of
+/// CI runners may have none; Archeion then refuses to move backups.
+fn recycle_bin_works() -> bool {
+    let Ok(dir) = tempfile::tempdir() else { return false };
+    let name = "archeion-test-recycle-bin-probe.txt";
+    let probe = dir.path().join(name);
+    if fs::write(&probe, b"probe").is_err() || trash::delete(&probe).is_err() {
+        return false;
+    }
+    let parent = dir.path().to_string_lossy().to_lowercase();
+    let found: Vec<_> = trash::os_limited::list()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|i| {
+            i.name.to_string_lossy() == name && i.original_parent.to_string_lossy().to_lowercase() == parent
+        })
+        .collect();
+    let works = !found.is_empty();
+    let _ = trash::os_limited::purge_all(found);
+    works
+}
+
 #[test]
 fn deleting_a_profile_with_its_backups_moves_them_to_the_recycle_bin() {
     let (dir, storage, backups) = sandbox();
@@ -163,6 +186,24 @@ fn deleting_a_profile_with_its_backups_moves_them_to_the_recycle_bin() {
     assert!(h.query_by_label_contains("can be restored from the Recycle Bin").is_some(), "the warning");
     button(&h, "Delete profile, backups to Recycle Bin").click();
 
+    if !recycle_bin_works() {
+        // CI runners: no Recycle Bin. The profile goes, the backups stay,
+        // and the status bar says why.
+        let started = Instant::now();
+        let (text, warn) = loop {
+            if let Some(super::Wipe::Done { text, warn }) = &h.state().wipe {
+                break (text.clone(), *warn);
+            }
+            assert!(started.elapsed() < Duration::from_secs(30), "the move did not end");
+            std::thread::sleep(Duration::from_millis(20));
+            h.step();
+        };
+        eprintln!("no Recycle Bin here: checked that nothing was moved ({text})");
+        assert!(warn, "{text}");
+        assert!(backups.join("archeion.json").exists(), "nothing was moved");
+        assert!(storage.load().unwrap().profiles.is_empty(), "the profile is gone");
+        return;
+    }
     let started = Instant::now();
     while backups.exists() {
         assert!(started.elapsed() < Duration::from_secs(20), "the backups were not moved");

@@ -136,12 +136,27 @@ fn expand(h: &mut Harness<'_, State>, label: &str) {
     settle(h);
 }
 
+/// Presses the button `label` once it is enabled (some wait for reads in
+/// the background), through accessibility: a layout still moving as sizes
+/// arrive cannot make the press miss. Waits at most 10 s.
+fn press(h: &mut Harness<'_, State>, label: &str) {
+    let button = |h: &Harness<'_, State>| {
+        h.query_by(|n| n.role() == egui::accesskit::Role::Button && n.label().as_deref() == Some(label))
+            .is_some_and(|n| !n.accesskit_node().is_disabled())
+    };
+    let started = Instant::now();
+    while !button(h) {
+        assert!(started.elapsed() < Duration::from_secs(10), "{label} stayed disabled");
+        std::thread::sleep(Duration::from_millis(20));
+        h.step();
+    }
+    h.get_by(|n| n.role() == egui::accesskit::Role::Button && n.label().as_deref() == Some(label))
+        .click_accesskit();
+    settle(h);
+}
+
 fn request(h: &mut Harness<'_, State>) -> archeion_engine::RestoreRequest {
-    // A frame first: a click counts on the button as last drawn, which may
-    // have been disabled until the versions were read.
-    settle(h);
-    h.get_by_label("Restore").click();
-    settle(h);
+    press(h, "Restore");
     match h.state_mut().1.take() {
         Some(Action::Restore(r)) => r,
         other => panic!("no restore started: {other:?}"),
@@ -239,11 +254,7 @@ fn clear_selection_beside_restore_unticks_everything() {
     tick_box(&h, &folder("sub")).click();
     settle(&mut h);
     assert_ne!(toggled(&h, &root), Some(Toggled::False));
-    h.get_by(|n| {
-        n.role() == egui::accesskit::Role::Button && n.label().as_deref() == Some("Clear selection")
-    })
-    .click();
-    settle(&mut h);
+    press(&mut h, "Clear selection");
     for item in [root, folder("sub"), file("a.txt")] {
         assert_eq!(toggled(&h, &item), Some(Toggled::False), "{item}");
     }
