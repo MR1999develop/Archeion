@@ -44,6 +44,7 @@ const SECTIONS: &[Section] = &[
         blocks: &[
             Text("doc-profiles-body"),
             Text("doc-profiles-list"),
+            Text("doc-profiles-duplicate"),
             Text("doc-profiles-exclusions"),
             Text("doc-profiles-format"),
             Text("doc-profiles-delete"),

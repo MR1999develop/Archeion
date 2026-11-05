@@ -745,3 +745,45 @@ fn the_automatic_merge_can_be_turned_off_and_on() {
     steps(&mut h);
     assert!(!merge(&storage).enabled, "restored: off again");
 }
+
+/// Duplicate, from the right button and from Ctrl+D: a copy below the
+/// original with its rules, no destination, its schedule paused and the
+/// next free name; the original stays as it was.
+#[test]
+fn a_profile_is_duplicated_from_its_context_menu_and_the_keyboard() {
+    let (_dir, storage) = three_profiles();
+    {
+        let mut settings = storage.load().unwrap();
+        settings.profiles[0].schedule = Schedule::Monthly { day: 3, at: TimeOfDay::new(21, 30).unwrap() };
+        storage.save(&settings).unwrap();
+    }
+    let original = storage.load().unwrap().profiles[0].clone();
+    let tasks = Recorder::default();
+    let mut h = harness_recording(storage.clone(), tasks.clone());
+    steps(&mut h);
+    from_list_menu(&mut h, "Docs", "Duplicate");
+    assert_eq!(names(&storage), ["Docs", "Docs (copy)", "A", "B"], "right below the original");
+    let settings = storage.load().unwrap();
+    let copy = &settings.profiles[1];
+    assert_ne!(copy.id, original.id);
+    assert_eq!(h.state().selected, Some(copy.id), "the copy is open");
+    assert_eq!(
+        (&copy.sources, &copy.excludes, &copy.schedule),
+        (&original.sources, &original.excludes, &original.schedule)
+    );
+    assert!(copy.destination.is_empty(), "a destination of its own to choose");
+    assert!(copy.schedule_paused, "its schedule waits");
+    assert_eq!(settings.profiles[0], original, "the original is untouched");
+    assert!(
+        tasks.calls().contains(&format!("apply {} Backup Manual", copy.id)),
+        "no automatic task: {:?}",
+        tasks.calls()
+    );
+
+    // Ctrl+D on the original again: the next free name.
+    h.state_mut().selected = Some(original.id);
+    steps(&mut h);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::D);
+    steps(&mut h);
+    assert_eq!(names(&storage), ["Docs", "Docs (copy 2)", "Docs (copy)", "A", "B"]);
+}

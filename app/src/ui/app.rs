@@ -745,6 +745,9 @@ impl ArcheionApp {
             let pressed = |s| ctx.input_mut(|i| i.consume_shortcut(s));
             let at = self.selected.and_then(|id| self.settings.profiles.iter().position(|p| p.id == id));
             let action = match at {
+                Some(i) if pressed(&profile_list::DUPLICATE) => {
+                    Some(profile_list::Action::Duplicate(self.settings.profiles[i].id))
+                }
                 Some(i) if pressed(&profile_list::RENAME) => {
                     let p = self.settings.profiles[i].clone();
                     self.profile_list.start_rename(&p);
@@ -906,6 +909,7 @@ impl ArcheionApp {
                     self.schedule_pending = Some((id, Instant::now()));
                 }
             }
+            profile_list::Action::Duplicate(id) => self.duplicate(ctx, id),
             profile_list::Action::Move { from, to } => {
                 let profiles = &mut self.settings.profiles;
                 if from < profiles.len() && to < profiles.len() {
@@ -919,6 +923,32 @@ impl ArcheionApp {
                 self.drafts.ask_delete(id);
             }
         }
+    }
+
+    /// Adds a copy of the profile `id` right below it and opens it in the
+    /// settings: every rule but the destination, to choose
+    /// ([`Profile::copy_named`]); named "<name> (copy)", then "(copy 2)"…
+    fn duplicate(&mut self, ctx: &egui::Context, id: ProfileId) {
+        let Some(pos) = self.settings.profiles.iter().position(|p| p.id == id) else { return };
+        let original = self.settings.profiles[pos].clone();
+        let taken = |name: &str| self.settings.profiles.iter().any(|p| p.name == name);
+        let name = (1..)
+            .map(|n| match n {
+                1 => self.tr.t_args("profile-copy-name", &[("name", arg(original.name.clone()))]),
+                n => self
+                    .tr
+                    .t_args("profile-copy-name-n", &[("name", arg(original.name.clone())), ("n", arg(n))]),
+            })
+            .find(|n| !taken(n))
+            .unwrap_or_else(|| profile_file::free_name(&self.settings, &original.name));
+        let copy = original.copy_named(name);
+        let copy_id = copy.id;
+        self.settings.profiles.insert(pos + 1, copy);
+        self.select(ctx, copy_id);
+        self.tab = Tab::Settings;
+        self.restore.invalidate();
+        self.save();
+        self.apply_schedule(copy_id);
     }
 
     /// The commands of the selected profile for the File menu.
