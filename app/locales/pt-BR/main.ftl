@@ -65,6 +65,18 @@ merge-automatic-hint = A mesclagem é automática: enquanto o Archeion está em 
 merge-keep-deleted = Manter no backup mesclado os arquivos excluídos da origem
 merge-keep-deleted-hint = Um arquivo excluído entre os backups mesclados fica no backup mesclado com seu último conteúdo, para ainda poder ser restaurado. Desmarque para descartá-lo e liberar seu espaço.
 retention-hint = Um backup é mantido se alguma regra o selecionar. Os backups dos dias definidos em "Todos, por dias" nunca são mesclados.
+merge-preview = { $count ->
+    [one] Com estas regras a próxima mesclagem une 1 backup ({ $from }) ao seguinte que fica.
+   *[other] Com estas regras a próxima mesclagem une { $count } backups (de { $from } a { $to }) aos seguintes que ficam.
+}
+merge-preview-none = Com estas regras não há nada para mesclar agora.
+merge-waits = { $count ->
+    [one] As novas regras mesclariam 1 backup que as anteriores mantinham: a mesclagem automática espera a sua confirmação.
+   *[other] As novas regras mesclariam { $count } backups que as anteriores mantinham: a mesclagem automática espera a sua confirmação.
+}
+merge-confirm = Mesclar com as novas regras
+merge-confirm-hint = A mesclagem não pode ser desfeita: as versões desses backups se perdem.
+merge-restore-rules = Restaurar as regras anteriores
 keep-within = Todos, por dias
 keep-last = Mais recentes
 keep-daily = Um por dia, por dias
@@ -543,6 +555,7 @@ doc-auto-now = Você sempre pode iniciar um backup por conta própria: Fazer bac
 doc-merge-title = Mesclagem de backups antigos
 doc-merge-body = Os backups antigos não são excluídos, mas mesclados ao próximo backup que é mantido: cada data mantida continua completa, e o espaço das versões que não são mais necessárias é liberado. A mesclagem é automática: acontece enquanto o Archeion está em execução, nunca enquanto um backup ou outra operação está usando o destino. O backup mesclado mantém os arquivos excluídos da origem entre os backups que ele junta, com seu último conteúdo, a menos que você desmarque "Manter no backup mesclado os arquivos excluídos da origem": nas configurações do perfil para a mesclagem automática, em Gerenciar backups para uma mesclagem manual.
 doc-merge-rules = As regras em "Mesclar backups antigos" definem quais backups manter, e um backup é mantido se alguma regra o selecionar: todos os backups dos últimos dias, os mais recentes, um por dia, um por semana, um por mês e um por ano, cada um pela quantidade definida. Com todas as regras em 0, todos os backups são mantidos e nada é mesclado.
+doc-merge-confirm = Regras que mesclariam backups que as anteriores mantinham não se aplicam sozinhas: a mesclagem automática espera até você escolher "Mesclar com as novas regras" ou "Restaurar as regras anteriores" (Mesclar agora conta como um sim). Abaixo das regras, uma linha diz o que a próxima mesclagem levaria.
 doc-merge-first = O primeiro backup completo nunca é mesclado automaticamente.
 doc-merge-manual = Em Backups > Gerenciar backups, "Escolher backups para mesclar…" mescla manualmente: marque o backup mais antigo e o mais recente, e tudo o que está entre eles vira um único backup. Se o intervalo incluir o primeiro backup completo, o Archeion avisa antes, porque as datas anteriores não poderão mais ser restauradas.
 doc-merge-delete = "Excluir este backup…" em Backups > Gerenciar backups remove uma data; os backups seguintes continuam completos. Um backup completo do qual dependem backups posteriores não pode ser excluído (mescle-o em vez disso). Uma exclusão não pode ser desfeita.

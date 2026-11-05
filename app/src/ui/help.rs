@@ -65,6 +65,7 @@ const SECTIONS: &[Section] = &[
         blocks: &[
             Text("doc-merge-body"),
             Text("doc-merge-rules"),
+            Text("doc-merge-confirm"),
             Text("doc-merge-first"),
             Text("doc-merge-manual"),
             Text("doc-merge-delete"),

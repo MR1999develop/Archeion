@@ -4,8 +4,8 @@
 use super::{symbol, theme, widgets};
 use crate::i18n::{Tr, arg};
 use archeion_core::{
-    Alerts, Container, Destination, Exclusion, FullBackupRule, LargeFiles, Profile, ProfileError, ProfileId,
-    Retention, Schedule, TimeOfDay, TypedKind, TypedRuleError, Weekday,
+    Alerts, ArchiveName, Container, Destination, Exclusion, FullBackupRule, LargeFiles, Profile,
+    ProfileError, ProfileId, Retention, Schedule, TimeOfDay, TypedKind, TypedRuleError, Weekday, merge_plan,
     password_policy::{self as policy, Rule, Strength},
     profile::Verification,
 };
@@ -172,6 +172,8 @@ pub struct DestinationInfo {
     pub foreign: Option<Foreign>,
     /// File system of its drive ("NTFS", "exFAT"…), when known.
     pub file_system: Option<String>,
+    /// The backups in it, oldest first, once read.
+    pub archives: Option<Vec<ArchiveName>>,
 }
 
 /// Owner of a destination that belongs to another profile.
@@ -245,7 +247,13 @@ pub fn show(
         ui.weak(tr.t("merge-automatic-hint"));
         let keep = widgets::checkbox(ui, &mut p.merge.keep_deleted, tr.t("merge-keep-deleted"));
         out.changed |= keep.on_hover_text(tr.t("merge-keep-deleted-hint")).changed();
-        retention(ui, tr, &mut p.merge.rules, &mut out);
+        let mut rules = p.merge.rules;
+        retention(ui, tr, &mut rules, &mut out);
+        let now = jiff::Zoned::now().datetime();
+        if rules != p.merge.rules {
+            p.merge.set_rules(rules, dest.archives.as_deref(), now);
+        }
+        merge_preview(ui, tr, p, dest.archives.as_deref(), now, &mut out);
     });
     section(ui, "checks", &tr.t("verify-section"), false, false, |ui| {
         verification(ui, tr, p, format, &mut out, busy);
@@ -1355,6 +1363,45 @@ fn retention(ui: &mut Ui, tr: &Tr, r: &mut Retention, out: &mut Outcome) {
         }
     });
     ui.weak(tr.t(if r.keeps_everything() { "keep-everything" } else { "retention-hint" }));
+}
+
+/// What the automatic merge would do with the rules shown, for the backups
+/// there are; when the rules would merge backups that the rules confirmed
+/// before kept, a warning that the merge waits, with the user's two ways
+/// out. Nothing while the backups are not read yet.
+fn merge_preview(
+    ui: &mut Ui,
+    tr: &Tr,
+    p: &mut Profile,
+    archives: Option<&[ArchiveName]>,
+    now: jiff::civil::DateTime,
+    out: &mut Outcome,
+) {
+    let Some(archives) = archives.filter(|a| !a.is_empty()) else { return };
+    let preview = merge_plan::preview(archives, &p.merge, now);
+    if preview.waits() {
+        let count = arg(preview.held_back.len());
+        ui.colored_label(
+            ui.visuals().warn_fg_color,
+            symbol::with(symbol::WARNING, tr.t_args("merge-waits", &[("count", count)])),
+        );
+        ui.horizontal(|ui| {
+            if ui.button(tr.t("merge-confirm")).on_hover_text(tr.t("merge-confirm-hint")).clicked() {
+                p.merge.confirm();
+                out.changed = true;
+            }
+            if ui.button(tr.t("merge-restore-rules")).clicked() {
+                p.merge.restore_approved();
+                out.changed = true;
+            }
+        });
+    } else if let (Some(first), Some(last)) = (preview.merged.first(), preview.merged.last()) {
+        let args =
+            [("count", arg(preview.merged.len())), ("from", arg(first.label())), ("to", arg(last.label()))];
+        ui.weak(tr.t_args("merge-preview", &args));
+    } else {
+        ui.weak(tr.t("merge-preview-none"));
+    }
 }
 
 fn day_name(tr: &Tr, d: Weekday) -> String {

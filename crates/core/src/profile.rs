@@ -1,6 +1,7 @@
 //! Backup profiles: what to save, where, when, and when to merge.
 
-use crate::{Destination, Exclusion, FullBackupRule, LargeFiles, Retention, Schedule};
+use crate::{ArchiveName, Destination, Exclusion, FullBackupRule, LargeFiles, Retention, Schedule};
+use jiff::civil::DateTime;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,
@@ -64,6 +65,11 @@ pub struct MergePolicy {
     /// them. On unless the user turns it off.
     #[serde(default = "keep_deleted_default")]
     pub keep_deleted: bool,
+    /// The rules last confirmed, while new ones would merge backups those
+    /// kept: the automatic merge waits for the user ([`Self::set_rules`]).
+    /// `None`: the current rules are confirmed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved: Option<Retention>,
 }
 
 fn keep_deleted_default() -> bool {
@@ -72,7 +78,38 @@ fn keep_deleted_default() -> bool {
 
 impl Default for MergePolicy {
     fn default() -> Self {
-        Self { rules: Retention::default(), keep_deleted: true }
+        Self { rules: Retention::default(), keep_deleted: true, approved: None }
+    }
+}
+
+impl MergePolicy {
+    /// New rules chosen by the user, for the backups `archives` (oldest
+    /// first) at local time `now`. When they would merge backups that the
+    /// rules confirmed so far keep, those rules are remembered and the
+    /// automatic merge waits for [`Self::confirm`]; otherwise the new rules
+    /// are confirmed at once. With `archives` unknown (the destination not
+    /// read yet) nothing is confirmed.
+    pub fn set_rules(&mut self, rules: Retention, archives: Option<&[ArchiveName]>, now: DateTime) {
+        if rules == self.rules {
+            return;
+        }
+        self.approved.get_or_insert(self.rules);
+        self.rules = rules;
+        if archives.is_some_and(|a| !crate::merge_plan::preview(a, self, now).waits()) {
+            self.approved = None;
+        }
+    }
+
+    /// The user accepts what the current rules merge.
+    pub fn confirm(&mut self) {
+        self.approved = None;
+    }
+
+    /// Back to the rules last confirmed.
+    pub fn restore_approved(&mut self) {
+        if let Some(rules) = self.approved.take() {
+            self.rules = rules;
+        }
     }
 }
 

@@ -65,6 +65,18 @@ merge-automatic-hint = The merge is automatic: while Archeion is running it merg
 merge-keep-deleted = Keep the files deleted at the source in the merged backup
 merge-keep-deleted-hint = A file deleted between the backups being merged stays in the merged backup with its last content, so it can still be restored. Untick to drop it and free its space.
 retention-hint = A backup is kept if any rule selects it. The backups of the days set in "All, for days" are never merged.
+merge-preview = { $count ->
+    [one] With these rules the next merge takes 1 backup ({ $from }) into the next one kept.
+   *[other] With these rules the next merge takes { $count } backups ({ $from } to { $to }) into the next ones kept.
+}
+merge-preview-none = With these rules there is nothing to merge now.
+merge-waits = { $count ->
+    [one] The new rules would merge 1 backup that the previous rules kept: the automatic merge waits for you.
+   *[other] The new rules would merge { $count } backups that the previous rules kept: the automatic merge waits for you.
+}
+merge-confirm = Merge with the new rules
+merge-confirm-hint = Merging cannot be undone: the versions in those backups go.
+merge-restore-rules = Restore the previous rules
 keep-within = All, for days
 keep-last = Most recent
 keep-daily = One per day, for days
@@ -543,6 +555,7 @@ doc-auto-now = You can always start a backup yourself: Back up now in the profil
 doc-merge-title = Merging old backups
 doc-merge-body = Old backups are not deleted but merged into the next backup that is kept: every date kept stays complete, and the space of the versions no longer needed is freed. The merge is automatic: it runs while Archeion is running, never while a backup or another operation uses the destination. The merged backup keeps the files deleted at the source between the backups it fuses, with their last content, unless you untick "Keep the files deleted at the source in the merged backup": in the profile settings for the automatic merge, in Manage backups for a merge by hand.
 doc-merge-rules = The rules in "Merge old backups" say which backups to keep, and a backup is kept if any rule selects it: all the backups of the last days, the most recent ones, one per day, one per week, one per month and one per year, each for the number you set. With every rule at 0 all backups are kept and nothing is merged.
+doc-merge-confirm = Rules that would merge backups the previous rules kept are not applied by themselves: the automatic merge waits until you choose "Merge with the new rules" or "Restore the previous rules" (Merge now counts as a yes). Below the rules, a line says what the next merge would take.
 doc-merge-first = The first complete backup is never merged automatically.
 doc-merge-manual = In Backups > Manage backups, "Choose backups to merge…" merges by hand: tick the oldest and the newest backup, and everything between them becomes one backup. If the range includes the first complete backup, Archeion warns you first, because the earlier dates can no longer be restored.
 doc-merge-delete = "Delete this backup…" in Backups > Manage backups removes one date; the backups after it stay complete. A complete backup that later backups depend on cannot be deleted (merge it instead). A deletion cannot be undone.

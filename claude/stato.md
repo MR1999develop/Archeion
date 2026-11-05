@@ -36,7 +36,10 @@ in `archeion_core::profile_text`; test in
 novembre: ordine per trascinamento e con Alt+Su/Giù, menu del tasto
 destro e del menu File con Rinomina sul posto e Elimina profilo…, niente
 più pulsante sotto le impostazioni; modulo `ui/profile_list.rs`, test in
-`app/src/ui/app_tests.rs`); `tools\check.bat` verde.
+`app/src/ui/app_tests.rs`) e della conferma delle regole di unione
+(`feature/merge-preview`: `MergePolicy::approved`, `merge_plan::preview`,
+`archive_names`; test in `merge_plan.rs`, `crates/engine/tests/merge_wait.rs`
+e `app_tests.rs`); `tools\check.bat` verde.
 Su GitHub (4 novembre) c'è `main` fino a `542a215`; il resto parte con il
 prossimo push, che lancia l'utente.
 
@@ -92,6 +95,13 @@ prossimo push, che lancia l'utente.
   irraggiungibile quando il disco è staccato, memoria anti-rollback da
   tenere sul PC) e copia per archivio (più complessa con unioni ed
   eliminazioni, senza un bisogno attuale).
+- Regole di unione (5 novembre): le regole nuove che unirebbero backup
+  tenuti da quelle confermate restano in attesa (`merge.approved` tiene
+  le confermate) e l'unione automatica non parte finché l'utente non
+  sceglie "Unisci con le nuove regole" o "Ripristina le regole
+  precedenti"; "Unisci ora" vale come conferma. Regole più larghe, o più
+  strette ma senza effetto sui backup presenti, si confermano da sole; con
+  i backup non ancora letti una modifica resta in attesa.
 - La finestra riceve l'Utilità di pianificazione come dipendenza
   (`Tasks`, trait `archeion_scheduler::Scheduler` con `apply_watch`): i
   test della finestra usano un registratore e non toccano mai le attività

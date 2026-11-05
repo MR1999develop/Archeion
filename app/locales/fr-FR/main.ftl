@@ -65,6 +65,18 @@ merge-automatic-hint = La fusion est automatique : tant qu'Archeion est ouvert, 
 merge-keep-deleted = Garder dans la sauvegarde fusionnée les fichiers supprimés de la source
 merge-keep-deleted-hint = Un fichier supprimé entre les sauvegardes fusionnées reste dans la sauvegarde fusionnée avec son dernier contenu, et peut donc encore être restauré. Décochez pour l’abandonner et libérer sa place.
 retention-hint = Une sauvegarde est conservée si au moins une règle la retient. Les sauvegardes des jours indiqués dans « Toutes, pendant jours » ne sont jamais fusionnées.
+merge-preview = { $count ->
+    [one] Avec ces règles, la prochaine fusion réunit 1 sauvegarde ({ $from }) avec la suivante conservée.
+   *[other] Avec ces règles, la prochaine fusion réunit { $count } sauvegardes (du { $from } au { $to }) avec les suivantes conservées.
+}
+merge-preview-none = Avec ces règles, il n'y a rien à fusionner pour l'instant.
+merge-waits = { $count ->
+    [one] Les nouvelles règles fusionneraient 1 sauvegarde que les règles précédentes conservaient : la fusion automatique attend votre confirmation.
+   *[other] Les nouvelles règles fusionneraient { $count } sauvegardes que les règles précédentes conservaient : la fusion automatique attend votre confirmation.
+}
+merge-confirm = Fusionner avec les nouvelles règles
+merge-confirm-hint = Une fusion ne peut pas être annulée : les versions de ces sauvegardes sont perdues.
+merge-restore-rules = Rétablir les règles précédentes
 keep-within = Toutes, pendant jours
 keep-last = Les plus récentes
 keep-daily = Une par jour, pendant jours
@@ -543,6 +555,7 @@ doc-auto-now = Vous pouvez toujours lancer une sauvegarde vous-même : Sauvegard
 doc-merge-title = Fusion des anciennes sauvegardes
 doc-merge-body = Les anciennes sauvegardes ne sont pas supprimées mais fusionnées avec la sauvegarde suivante conservée : chaque date conservée reste complète, et l'espace des versions devenues inutiles est libéré. La fusion est automatique : elle a lieu tant qu'Archeion est ouvert, jamais pendant qu'une sauvegarde ou une autre opération utilise la destination. La sauvegarde fusionnée garde les fichiers supprimés de la source entre les sauvegardes qu’elle réunit, avec leur dernier contenu, sauf si vous décochez « Garder dans la sauvegarde fusionnée les fichiers supprimés de la source » : dans les réglages du profil pour la fusion automatique, dans Gérer les sauvegardes pour une fusion à la main.
 doc-merge-rules = Les règles de « Fusion des anciennes sauvegardes » indiquent quelles sauvegardes conserver, et une sauvegarde est conservée si au moins une règle la retient : toutes les sauvegardes des derniers jours, les plus récentes, une par jour, une par semaine, une par mois et une par an, chacune pour le nombre indiqué. Avec toutes les règles à 0, toutes les sauvegardes sont conservées et rien n'est fusionné.
+doc-merge-confirm = Des règles qui fusionneraient des sauvegardes que les règles précédentes conservaient ne s'appliquent pas d'elles-mêmes : la fusion automatique attend que vous choisissiez « Fusionner avec les nouvelles règles » ou « Rétablir les règles précédentes » (Fusionner maintenant vaut un oui). Sous les règles, une ligne indique ce que prendrait la prochaine fusion.
 doc-merge-first = La première sauvegarde complète n'est jamais fusionnée automatiquement.
 doc-merge-manual = Dans Sauvegardes > Gérer les sauvegardes, « Choisir les sauvegardes à fusionner… » fusionne manuellement : cochez la sauvegarde la plus ancienne et la plus récente, et tout ce qui se trouve entre les deux devient une seule sauvegarde. Si la plage comprend la première sauvegarde complète, Archeion vous avertit d'abord, car les dates antérieures ne pourront plus être restaurées.
 doc-merge-delete = « Supprimer cette sauvegarde… » dans Sauvegardes > Gérer les sauvegardes supprime une date ; les sauvegardes suivantes restent complètes. Une sauvegarde complète dont dépendent des sauvegardes ultérieures ne peut pas être supprimée (fusionnez-la plutôt). Une suppression est irréversible.

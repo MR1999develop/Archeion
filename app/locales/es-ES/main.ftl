@@ -65,6 +65,18 @@ merge-automatic-hint = La fusión es automática: mientras Archeion está en eje
 merge-keep-deleted = Conservar en la copia fusionada los archivos eliminados del origen
 merge-keep-deleted-hint = Un archivo eliminado entre las copias que se fusionan se queda en la copia fusionada con su último contenido, así aún se puede restaurar. Desmárcalo para descartarlo y liberar su espacio.
 retention-hint = Una copia se conserva si alguna regla la selecciona. Las copias de los días indicados en "Todas, durante días" nunca se fusionan.
+merge-preview = { $count ->
+    [one] Con estas reglas la próxima fusión une 1 copia ({ $from }) con la siguiente que se conserva.
+   *[other] Con estas reglas la próxima fusión une { $count } copias (de { $from } a { $to }) con las siguientes que se conservan.
+}
+merge-preview-none = Con estas reglas ahora no hay nada que fusionar.
+merge-waits = { $count ->
+    [one] Las nuevas reglas fusionarían 1 copia que las anteriores conservaban: la fusión automática espera tu confirmación.
+   *[other] Las nuevas reglas fusionarían { $count } copias que las anteriores conservaban: la fusión automática espera tu confirmación.
+}
+merge-confirm = Fusionar con las nuevas reglas
+merge-confirm-hint = La fusión no se puede deshacer: las versiones de esas copias se pierden.
+merge-restore-rules = Restaurar las reglas anteriores
 keep-within = Todas, durante días
 keep-last = Más recientes
 keep-daily = Una al día, durante días
@@ -543,6 +555,7 @@ doc-auto-now = Siempre puedes iniciar una copia tú mismo: Hacer copia ahora en 
 doc-merge-title = Fusión de copias antiguas
 doc-merge-body = Las copias antiguas no se eliminan, sino que se fusionan con la siguiente copia que se conserva: cada fecha conservada sigue completa y se libera el espacio de las versiones que ya no hacen falta. La fusión es automática: se hace mientras Archeion está en ejecución, nunca mientras una copia u otra operación usa el destino. La copia fusionada conserva los archivos eliminados del origen entre las copias que une, con su último contenido, salvo que desmarques "Conservar en la copia fusionada los archivos eliminados del origen": en los ajustes del perfil para la fusión automática, en Gestionar copias para una fusión a mano.
 doc-merge-rules = Las reglas de "Fusionar copias antiguas" indican qué copias conservar, y una copia se conserva si alguna regla la selecciona: todas las copias de los últimos días, las más recientes, una al día, una a la semana, una al mes y una al año, cada una durante la cantidad que indiques. Con todas las reglas a 0, se conservan todas las copias y no se fusiona nada.
+doc-merge-confirm = Las reglas que fusionarían copias que las anteriores conservaban no se aplican solas: la fusión automática espera hasta que elijas "Fusionar con las nuevas reglas" o "Restaurar las reglas anteriores" (Fusionar ahora cuenta como un sí). Debajo de las reglas, una línea dice qué tomaría la próxima fusión.
 doc-merge-first = La primera copia completa nunca se fusiona automáticamente.
 doc-merge-manual = En Copias > Gestionar copias, "Elegir copias para fusionar…" fusiona a mano: marca la copia más antigua y la más reciente, y todo lo que hay entre ellas se convierte en una sola copia. Si el intervalo incluye la primera copia completa, Archeion te avisa antes, porque las fechas anteriores ya no se podrán restaurar.
 doc-merge-delete = "Eliminar esta copia…" en Copias > Gestionar copias quita una fecha; las copias posteriores siguen completas. Una copia completa de la que dependen copias posteriores no se puede eliminar (fusiónala en su lugar). Una eliminación no se puede deshacer.
