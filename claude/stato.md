@@ -115,6 +115,10 @@ prossimo push, che lancia l'utente.
   entrambi gli ordini, una sola finestra); con `ARCHEION_DATA_DIR` restano
   nella cartella di prova. Una seconda copia diversa porta avanti la finestra e lo dice con
   un messaggio (percorso della copia aperta, File > Esci).
+- Duplica profilo (5 novembre): `Profile::copy_named` tiene tutte le regole
+  tranne la destinazione (una cartella per profilo), mette in pausa la
+  pianificazione e azzera le conferme dell'unione; la copia va subito sotto
+  l'originale con il nome libero successivo ("(copia)", "(copia 2)"…).
 - La finestra riceve l'Utilità di pianificazione come dipendenza
   (`Tasks`, trait `archeion_scheduler::Scheduler` con `apply_watch`): i
   test della finestra usano un registratore e non toccano mai le attività

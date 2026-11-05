@@ -1231,22 +1231,24 @@ fn schedule(ui: &mut Ui, tr: &Tr, id: &str, s: &mut Schedule, out: &mut Outcome)
         }
         Schedule::Hours { hours, from, until } => {
             ui.horizontal(|ui| {
-                ui.label(tr.t("schedule-every"));
-                ui.add(egui::DragValue::new(hours).range(archeion_core::schedule::HOURS_RANGE));
+                let every = ui.label(tr.t("schedule-every"));
+                ui.add(egui::DragValue::new(hours).range(archeion_core::schedule::HOURS_RANGE))
+                    .labelled_by(every.id);
                 ui.label(tr.t("hours-unit"));
                 ui.label(tr.t("schedule-from"));
-                time_edit(ui, from);
+                time_edit(ui, tr, from);
                 ui.label(tr.t("schedule-until"));
-                time_edit(ui, until);
+                time_edit(ui, tr, until);
             });
             ui.weak(tr.t("schedule-hours-hint"));
         }
         Schedule::Monthly { day, at } => {
             ui.horizontal(|ui| {
-                ui.label(tr.t("schedule-month-day"));
-                ui.add(egui::DragValue::new(day).range(archeion_core::schedule::MONTH_DAY_RANGE));
+                let label = ui.label(tr.t("schedule-month-day"));
+                ui.add(egui::DragValue::new(day).range(archeion_core::schedule::MONTH_DAY_RANGE))
+                    .labelled_by(label.id);
                 ui.label(tr.t("at"));
-                time_edit(ui, at);
+                time_edit(ui, tr, at);
             });
             ui.weak(tr.t("schedule-month-hint"));
         }
@@ -1312,7 +1314,7 @@ fn day_times(ui: &mut Ui, tr: &Tr, id: &str, times: &mut Vec<TimeOfDay>) {
         ui.push_id((id, "time", i), |ui| {
             ui.horizontal(|ui| {
                 ui.label(tr.t("at"));
-                time_edit(ui, t);
+                time_edit(ui, tr, t);
                 if can_remove
                     && widgets::icon_button(ui, symbol::REMOVE, tr.t("schedule-remove-time")).clicked()
                 {
@@ -1334,12 +1336,13 @@ fn day_times(ui: &mut Ui, tr: &Tr, id: &str, times: &mut Vec<TimeOfDay>) {
     }
 }
 
-/// Hour and minute of `t`.
-fn time_edit(ui: &mut Ui, t: &mut TimeOfDay) {
+/// Hour and minute of `t`, each named for screen readers.
+fn time_edit(ui: &mut Ui, tr: &Tr, t: &mut TimeOfDay) {
     let (mut hour, mut minute) = (t.hour(), t.minute());
-    ui.add(egui::DragValue::new(&mut hour).range(0..=23));
+    ui.add(egui::DragValue::new(&mut hour).range(0..=23)).accessible_name(tr.t("time-hour"));
     ui.label(":");
-    ui.add(egui::DragValue::new(&mut minute).range(0..=59).custom_formatter(|v, _| format!("{v:02}")));
+    ui.add(egui::DragValue::new(&mut minute).range(0..=59).custom_formatter(|v, _| format!("{v:02}")))
+        .accessible_name(tr.t("time-minute"));
     if let Some(new) = TimeOfDay::new(hour, minute) {
         *t = new;
     }

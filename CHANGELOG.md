@@ -6,6 +6,17 @@ All notable changes to Archeion are listed here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Duplicate (right button on a profile, File menu, Ctrl+D) adds a copy of
+  the profile below it, with every rule but the destination, which the
+  user chooses; its schedule waits to be turned on.
+
+### Fixed
+
+- The fields of a schedule (hour, minutes, day of the month, every N
+  hours) had no name for screen readers.
+
 ## [0.2.1] - 2026-11-05
 
 ### Fixed

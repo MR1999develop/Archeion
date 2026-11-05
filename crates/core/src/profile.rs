@@ -307,6 +307,22 @@ impl Profile {
         }
     }
 
+    /// A copy of this profile named `name`, with an id of its own, for the
+    /// user to adapt: every rule comes along but the destination, which
+    /// belongs to this profile alone and is left for the user to choose.
+    /// Its schedule waits to be turned on, and nothing waits for a
+    /// confirmation of the merge (it has no backups yet).
+    #[must_use]
+    pub fn copy_named(&self, name: impl Into<String>) -> Self {
+        let mut copy = self.clone();
+        copy.id = ProfileId::new_random();
+        copy.name = name.into();
+        copy.destination = Destination::default();
+        copy.schedule_paused = copy.schedule.is_automatic() || copy.events.any();
+        copy.merge.approved = None;
+        copy
+    }
+
     /// True when backups start without the user: by the clock or by an
     /// event.
     #[must_use]
@@ -483,6 +499,34 @@ mod tests {
         assert_eq!(p.validate(), Ok(()));
         p.container = Container::Folder;
         assert_eq!(p.validate(), Err(vec![ProfileError::EncryptionNeedsZip]));
+    }
+
+    /// The copy keeps every rule but the destination, has its own id, and
+    /// waits before running on its own.
+    #[test]
+    fn a_copy_keeps_the_rules_but_not_the_destination() {
+        let mut p = Profile::new("Docs");
+        p.sources.push(r"C:\Users\me\Documents".into());
+        p.destination = Destination::Local { path: r"E:\Backup".into() };
+        p.encrypted = true;
+        p.container = Container::ZipPerFile;
+        p.schedule = Schedule::Monthly { day: 3, at: crate::TimeOfDay::new(21, 30).unwrap() };
+        p.merge.approved = Some(crate::ConfirmedMerge { enabled: true, rules: Retention::KEEP_ALL });
+        let copy = p.copy_named("Docs (copy)");
+        assert_ne!(copy.id, p.id);
+        assert_eq!(copy.name, "Docs (copy)");
+        assert!(copy.destination.is_empty(), "a folder of its own to choose");
+        assert_eq!(
+            (&copy.sources, copy.encrypted, copy.container),
+            (&p.sources, true, Container::ZipPerFile)
+        );
+        assert_eq!(copy.schedule, p.schedule, "kept for when it is turned on");
+        assert!(copy.schedule_paused && !copy.backs_up_automatically());
+        assert_eq!(copy.merge.approved, None);
+        assert!(copy.validate().is_err(), "not valid until it has a destination");
+
+        let manual = Profile::new("Manual").copy_named("Manual (copy)");
+        assert!(!manual.schedule_paused, "nothing to wait for");
     }
 
     #[test]

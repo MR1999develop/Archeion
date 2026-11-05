@@ -1,6 +1,6 @@
 //! The list of profiles at the left of the window. A click selects a
-//! profile; the right button opens its commands (rename, move up or down,
-//! delete), which the File menu and the keyboard also have; dragging a
+//! profile; the right button opens its commands (rename, duplicate, move
+//! up or down, delete), which the File menu and the keyboard also have; dragging a
 //! profile changes the order, with a line where it will go. A rename
 //! happens in place: Enter or a click elsewhere keeps the name, Esc
 //! cancels.
@@ -11,6 +11,7 @@ use archeion_core::{Profile, ProfileId};
 use eframe::egui::{self, Key, KeyboardShortcut, Modifiers, RichText, Ui};
 
 pub const RENAME: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::F2);
+pub const DUPLICATE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::COMMAND, Key::D);
 pub const MOVE_UP: KeyboardShortcut = KeyboardShortcut::new(Modifiers::ALT, Key::ArrowUp);
 pub const MOVE_DOWN: KeyboardShortcut = KeyboardShortcut::new(Modifiers::ALT, Key::ArrowDown);
 pub const DELETE: KeyboardShortcut = KeyboardShortcut::new(Modifiers::NONE, Key::Delete);
@@ -21,6 +22,8 @@ pub enum Action {
     Select(ProfileId),
     /// A new name, typed and confirmed (never blank).
     Rename(ProfileId, String),
+    /// A copy of the profile, beside it, to adapt.
+    Duplicate(ProfileId),
     /// The profile at `from` goes to position `to`.
     Move {
         from: usize,
@@ -102,11 +105,16 @@ impl ProfileList {
     /// The commands of profile `p`, at position `i` of `0..=last`: the
     /// context menu of the list and the File menu.
     pub fn commands(&mut self, ui: &mut Ui, tr: &Tr, p: &Profile, i: usize, last: usize) -> Option<Action> {
-        let [rename, up, down] = [RENAME, MOVE_UP, MOVE_DOWN].map(|s| ui.ctx().format_shortcut(&s));
+        let [rename, duplicate, up, down] =
+            [RENAME, DUPLICATE, MOVE_UP, MOVE_DOWN].map(|s| ui.ctx().format_shortcut(&s));
         let mut action = None;
         if ui.add(egui::Button::new(tr.t("rename-profile")).shortcut_text(rename)).clicked() {
             self.start_rename(p);
             action = Some(Action::Select(p.id));
+        }
+        let copy = egui::Button::new(tr.t("duplicate-profile")).shortcut_text(duplicate);
+        if ui.add(copy).on_hover_text(tr.t("duplicate-profile-hint")).clicked() {
+            action = Some(Action::Duplicate(p.id));
         }
         let up = egui::Button::new(tr.t("move-profile-up")).shortcut_text(up);
         if ui.add_enabled(i > 0, up).on_disabled_hover_text(tr.t("move-profile-first")).clicked() {

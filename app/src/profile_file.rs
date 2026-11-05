@@ -83,7 +83,7 @@ pub fn add(settings: &mut Settings, mut profile: Profile, held: &[ProfileId]) ->
 }
 
 /// `name`, or `name (2)`, `name (3)`… when a profile already has it.
-fn free_name(settings: &Settings, name: &str) -> String {
+pub fn free_name(settings: &Settings, name: &str) -> String {
     let taken = |n: &str| settings.profiles.iter().any(|p| p.name == n);
     if !taken(name) {
         return name.to_owned();
