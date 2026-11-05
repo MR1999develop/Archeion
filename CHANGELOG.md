@@ -6,6 +6,10 @@ All notable changes to Archeion are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-05
+
+First published release.
+
 ### Added
 
 - Every backup keeps a copy of its profile in the destination folder
@@ -491,7 +495,7 @@ All notable changes to Archeion are listed here. The format follows
 
 ## [0.1.0] - 2026-11-01
 
-First version, not yet released.
+First version, never published as a release.
 
 ### Added
 
@@ -516,5 +520,5 @@ First version, not yet released.
   stopped.
 - English and Italian interface.
 
-[Unreleased]: https://github.com/MR1999develop/Archeion/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/MR1999develop/Archeion/releases/tag/v0.1.0
+[Unreleased]: https://github.com/MR1999develop/Archeion/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/MR1999develop/Archeion/releases/tag/v0.2.0
