@@ -405,9 +405,10 @@ trigger it. Remove an item when it is done or no longer applies.
   recovery key alone cannot import the profile (they can still restore
   with `archeion extract`). Accepting the recovery key would also need a
   way to choose a new password for the destination.
-- **The save of the password after an import** (Credential Manager) is
-  not covered by an automatic test, which would write to the real one;
-  the dialog is tested up to the password handed back. Try it by hand.
+- **The full import test writes to the real Credential Manager**, under
+  the test profile's random id, removed at the end even when it fails
+  (the user agreed, 5 November). A credential store passed to the window
+  like its scheduler would keep the tests off it.
 - **Backups made before this version** have no copy until their next
   backup; importing them says so and points to "Use these backups for
   this profile".
