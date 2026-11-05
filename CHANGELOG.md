@@ -6,6 +6,8 @@ All notable changes to Archeion are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-05
+
 ### Fixed
 
 - Two copies of Archeion in different folders (an installed one and a
@@ -14,6 +16,9 @@ All notable changes to Archeion are listed here. The format follows
   window per Windows user: starting another copy brings the open window
   forward and says which copy is open and how to close it. A window of
   0.2.0, which keeps its lock in the data folder, is found too.
+- The tests that move backups to the Recycle Bin pass where there is
+  none (the accounts of CI runners): they check that nothing was moved.
+  Two restore tests no longer fail under load.
 
 ## [0.2.0] - 2026-11-05
 
@@ -529,5 +534,6 @@ First version, never published as a release.
   stopped.
 - English and Italian interface.
 
-[Unreleased]: https://github.com/MR1999develop/Archeion/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/MR1999develop/Archeion/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/MR1999develop/Archeion/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/MR1999develop/Archeion/releases/tag/v0.2.0
