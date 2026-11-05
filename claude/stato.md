@@ -49,7 +49,11 @@ prossimo push, che lancia l'utente.
 
 ## Lavoro in corso
 
-- Nessuno.
+- Release 0.2.0 (5 novembre), la prima pubblicata: versione e CHANGELOG
+  su `main`, tag `v0.2.0` locale, eseguibile costruito con
+  `tools\release.bat`. Su GitHub parte quando l'utente invia `main` e il
+  tag (`tools\github_publish.bat`): il workflow di rilascio, mai eseguito
+  finora, costruisce il pacchetto e crea la release.
 
 ## Punti aperti
 
