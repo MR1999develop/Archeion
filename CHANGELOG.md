@@ -6,6 +6,8 @@ All notable changes to Archeion are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-06
+
 ### Added
 
 - Duplicate (right button on a profile, File menu, Ctrl+D) adds a copy of
@@ -545,6 +547,7 @@ First version, never published as a release.
   stopped.
 - English and Italian interface.
 
-[Unreleased]: https://github.com/MR1999develop/Archeion/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/MR1999develop/Archeion/compare/v0.2.2...HEAD
+[0.2.2]: https://github.com/MR1999develop/Archeion/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/MR1999develop/Archeion/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/MR1999develop/Archeion/releases/tag/v0.2.0
