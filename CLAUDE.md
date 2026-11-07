@@ -17,7 +17,7 @@
   - crittografia, password, file non fidati e rilascio: `security-design`.
 - Linguaggio: Rust + egui.
 - Alla fine di ogni blocco di lavoro aggiornare `TIDY.md` (cose rimandate) e
-  il documento di stato del progetto `claude/stato.md` (ultimo commit
+  il documento di stato del progetto `claude/status.md`, in inglese (ultimo commit
   controllato, lavoro in corso, punti aperti, decisioni).
 - Prove senza l'utente: `tools\check.bat` comprende i test end-to-end
   dell'eseguibile (`app/tests/cli.rs`: backup, ripristino con esclusioni,
