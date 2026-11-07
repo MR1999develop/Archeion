@@ -2,10 +2,13 @@
 
 - Lo sviluppo del progetto avviene in una sola chat, che scrive il codice,
   compila, controlla, corregge e unisce i rami.
-- Si sviluppa in locale con git e GitHub; il push su GitHub lo fa l'utente a
-  mano. Niente push o release senza una sua richiesta esplicita.
+- Si sviluppa in locale con git e GitHub. L'agente pubblica solo il ramo di
+  lavoro, con il comando delle regole generali, per far girare la CI; push
+  di `main`, tag e release li fa l'utente (`git push` diretto resta negato
+  in `.claude/settings.json`).
 - Un ramo di lavoro alla volta, partendo dall'ultimo `main` controllato; si
-  unisce a `main` solo dopo `tools\check.bat` tutto verde.
+  unisce a `main` solo dopo `tools\check.bat` tutto verde e la CI del ramo
+  verde. La CI parte a ogni push di un ramo, senza `--avvia`.
 - Rispondere in italiano; interfaccia, codice, commenti e commit in inglese.
 - Applicare le skill di progettazione prima di scrivere o rivedere codice:
   - sempre: `rust-egui-desktop-design`, `software-design-core` e

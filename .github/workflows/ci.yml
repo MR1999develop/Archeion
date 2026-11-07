@@ -1,12 +1,14 @@
-# Formatting, lints, tests and dependency checks on every push to main and
-# every pull request; the dependency check also runs every day, since new
-# advisories appear for code that does not change. Actions are pinned to a
-# commit (the tag in the comment); Dependabot proposes the updates.
+# Formatting, lints, tests and dependency checks on every push to a branch
+# (work branches included, so a branch is checked before it is merged into
+# main) and every pull request; the dependency check also runs every day,
+# since new advisories appear for code that does not change. Actions are
+# pinned to a commit (the tag in the comment); Dependabot proposes the
+# updates.
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: ["**"]
   pull_request:
   schedule:
     - cron: "17 5 * * *"
