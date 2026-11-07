@@ -81,8 +81,10 @@ next push, which the user runs.
 - GitHub with a fine-grained token for Archeion only (November 4), like
   the other project: Git Credential Manager keeps it for the repository
   URL (`useHttpPath` in `.git/config`), `gh` keeps the other project's
-  token and is not used for Archeion; with `origin` set,
-  `tools\github_publish.bat` does not call `gh`. The repository is named
+  token and is used for Archeion only to read workflow runs (CI status,
+  failed-step logs; since November 7), never to push, publish or change
+  the repository; with `origin` set, `tools\github_publish.bat` does not
+  call `gh`. The repository is named
   `Archeion` with the capital letter: every reference uses that exact
   name.
 - Profile settings live on the PC, the source of truth (November 4); every
